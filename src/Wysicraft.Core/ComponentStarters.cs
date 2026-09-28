@@ -12,13 +12,25 @@ public static class ComponentStarters
         new("confirmation_dialog","Confirmation dialog","Message, confirm and cancel. Demo confirmation updates a label; cancel hides this dialog."),
         new("player_status","Player status","Player name, health and energy bars with sample values. Connect your player data."),
         new("pagination_bar","Pagination bar","Previous/next controls and page label. Connect paging events to your list."),
-        new("notification_banner","Notification banner","Notice icon, message and working dismiss button.")
+        new("notification_banner","Notification banner","Notice icon, message and working dismiss button."),
+        new("touch_controls","Touch controls","On-screen buttons for a phone: a menu and a map button, plus two actions. They appear only on a touch device, and each presses a named input. Steering needs no buttons — give your direction inputs a touch action and a drag anywhere steers.")
     ];
     public static UiDefinition Add(Project project,string key) {
         var starter=All.SingleOrDefault(s=>s.Id==key)??throw new InvalidOperationException("Unknown starter component");
         var source=Build(key);string basis="component_"+key;source.Id=basis;int n=2;while(project.Screens.Any(s=>s.Id==source.Id))source.Id=basis+"_"+n++;
-        source.Title=starter.Title;source.IsComponent=true;project.Screens.Add(source);return source;
+        source.Title=starter.Title;source.IsComponent=true;project.Screens.Add(source);
+        // Controls that press an input need that input to exist, or the project no longer validates the moment the
+        // starter is placed. Anything the project already has is left alone.
+        foreach(var (name,keys,buttons) in StarterInputs(key))
+            if(!project.Manifest.Inputs.Any(i=>i.Name==name))
+                project.Manifest.Inputs.Add(new GameInput{Name=name,Keys=[..keys],Buttons=[..buttons]});
+        return source;
     }
+    /// <summary>The inputs a starter's controls press, so placing one leaves a project that still works.</summary>
+    static (string Name,string[] Keys,string[] Buttons)[] StarterInputs(string key)=>key switch {
+        "touch_controls"=>[("pause",["escape"],["start"]),("map",["m"],["back"]),("confirm",["enter","space"],["a"]),("action",["e"],["b"])],
+        _=>[]
+    };
     static UiDefinition Build(string key) {
         var ui=new UiDefinition();
         Element Add(string id,string type,int x,int y,int w,int h,string text="") {
@@ -61,6 +73,18 @@ public static class ComponentStarters
             case "pagination_bar":
                 Body(288,58);var previous=Button("previous","< Previous",8,8,88);var next=Button("next","Next >",192,8,88);next.HorizontalAnchor="right";Label("page","Page 1 of 3",104,13,80).Alignment="center";
                 Label("status","",10,39,268,12).FontScale=.75;Click(previous,Text("status","Previous requested"));Click(next,Text("status","Next requested"));previous.Tooltip=next.Tooltip="Placeholder: connect to your list paging handler and update the page label.";break;
+            case "touch_controls": {
+                // Only the buttons are here. Steering is a drag anywhere the controls are not, which needs no control
+                // at all — set a touch action on the direction inputs instead.
+                Body(240,56);
+                var pad=ui.Elements[0];pad.Background="#00000000";pad.BorderWidth=0;pad.TouchOnly=true;
+                string[,] keys={{"t_menu","MENU","pause"},{"t_map","MAP","map"},{"t_a","A","confirm"},{"t_b","B","action"}};
+                for(int i=0;i<4;i++){
+                    var b=Button(keys[i,0],keys[i,1],8+i*58,10,52,36);
+                    b.Input=keys[i,2];b.TouchOnly=true;b.CornerRadius=6;b.Background="#1E2A33C8";b.BorderColor="#6E8A9A";b.BorderWidth=1;
+                    b.Tooltip="Presses the \""+keys[i,2]+"\" input. Rename it in Advanced → Inputs, or clear Presses input to use a click event instead.";
+                }
+                break; }
             case "notification_banner":
                 Body(304,56);var notice=Add("icon","item",10,13,24,24);notice.Item="minecraft:paper";Label("title","NOTICE",44,8,212).Bold=true;Label("message","Your message goes here.",44,29,212).FontScale=.85;
                 var dismiss=Button("dismiss","X",272,15,24);dismiss.HorizontalAnchor="right";Click(dismiss,Visible("body",false));break;

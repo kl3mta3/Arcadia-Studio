@@ -1,4 +1,4 @@
-// Runs in WYSICRAFT's bundled SERVER engine. Data comes from the clicking player.
+// Runs in Wysicraft's bundled SERVER engine. Data comes from the clicking player.
 // This example never grants, removes, or transfers items.
 function refresh(ctx) {
     const rows = ctx.player.getInventory();

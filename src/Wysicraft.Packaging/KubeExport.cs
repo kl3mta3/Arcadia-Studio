@@ -45,6 +45,7 @@ public static class KubeExport
         if (!project.Manifest.Dependencies.Contains("kubejs")) project.Manifest.Dependencies.Add("kubejs");
         string id = project.Manifest.Id;
         string code = "// Generated Wysicraft server handlers. Install on the server; /reload after replacement.\n(() => {\nconst API = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');\nconst projectId = " + Json.Write(id) + ";\nAPI.clearKubeHandlers(projectId);\n" + registrations + "\nconsole.info('Wysicraft: registered " + handlers.Count + " handlers for ' + projectId);\n})();\n";
+        Compatibility.RequireMinecraftScripts(project);
         using var pack = new MemoryStream();
         using (var zip = new ZipArchive(pack, ZipArchiveMode.Create, true))
             foreach (var file in ProjectStore.Files(project, true)) { using var stream = zip.CreateEntry(file.Key).Open(); stream.Write(file.Value); }

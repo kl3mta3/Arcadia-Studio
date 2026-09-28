@@ -18,7 +18,11 @@ public partial class MainWindow
         "ctx.state.set('name', 'value');", "ctx.state.get('name');", "ctx.ui.close();",
         "ctx.server.runCommand('say Hello');", "ctx.ui.open('screen_id');",
         "ctx.player.getName();", "ctx.player.getInventory();", "ctx.player.getPosition();", "ctx.player.hasPermission(2);",
-        "ctx.ui.setItems('list_id', ctx.player.getInventory());", "console.log('Debug message');"
+        "ctx.ui.setItems('list_id', ctx.player.getInventory());", "console.log('Debug message');",
+        "ctx.ui.play('sprite_id', 'run'); // sprite clip", "ctx.ui.setValue('sound_id', 'play'); // Sound control: play or stop", "ctx.client.playSound('myproject:click');", "ctx.repeat // true while a key is held down",
+        "ctx.ui.animate('animation_id'); // web & desktop", "ctx.ui.stopAnimation('animation_id'); // web & desktop", "ctx.ui.setVelocity('body_id', 0, -200); // web & desktop physics", "ctx.ui.setPosition('body_id', 40, 20); // web & desktop", "ctx.ui.setSize('camera1', 240, 135); // web & desktop: resize (a smaller camera zooms in)", "ctx.ui.changeTexture('image_id', 'myproject:textures/gui/image/other.png');",
+        "ctx.input.isDown('jump'); // web & desktop inputs", "ctx.input.axis('left'); // 0-1, web & desktop", "ctx.ui.getElement('body_id').vx; // x, y, width, height, vx, vy (web & desktop)",
+        "ctx.physics.touching('player'); // IDs it's touching or overlapping (web & desktop)", "ctx.physics.isTouching('player', 'goal'); // web & desktop"
     ];
     void ShowScriptApi() {
         var window=new Window { Owner=this,Title="Script API / insert snippet",Width=660,Height=440 };
@@ -55,22 +59,13 @@ public partial class MainWindow
             case "kubejs": case "jar": Distribution.Write(path,Distribution.BundledJar(project,RuntimeJar()));break;
             case "kubejs_files": KubeExport.Export(project,path);break;
             case "standard": ProjectStore.Export(project,path);break;
+            case "web_folder": Wysicraft.Packaging.WebExport.ExportFolder(project,path);break;
+            case "web_file": Wysicraft.Packaging.WebExport.ExportSingleFile(project,path);break;
+            case "windows_app": DesktopExport.WindowsApp(project,path,AppHostExe());break;
             default: throw new InvalidDataException("Unknown export format");
         }
     }
-    void Export() {
-        SaveScriptText();var window=new Window { Owner=this,Title="Export project",Width=590,SizeToContent=SizeToContent.Height,WindowStartupLocation=WindowStartupLocation.CenterOwner };
-        var panel=new StackPanel { Margin=new Thickness(16) };window.Content=panel;
-        var formats=new ComboBox { ItemsSource=new[]{"Installation ZIP — bundled client/server JARs", "Project JAR — runtime + assigned scripts bundled", "Portable .wysicraft pack", "KubeJS loose files (advanced)"},SelectedIndex=1 }; panel.Children.Add(formats);
-        panel.Children.Add(new TextBlock { Text="For Minecraft 1.21.1 / NeoForge. Installation ZIP includes separate client/server project JARs, bundled runtime and assigned scripts, plus instructions. KubeJS projects still require KubeJS/Rhino. Save your editable .wysicraftproj separately. JAR changes require a game restart.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(4,12,4,12) });
-        var button=new Button { Content="Export…" };panel.Children.Add(button);
-        button.Click+=(_,_)=>Guard(()=>{
-            string format=new[]{"installation","jar","standard","kubejs_files"}[formats.SelectedIndex];
-            string ext=format=="jar"?"jar":format=="standard"?"wysicraft":"zip";
-            var dialog=new SaveFileDialog { Filter=$"Export file|*.{ext}",DefaultExt="."+ext,FileName=project.Manifest.Id+"."+ext };
-            if(dialog.ShowDialog()!=true)return; ExportArtifact(format,dialog.FileName);Log("Exported "+dialog.FileName);window.Close();
-        });window.ShowDialog();
-    }
+    // Export() lives in ExportDialog.cs.
 }
 
 

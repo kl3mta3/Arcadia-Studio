@@ -104,7 +104,7 @@ public partial class MainWindow
         if(!labelRow.Children.OfType<StackPanel>().SelectMany(p=>p.Children.OfType<TextBlock>()).Any(t=>t.Text.Contains('↳')))throw new Exception("Nested row not marked");
         // Parent dropdown: only valid panels, and choosing one re-parents.
         selected.Clear();selected.Add("panel");RefreshInspector();
-        var pick=Properties.Children.OfType<DockPanel>().Select(d=>d.Children.OfType<ComboBox>().FirstOrDefault()).First(c=>c?.ToolTip is string t && t.StartsWith("The panel this item"))!;
+        var pick=InspectorItems().OfType<DockPanel>().Select(d=>d.Children.OfType<ComboBox>().FirstOrDefault()).First(c=>c?.ToolTip is string t && t.StartsWith("The panel this item"))!;
         var items=((IEnumerable<string>)pick.ItemsSource).ToList();
         if(items.Contains("panel") || !items.Contains("other") || items.Contains("label"))throw new Exception("Parent dropdown lists invalid choices: "+string.Join(",",items));
         pick.SelectedItem="other";if(E("panel").Parent!="other" || Z("panel")<Z("other") || Z("label")<Z("panel"))throw new Exception("Parent dropdown did not re-parent in front");

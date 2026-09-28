@@ -1,0 +1,5 @@
+<!-- Restore-only project: brings the WebView2 SDK (headers + static loader) into the NuGet cache for AppHost.cpp. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Library</OutputType><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup><PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" /></ItemGroup>
+</Project>

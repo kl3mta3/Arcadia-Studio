@@ -60,19 +60,32 @@ public partial class MainWindow
     }
     internal async Task VerifyNesting(string output)
     {
-        var fixture=Json.CloneProject(project);
         VerifyLayerEditing(output+".layers.txt");
+        // Its own starting point: the layer checks above end on a different set of items with no groups left.
+        project=new Project();ui=project.Screens[0];
+        ui.Elements=[new Element {Id="one",LayerGroup="Controls"},new Element {Id="two",LayerGroup="Controls"}];
+        ui.GroupParents=new() {["Controls"]=""};
+        history.Clear();selected.Clear();RefreshAll();
         selected.Clear();selected.UnionWith(ui.Elements.Where(e=>e.LayerGroup=="Controls").Select(e=>e.Id));SetLayerGroup("Outer");
         if(ui.GroupParents.GetValueOrDefault("Controls")!="Outer")throw new Exception("Nested group creation failed");
         Duplicate();var copiedGroups=ui.Elements.Where(e=>selected.Contains(e.Id)).Select(e=>e.LayerGroup).Distinct().ToArray();
         if(copiedGroups.Any(g=>LayerGroups.Path(ui,g).Count()!=2 || LayerGroups.Root(ui,g)=="Outer"))throw new Exception("Nested duplication failed");
-        project=fixture;ui=project.Screens[0];selected.Clear();RefreshAll();
+        // A list with a row template of its own, so the check doesn't depend on which project was opened.
+        project=new Project();ui=project.Screens[0];
+        project.Screens.Add(new UiDefinition {Id="item_row",Title="Item row template",Size=new(){Width=180,Height=48},Elements=[
+            new Element {Id="row_panel",Type="panel",Bounds=new(){Width=180,Height=46}},
+            new Element {Id="name",Type="label",Parent="row_panel",Text="${row.name}",Bounds=new(){X=4,Y=2,Width=120,Height=20}},
+            new Element {Id="primary",Type="button",Parent="row_panel",Text="Add 1",RowAction="item_primary",Bounds=new(){X=100,Y=24,Width=70,Height=18}}]});
+        project.Manifest.Ui=["main","item_row"];
+        ui.Elements=[new Element {Id="list1",Type="item_list",RowTemplate="item_row",RowHeight=48,Bounds=new(){X=8,Y=8,Width=180,Height=96},
+            Value="[{\"item\":\"minecraft:stone\",\"name\":\"Stone\",\"count\":3},{\"item\":\"minecraft:dirt\",\"name\":\"Dirt\",\"count\":5}]"}];
+        history.Clear();selected.Clear();RefreshAll();
         var list=ui.Elements.First(e=>e.Type=="item_list");string fired="";
         var row=RenderTemplateRow(list,ItemRows.Parse(list.Value)[1],1,e=>fired=e,ui.Variables);
         var button=row.Children.OfType<Button>().Single();button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if(fired!="item_primary" || list.Text!="1")throw new Exception("Row button did not route index to owning list");
         var preview=new PreviewSession(this,Json.CloneProject(project),ui.Id);preview.Window.Show();await preview.WaitReady();
-        preview.CaptureCanvas(output+".png");preview.Window.Close();
+        await preview.CaptureCanvas(output+".png");await preview.CloseAsync();
         dirty=false;System.IO.File.WriteAllText(output,"PASS: nested group editing/duplication, row button/index and preview rendering");
     }
 }

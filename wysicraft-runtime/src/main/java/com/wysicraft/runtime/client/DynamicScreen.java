@@ -42,7 +42,7 @@ public final class DynamicScreen extends Screen {
         int bw=Math.max(32,Math.min(62,(int)e.bounds.width/5));
         mouseClicked((x(e)+e.bounds.width-6-bw*(secondary?0.5:1.5))*viewScale,(y(e)+index*e.rowHeight-listScroll(e.id)+8)*viewScale,0);
     }
-    Element focused, hovered, dragging; private int originX, originY; private boolean opened, closed; private long lastHover;
+    Element focused, hovered, dragging; private int originX, originY; private boolean opened, closed; private long lastHover, lastTick;
     public DynamicScreen(Ui ui, String session) { super(Component.literal(ui.title)); this.ui = ui; this.design=ui.copy(); this.session = session; state = new HashMap<>(ui.variables); }
     public Font font() { return font; }
     public String bind(String text) { return Expressions.bind(text,state); }
@@ -55,10 +55,25 @@ public final class DynamicScreen extends Screen {
         }
         viewScale=ui.responsive?1f:ui.fitToScreen?Math.min(1f,Math.min(width/(ui.size.width+12f),height/(ui.size.height+(ui.showFrame?32f:12f)))):1f;
         originX=(int)((width/viewScale-ui.size.width)/2); originY=(int)((height/viewScale-ui.size.height+(ui.showFrame?14:0))/2);
-        if (!opened) { opened = true; fire(null,"open",""); }
+        if (!opened) { opened = true; lastTick = openedAt = System.currentTimeMillis(); fire(null,"open",""); }
+    }
+    // Screen timer: fires the Tick event every tickInterval ms while the screen is open (checked each client tick, 50 ms).
+    @Override public void tick() {
+        super.tick();
+        tickSounds();
+        if (ui.tickInterval < 50 || !ui.events.containsKey("tick")) return;
+        long now = System.currentTimeMillis();
+        if (now - lastTick >= ui.tickInterval) { lastTick = now; fire(null,"tick",""); }
     }
     @Override public boolean isPauseScreen() { return false; }
-    java.util.List<Element> parents(Element e) { return com.wysicraft.runtime.model.ContainerTree.ancestors(ui,e); }
+    // Asked for several times per element per frame; a screen's parent chains only change when its element
+    // list does, so they are worked out once and kept until then.
+    private final Map<String,java.util.List<Element>> parentChains=new HashMap<>();
+    private int parentChainCount=-1;
+    java.util.List<Element> parents(Element e) {
+        if(parentChainCount!=ui.elements.size()) { parentChains.clear(); parentChainCount=ui.elements.size(); }
+        return parentChains.computeIfAbsent(e.id,id->com.wysicraft.runtime.model.ContainerTree.ancestors(ui,e));
+    }
     boolean visible(Element e) { return e.visible && Expressions.evaluate(e.visibleIf,state) && parents(e).stream().allMatch(p->p.visible && Expressions.evaluate(p.visibleIf,state)); }
     boolean enabled(Element e) { return e.enabled && Expressions.evaluate(e.enabledIf,state) && parents(e).stream().allMatch(p->p.enabled && Expressions.evaluate(p.enabledIf,state)); }
     int x(Element e) { return originX + (int)e.bounds.x; }
@@ -68,19 +83,23 @@ public final class DynamicScreen extends Screen {
         g.enableScissor((int)Math.floor(x*viewScale),(int)Math.floor(y*viewScale),
             (int)Math.ceil((x+w)*viewScale),(int)Math.ceil((y+h)*viewScale));
     }
-    boolean inside(Element e,double mx,double my) { mx/=viewScale; my/=viewScale; if (mx < x(e) || mx >= x(e)+e.bounds.width || my < y(e) || my >= y(e)+e.bounds.height) return false; for(var p:parents(e)) if(mx<x(p) || mx>=x(p)+p.bounds.width || my<y(p) || my>=y(p)+p.bounds.height)return false; return true; }
+    // Controls with no picture (sounds, and the web-only colliders and cameras) are never hovered or clicked.
+    static boolean unseen(Element e) { return e.type.equals("sound") || e.type.equals("collider") || e.type.equals("camera"); }
+    boolean inside(Element e,double mx,double my) { mx/=viewScale; my/=viewScale; if (ui.clipToScreen && (mx < originX || mx >= originX+ui.size.width || my < originY || my >= originY+ui.size.height)) return false; if (mx < x(e) || mx >= x(e)+e.bounds.width || my < y(e) || my >= y(e)+e.bounds.height) return false; for(var p:parents(e)) if(mx<x(p) || mx>=x(p)+p.bounds.width || my<y(p) || my>=y(p)+p.bounds.height)return false; return true; }
     @Override public void render(GuiGraphics g,int mx,int my,float partial) {
         if(ui.dimBackground) g.fill(0,0,width,height,0xB010141B);
         g.pose().pushPose(); g.pose().scale(viewScale,viewScale,1);
         if(ui.showFrame) { g.fill(originX-6,originY-20,originX+ui.size.width+6,originY+ui.size.height+6,0xFF242B34); g.drawString(font,title,originX,originY-14,0xFFD9E6F1); }
         Element over = null;
+        if(ui.clipToScreen) clip(g,originX,originY,ui.size.width,ui.size.height); // nothing outside the screen's own area
         for (Element e : ui.elements) {
-            if (!visible(e)) continue; boolean hover = inside(e,mx,my); if (hover && enabled(e)) over = e;
+            if (!visible(e)) continue; boolean hover = !unseen(e) && inside(e,mx,my); if (hover && enabled(e)) over = e;
             var ancestors=parents(e); for(var parent:ancestors) clip(g,x(parent),y(parent),(int)parent.bounds.width,(int)parent.bounds.height);
             var renderer = ElementRenderers.get(e.type); if (renderer != null) try { ElementRenderers.skin(g,e,x(e),y(e),(int)e.bounds.width,(int)e.bounds.height); renderer.draw(this,g,e,x(e),y(e),(int)e.bounds.width,(int)e.bounds.height,hover && enabled(e)); ElementRenderers.border(g,e,x(e),y(e),(int)e.bounds.width,(int)e.bounds.height); } catch (Exception ex) { g.drawString(font,"Invalid " + e.type,x(e),y(e),0xFFFF7070); }
             if (!enabled(e)) ElementRenderers.roundedFill(g,x(e),y(e),(int)e.bounds.width,(int)e.bounds.height,e.cornerRadius,0x77000000);
             for(var parent:ancestors) g.disableScissor();
         }
+        if(ui.clipToScreen) g.disableScissor();
         if (over != hovered) { if (hovered != null) fire(hovered,"mouse_leave",""); hovered = over; if (hovered != null) fire(hovered,"mouse_enter",""); }
         if (hovered != null && System.currentTimeMillis()-lastHover > 250) { lastHover = System.currentTimeMillis(); fire(hovered,"hover",""); }
         g.pose().popPose();
@@ -113,7 +132,7 @@ public final class DynamicScreen extends Screen {
     @Override public boolean mouseClicked(double mx,double my,int button) {
         if (button != 0) return super.mouseClicked(mx,my,button); focused = null;
         var reversed = new ArrayList<>(ui.elements); Collections.reverse(reversed);
-        for (Element e : reversed) if (visible(e) && enabled(e) && inside(e,mx,my)) {
+        for (Element e : reversed) if (!unseen(e) && visible(e) && enabled(e) && inside(e,mx,my)) {
             switch (e.type) {
                 case "item_list" -> { int index=(int)((my/viewScale-y(e)+listScroll(e.id))/Math.clamp(e.rowHeight,24,128)); if(index>=0 && index<rows(e).size()) { if(!e.rowElements.isEmpty()) {String action=RowTemplateRenderer.hit(this,e,mx/viewScale-x(e),(my/viewScale-y(e)+listScroll(e.id))%Math.clamp(e.rowHeight,24,128));if(!action.isEmpty())fire(e,action,Integer.toString(index));break;} int count=(e.primaryLabel.isEmpty()?0:1)+(e.secondaryLabel.isEmpty()?0:1); int bw=Math.max(32,Math.min(62,(int)e.bounds.width/5)); double local=mx/viewScale-x(e); String event="item_click"; if(!e.secondaryLabel.isEmpty() && local>=e.bounds.width-6-bw) event="item_secondary"; else if(!e.primaryLabel.isEmpty() && local>=e.bounds.width-6-count*bw) event="item_primary"; fire(e,event,Integer.toString(index)); } }
                 case "button" -> fire(e,"click","");
@@ -133,10 +152,23 @@ public final class DynamicScreen extends Screen {
     @Override public boolean charTyped(char c,int modifiers) { if (focused != null && c >= 32 && c != 127 && focused.value.length() < 1024) { focused.value += c; fire(focused,"text_changed",focused.value); return true; } return super.charTyped(c,modifiers); }
     @Override public boolean keyPressed(int key,int scan,int modifiers) {
         if (focused != null) { if (key == GLFW.GLFW_KEY_BACKSPACE) { if (!focused.value.isEmpty()) focused.value = focused.value.substring(0,focused.value.length()-1); fire(focused,"text_changed",focused.value); return true; } if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) { fire(focused,"submit",focused.value); return true; } if (Screen.isPaste(key)) { String value = minecraft.keyboardHandler.getClipboard().replaceAll("[\\p{Cntrl}]",""); focused.value = (focused.value+value).substring(0,Math.min(1024,focused.value.length()+value.length())); fire(focused,"text_changed",focused.value); return true; } }
+        // Screen Key event: while no text box is being typed in, a fresh press fires at once. A held key repeats at most
+        // every keyRepeat ms (never, when 0) and the script sees ctx.repeat. Nothing queues: extra repeats are dropped.
+        // Escape isn't forwarded, so it still closes the screen.
+        else if (ui.events.containsKey("key")) {
+            String name = com.wysicraft.runtime.model.KeyNames.name(key);
+            if (name != null) {
+                boolean repeat = !heldKeys.add(key); long now = System.currentTimeMillis();
+                if (!repeat || (ui.keyRepeat > 0 && now - lastKey >= ui.keyRepeat)) { lastKey = now; keyRepeating = repeat; try { fire(null,"key",name); } finally { keyRepeating = false; } }
+                return true;
+            }
+        }
         return super.keyPressed(key,scan,modifiers);
     }
-    @Override public void onClose() { if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } super.onClose(); }
-    @Override public void removed() { if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } }
+    private final Set<Integer> heldKeys = new HashSet<>(); private long lastKey; private boolean keyRepeating;
+    @Override public boolean keyReleased(int key,int scan,int modifiers) { heldKeys.remove(key); return super.keyReleased(key,scan,modifiers); }
+    @Override public void onClose() { stopSounds(); if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } super.onClose(); }
+    @Override public void removed() { stopSounds(); if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } }
     void fire(Element element,String event,String value) {
         var events = element == null ? ui.events : element.events; Event ev = events.get(event); if (ev == null) return;
         if (element != null) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,element.id,event,value));
@@ -147,6 +179,7 @@ public final class DynamicScreen extends Screen {
             public void message(String text) { minecraft.player.sendSystemMessage(Component.literal(text)); }
             public String elementId() { return element == null ? "" : element.id; }
             public String value() { return value; }
+            public boolean repeat() { return keyRepeating; }
             public String text(String id) { var e = ui.element(id); return e == null ? "" : e.text; }
             public void action(String type,String target,String value) {
                 if (type.startsWith("console_")) { Wysicraft.LOG.info("[JS {}] {}",type.substring(8),value); return; }
@@ -155,7 +188,7 @@ public final class DynamicScreen extends Screen {
                 var e = ui.element(target);
                 switch (type) {
                     case "set_text" -> { if (e != null) e.text = value; }
-                    case "set_value" -> { if (e != null) { if(e.type.equals("item_list")) com.wysicraft.runtime.model.ItemRows.parse(value); e.value = value; } }
+                    case "set_value" -> { if (e != null) { if(e.type.equals("item_list")) com.wysicraft.runtime.model.ItemRows.parse(value); e.value = value; soundValue(e,value); } }
                     case "set_item" -> {
                         if (e == null || !e.type.equals("item")) throw new IllegalArgumentException("setItem target must be an item element: " + target);
                         var resource = ResourceLocation.tryParse(value);
@@ -167,7 +200,7 @@ public final class DynamicScreen extends Screen {
                     case "change_texture" -> { if (e != null) e.texture = value; }
                     case "message" -> message(value);
                     case "close_ui" -> minecraft.execute(DynamicScreen.this::onClose);
-                    case "play_sound" -> minecraft.getSoundManager().play(SimpleSoundInstance.forUI(BuiltInRegistries.SOUND_EVENT.get(ResourceLocation.parse(value)),1));
+                    case "play_sound" -> playSound(value);
                     default -> throw new IllegalArgumentException("Unsupported client script action: " + type);
                 }
             }
@@ -180,17 +213,54 @@ public final class DynamicScreen extends Screen {
             case "set_item" -> { if(target!=null && target.type.equals("item")) { var id=ResourceLocation.tryParse(value); if(id!=null && BuiltInRegistries.ITEM.containsKey(id)) target.item=value; } }
             case "set_visible" -> { if (target != null) target.visible = Boolean.parseBoolean(value); }
             case "set_enabled" -> { if (target != null) target.enabled = Boolean.parseBoolean(value); }
-            case "set_value" -> { if (target != null) target.value = value; }
+            case "set_value" -> { if (target != null) { target.value = value; soundValue(target,value); } }
             case "change_texture" -> { if (target != null) target.texture = value; }
             case "set_variable" -> state.put(action.target,value);
             case "toggle_variable" -> state.put(action.target,Boolean.toString(!Boolean.parseBoolean(state.get(action.target))));
             case "message" -> minecraft.player.sendSystemMessage(Component.literal(value));
-            case "play_sound" -> minecraft.getSoundManager().play(SimpleSoundInstance.forUI(BuiltInRegistries.SOUND_EVENT.get(ResourceLocation.parse(value)),1));
+            case "play_sound" -> playSound(value);
             case "close_ui" -> onClose();
             case "open_ui" -> { /* Server authorizes navigation from the trusted event definition. */ }
             default -> { var handler = ACTIONS.get(action.type); if (handler == null) throw new IllegalArgumentException("Unknown client action"); handler.accept(this,action); }
         }
     }
+    // ---- Sounds and sprites ----
+    // Any sound ID Minecraft knows (a sounds.json in the game, a mod or the project JAR), including project .ogg files.
+    void playSound(String id) {
+        var location = ResourceLocation.tryParse(id); if (location == null) return;
+        minecraft.getSoundManager().play(SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvent.createVariableRangeEvent(location),1));
+    }
+    private long openedAt;
+    private record Playing(net.minecraft.client.resources.sounds.SoundInstance instance, int[] left) {}
+    private final Map<String,Playing> sounds = new HashMap<>(); private final Set<String> started = new HashSet<>();
+    // Sound controls: start Delay ms after opening (when Autoplay), play Repeat times, or loop; "play"/"stop" values control them.
+    private void tickSounds() {
+        long now = System.currentTimeMillis();
+        for (var e : ui.elements) {
+            if (!e.type.equals("sound") || e.sound.isEmpty()) continue;
+            if (e.autoplay && !started.contains(e.id) && now - openedAt >= e.delay) startSound(e);
+            var playing = sounds.get(e.id);
+            if (playing != null && !e.loop && !minecraft.getSoundManager().isActive(playing.instance())) { if (--playing.left()[0] > 0) play(e,playing.left()); else sounds.remove(e.id); }
+        }
+    }
+    void soundValue(Element e, String value) { if (!e.type.equals("sound")) return; if (value.equals("play")) startSound(e); else if (value.equals("stop")) stopSound(e); }
+    private void startSound(Element e) { started.add(e.id); stopSound(e); play(e,new int[]{Math.max(1,e.repeat)}); }
+    private void play(Element e, int[] left) {
+        var location = ResourceLocation.tryParse(e.sound); if (location == null) return;
+        var instance = new SimpleSoundInstance(location, net.minecraft.sounds.SoundSource.MASTER, (float)Math.clamp(e.volume,0,1), 1f,
+            net.minecraft.client.resources.sounds.SoundInstance.createUnseededRandom(), e.loop, 0, net.minecraft.client.resources.sounds.SoundInstance.Attenuation.NONE, 0, 0, 0, true);
+        minecraft.getSoundManager().play(instance); sounds.put(e.id, new Playing(instance, left));
+    }
+    private void stopSound(Element e) { var playing = sounds.remove(e.id); if (playing != null) minecraft.getSoundManager().stop(playing.instance()); }
+    private void stopSounds() { for (var playing : sounds.values()) minecraft.getSoundManager().stop(playing.instance()); sounds.clear(); }
+    private final Map<String,Object[]> spriteClock = new HashMap<>();
+    /** Milliseconds since the sprite's current clip (its value) was chosen. */
+    long spriteElapsed(Element e) {
+        long now = System.currentTimeMillis(); var clock = spriteClock.get(e.id);
+        if (clock == null || !clock[0].equals(e.value)) { clock = new Object[]{e.value, now}; spriteClock.put(e.id, clock); }
+        return now - (long)clock[1];
+    }
+
 }
 
 

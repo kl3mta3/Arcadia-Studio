@@ -3,18 +3,28 @@ namespace Wysicraft.Core;
 
 public static class TextureAssets
 {
+    /// <summary>Pixel editor layers, kept beside a PNG (name.png.layers). Editor-only: never exported.</summary>
+    public const string LayersSuffix = ".layers";
+    public static bool IsEditorOnly(string path) => path.EndsWith(".png" + LayersSuffix, StringComparison.Ordinal) || SoundAssets.IsSidecar(path);
     public static string Path(string projectId, string name, string elementType = "image") => "assets/" + projectId + "/textures/gui/" + elementType + "/" + name;
     public static string Resource(string projectId, string name, string elementType = "image") => projectId + ":textures/gui/" + elementType + "/" + name;
     public static bool TryGet(Project project, string resource, out byte[] bytes)
     {
         bytes = [];
-        if (!Validation.Resource(resource)) return false;
+        return PathOf(project, resource) is string path && project.Assets.TryGetValue(path, out bytes!);
+    }
+    /// <summary>The project asset a texture resource points at (the same fallbacks the runtimes use), or null.</summary>
+    public static string? PathOf(Project project, string resource)
+    {
+        if (!Validation.Resource(resource)) return null;
         var parts = resource.Split(':', 2);
-        if (project.Assets.TryGetValue("assets/" + parts[0] + "/" + parts[1], out bytes!)) return true;
-        if (parts[0] != project.Manifest.Id) return false;
+        if (project.Assets.ContainsKey("assets/" + parts[0] + "/" + parts[1])) return "assets/" + parts[0] + "/" + parts[1];
+        if (parts[0] != project.Manifest.Id) return null;
         string name = parts[1].StartsWith("textures/gui/") ? parts[1][13..] : parts[1];
         if (name.StartsWith("image/")) name = name[6..];
-        return project.Assets.TryGetValue(Path(parts[0], name), out bytes!) || project.Assets.TryGetValue("assets/" + parts[0] + "/textures/gui/" + name, out bytes!) || project.Assets.TryGetValue("assets/textures/" + name, out bytes!);
+        foreach (var path in new[] { Path(parts[0], name), "assets/" + parts[0] + "/textures/gui/" + name, "assets/textures/" + name })
+            if (project.Assets.ContainsKey(path)) return path;
+        return null;
     }
     public static Dictionary<string, byte[]> CanonicalAssets(Project project)
     {
@@ -24,7 +34,10 @@ public static class TextureAssets
             string prefix = "assets/" + project.Manifest.Id + "/textures/gui/";
             if (target.StartsWith(prefix) && !target[prefix.Length..].Contains('/')) target = Path(project.Manifest.Id, target[prefix.Length..]);
             Validation.SafePath(target);
-            if (!System.Text.RegularExpressions.Regex.IsMatch(target, @"^assets/[a-z0-9_.-]+/textures/.+\.png$")) throw new InvalidDataException("Invalid texture path: " + target);
+            if ((SoundAssets.IsSound(target) || SoundAssets.IsSidecar(target)) && System.Text.RegularExpressions.Regex.IsMatch(target, "^assets/[a-z0-9_.-]+/sounds/[a-z0-9_/.-]+$")) { result[target] = bytes; continue; }
+            // Fonts live beside sounds: not textures, and carried through to web and desktop exports as they are.
+            if (System.Text.RegularExpressions.Regex.IsMatch(target, "^assets/[a-z0-9_.-]+/fonts/[a-z0-9_-]+\\.(ttf|otf|woff2|woff)$")) { result[target] = bytes; continue; }
+            if (!System.Text.RegularExpressions.Regex.IsMatch(target, @"^assets/[a-z0-9_.-]+/textures/.+\.png(\.mcmeta|\.layers)?$")) throw new InvalidDataException("Invalid texture path: " + target);
             if (result.TryGetValue(target, out var existing) && !existing.SequenceEqual(bytes)) throw new InvalidDataException("Conflicting texture paths: " + target);
             result[target] = bytes;
         }

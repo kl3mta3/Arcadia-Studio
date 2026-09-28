@@ -17,9 +17,10 @@ public final class Payloads {
         public static final StreamCodec<RegistryFriendlyByteBuf,UiEvent> CODEC = StreamCodec.of((buf,p) -> { buf.writeUtf(p.ui,129); buf.writeUtf(p.session,36); buf.writeUtf(p.element,64); buf.writeUtf(p.event,32); buf.writeUtf(p.value,1024); }, buf -> new UiEvent(buf.readUtf(129),buf.readUtf(36),buf.readUtf(64),buf.readUtf(32),buf.readUtf(1024)));
         public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
-    public record OpenUi(String session, String json) implements CustomPacketPayload {
+    // The screen JSON travels compressed (see UiCompression).
+    public record OpenUi(String session, byte[] data) implements CustomPacketPayload {
         public static final Type<OpenUi> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath("wysicraft","open"));
-        public static final StreamCodec<RegistryFriendlyByteBuf,OpenUi> CODEC = StreamCodec.of((buf,p) -> { buf.writeUtf(p.session,36); buf.writeUtf(p.json,200000); }, buf -> new OpenUi(buf.readUtf(36),buf.readUtf(200000)));
+        public static final StreamCodec<RegistryFriendlyByteBuf,OpenUi> CODEC = StreamCodec.of((buf,p) -> { buf.writeUtf(p.session,36); buf.writeByteArray(p.data); }, buf -> new OpenUi(buf.readUtf(36),buf.readByteArray(UiCompression.MAX_PACKED)));
         public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
     public record CloseUi(String session) implements CustomPacketPayload {

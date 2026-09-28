@@ -51,7 +51,16 @@ public partial class MainWindow
         Field(Properties,"Show frame / title",ui,"ShowFrame");
         Field(Properties,"Dim game behind UI",ui,"DimBackground");
         Field(Properties,"Fit to viewport",ui,"FitToScreen");
-        Properties.Children.Add(new TextBlock {Text="Responsive layout moves controls by their anchors when the game window size differs. Fit to viewport scales a non-responsive screen to fit instead. For a transparent screen, turn off the frame and dimming, and add a Panel wherever you want a background.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(4),Foreground=System.Windows.Media.Brushes.LightGray});
+        Field(Properties,"Clip to screen",ui,"ClipToScreen");
+        Field(Properties,"Tick interval (ms)",ui,"TickInterval");
+        Field(Properties,"Key repeat (ms)",ui,"KeyRepeat");
+        if(AdvancedAllowed){Field(Properties,"Gravity (web & desktop)",ui,"Gravity");var anim=new Button{Content=$"Animations ({ui.Animations.Count})…",HorizontalAlignment=HorizontalAlignment.Left};anim.Click+=(_,_)=>Guard(ShowAnimationsWindow);Properties.Children.Add(anim);
+            var states=new Button{Content=$"State graphs ({ui.StateGraphs.Count})…",HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,4,0,0)};states.Click+=(_,_)=>Guard(ShowStateGraphsWindow);Properties.Children.Add(states);
+            // The shader runs over what the WebGL2 batch drew (tilemap, particles, plain sprites); web only.
+            var shaders=new List<(string,string)>{("","(no shader)")};shaders.AddRange(project.Manifest.Shaders.Select(s=>(s.Id,s.Id)));
+            Choice(Properties,"Shader (web)",ui.Shader,shaders,v=>ui.Shader=v,"A fragment shader run over the batched layer: the tilemap, particles and plain sprites. Make them in Advanced → Shaders.");
+            var edit=new Button{Content=project.Manifest.Shaders.Count==0?"Shaders…":$"Edit shaders ({project.Manifest.Shaders.Count})…",HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,4,0,0)};edit.Click+=(_,_)=>Guard(ShowShadersWindow);Properties.Children.Add(edit);}
+        Properties.Children.Add(new TextBlock {Text="Responsive layout moves controls by their anchors when the game window size differs. Fit to viewport scales a non-responsive screen to fit instead. Clip to screen hides anything outside the screen's own area, for games that scroll things in from off screen. Tick interval runs the screen's Tick event every so many milliseconds while it's open (0 = off, 50 or more), for timers, animations and games. Key repeat is how often a held key sends the Key event again (0 = only once per press); presses never pile up. For a transparent screen, turn off the frame and dimming, and add a Panel wherever you want a background.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(4),Foreground=System.Windows.Media.Brushes.LightGray});
     }
     // A text field applied on Enter or when it loses focus (not on every keystroke), for values that need validation as a whole.
     void CommitField(string label,string value,Action<string> apply,string tip) {

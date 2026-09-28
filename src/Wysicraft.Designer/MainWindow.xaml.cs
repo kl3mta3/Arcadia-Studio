@@ -115,25 +115,17 @@ public partial class MainWindow : Window {
 			}
 		};
 		InitializeLayers();
-		foreach (ControlSpec value in Registry.Controls.Values)
-		{
-			Toolbox.Items.Add(new ListBoxItem
-			{
-				Content = Icons.WithText(value.Type, value.DisplayName),
-				Tag = value.Type,
-				Padding = new Thickness(8.0, 5.0, 8.0, 5.0)
-			});
-		}
+		RebuildToolbox();
 		Toolbox.PreviewMouseMove += delegate(object _, MouseEventArgs e)
 		{
-			if (e.LeftButton == MouseButtonState.Pressed && Toolbox.SelectedItem is ListBoxItem listBoxItem)
+			if (e.LeftButton == MouseButtonState.Pressed && Toolbox.SelectedItem is ListBoxItem { Tag: string } listBoxItem)
 			{
 				DragDrop.DoDragDrop(Toolbox, new DataObject("control", listBoxItem.Tag), DragDropEffects.Copy);
 			}
 		};
 		Toolbox.MouseDoubleClick += delegate
 		{
-			if (Toolbox.SelectedItem is ListBoxItem listBoxItem)
+			if (Toolbox.SelectedItem is ListBoxItem { Tag: string } listBoxItem)
 			{
 				AddControl((string)listBoxItem.Tag, 16.0, 16.0);
 			}
@@ -262,6 +254,7 @@ public partial class MainWindow : Window {
 		base.PreviewKeyDown += Keys;
 		base.Closing += delegate(object? _, CancelEventArgs e)
 		{
+			if (!CloseSideEditors()) { e.Cancel = true; return; }
 			if (!crashRecovery)
 			{
 				SaveScriptText();
@@ -373,6 +366,7 @@ public partial class MainWindow : Window {
 
 	private bool CanReplace()
 	{
+		if (!CloseSideEditors()) return false; // an open editor would otherwise save into the next project
 		SaveScriptText();
 		if (!dirty)
 		{
@@ -471,6 +465,7 @@ public partial class MainWindow : Window {
 	private void ExportPack()
 	{
 		SaveScriptText();
+		if (!MinecraftExportAllowed("Exporting for Minecraft")) return;
 		Validate();
 		if (Wysicraft.Core.Validation.Check(project).Count <= 0)
 		{
@@ -491,6 +486,7 @@ public partial class MainWindow : Window {
 	private void ExportKube()
 	{
 		SaveScriptText();
+		if (!MinecraftExportAllowed("Exporting for Minecraft")) return;
 		SaveFileDialog saveFileDialog = new SaveFileDialog
 		{
 			Filter = "Bundled project JAR|*.jar",
@@ -513,13 +509,21 @@ public partial class MainWindow : Window {
 		{
 			Output.Items.Add(item);
 		}
+		// Advice is listed with the rest but counted apart: it blocks nothing, it just says what something will cost.
+		List<Issue> advice = Wysicraft.Core.Validation.Advice(project);
+		foreach (Issue note in advice)
+		{
+			Output.Items.Add(note);
+		}
+		string andAdvice = (advice.Count > 0) ? $" {advice.Count} note(s) about performance." : "";
 		if (list.Count == 0)
 		{
-			Log("Validation passed.");
+			Log("Validation passed." + andAdvice);
 		}
 		else
 		{
-			Log($"{list.Count} validation errors");
+			int minecraftOnly = list.Count(i => i.MinecraftOnly);
+			Log((minecraftOnly == list.Count ? $"No errors. {minecraftOnly} thing(s) only block Minecraft exports; web and desktop exports are fine." : $"{list.Count - minecraftOnly} validation error(s)" + (minecraftOnly > 0 ? $", plus {minecraftOnly} that only block Minecraft exports" : "")) + andAdvice);
 		}
 		ShowDock("output");
 	}
@@ -528,6 +532,7 @@ public partial class MainWindow : Window {
 	private void RefreshAll()
 	{
 		refreshing = true;
+		if (toolboxTarget != project.Manifest.Target) { toolboxTarget = project.Manifest.Target; RebuildToolbox(); }
 		Screens.ItemsSource = project.Screens.Where(s=>!s.IsComponent).Select((UiDefinition s) => s.Id).ToList();
 		Screens.SelectedItem = ui.IsComponent?null:ui.Id;
         RefreshSourceContext();
@@ -542,6 +547,8 @@ public partial class MainWindow : Window {
 
 	private void AddControl(string type, double x, double y)
 	{
+		// Toolbox stamps carry a preset after a colon: "shape:star", "collider:circle".
+		string preset = ""; int colon = type.IndexOf(':'); if (colon > 0) { preset = type[(colon + 1)..]; type = type[..colon]; }
 		Change();
 		Element element = new Element();
 		element.Type = type;
@@ -582,6 +589,9 @@ public partial class MainWindow : Window {
 		bounds3.Height = (flag2 ? 100 : 20);
 		element2.Bounds = bounds;
 		Element element3 = element;
+		// Pictures draw their own image; a fill behind them would show through transparent pixels.
+		if (type is "image" or "texture_region" or "item" or "sprite" or "tilemap") element3.FillEnabled = false;
+		ApplyControlPreset(element3, preset);
 		element3.LayerGroup=isolatedGroup;
         ui.Elements.Add(element3);
 		selected.Clear();
@@ -591,16 +601,9 @@ public partial class MainWindow : Window {
 	}
 
 
-	private string Unique(string basis)
-	{
-		string id = basis;
-		int num = 1;
-		while (ui.Elements.Any((Element e) => e.Id == id))
-		{
-			id = basis + "_" + num++;
-		}
-		return id;
-	}
+	// New and copied elements are numbered name1, name2, …: a copy of "button3" becomes the next free
+	// "buttonN" instead of growing a "_1" suffix on every copy.
+	private string Unique(string basis) => ElementIds.Next(basis, ui.Elements.Select(e => e.Id));
 
 
 	private double Snap(double n)
@@ -616,7 +619,10 @@ public partial class MainWindow : Window {
 	private void Draw()
 	{
 		SyncIsolation(); RefreshSourceContext();
-        Surface.Children.Clear();
+		// A tilemap's box always matches its grid: the runtime draws the grid, so a box that disagreed would only
+		// mislead about where the map is and what a click lands on.
+		foreach (var map in ui.Elements) Tilemaps.Fit(map);
+        Surface.Children.Clear(); handlePlacers.Clear();
 		Surface.Width = (double)ui.Size.Width * 2.0;
 		Surface.Height = (double)ui.Size.Height * 2.0;
 		if (grid)
@@ -636,7 +642,7 @@ public partial class MainWindow : Window {
 		{
 			Surface.Background = new SolidColorBrush(Color.FromRgb(52, 58, 67));
 		}
-		foreach (Element e in ui.Elements)
+		foreach (Element e in ui.Elements.Where(x => x.Type != "sound")) // Sound controls have no picture: they live in Layers
 		{
 			Border border = new Border
 			{
@@ -659,9 +665,14 @@ public partial class MainWindow : Window {
 				rect.Intersect(new Rect(item.Bounds.X * 2.0, item.Bounds.Y * 2.0, item.Bounds.Width * 2.0, item.Bounds.Height * 2.0));
 			}
 			border.Clip = new RectangleGeometry(rect.IsEmpty ? default(Rect) : new Rect(rect.X - e.Bounds.X * 2.0, rect.Y - e.Bounds.Y * 2.0, rect.Width, rect.Height));
-			border.ContextMenu = ElementMenu(e);
+			// Filled when it's actually opened: building a full menu for every control on every redraw was the bulk of a redraw.
+			ContextMenu menu = new ContextMenu();
+			border.ContextMenu = menu;
+			border.ContextMenuOpening += delegate { FillElementMenu(menu, e); };
+			menu.Opened += delegate { if (menu.Items.Count == 0) FillElementMenu(menu, e); };
             if(!InIsolation(e)){border.Opacity*=.25;border.IsHitTestVisible=false;}
             if(e.Locked)border.IsHitTestVisible=false; // clicks pass through to what's underneath
+            if(e.Type=="camera"){border.Background=null;border.BorderThickness=new Thickness(selected.Contains(e.Id)?3:2);} // a camera is grabbed by its edge; clicks inside reach the controls under it
             border.MouseLeftButtonDown+=(_,args)=>CanvasElementDown(e,args);
 			if (selected.Contains(e.Id) && InIsolation(e) && !e.Locked) AddResizeHandles(e);
 		}
@@ -687,7 +698,9 @@ public partial class MainWindow : Window {
         if(dragBounds==null)return;
         if(!dragChanged){var delta=position-dragStart;if(Math.Abs(delta.X)<SystemParameters.MinimumHorizontalDragDistance && Math.Abs(delta.Y)<SystemParameters.MinimumVerticalDragDistance)return;Change();dragChanged=true;lastCanvasClick=0;}
         foreach(var item in ui.Elements.Where(e=>dragBounds.ContainsKey(e.Id))){item.Bounds.X=Math.Max(0,Snap(dragBounds[item.Id].X+(position.X-dragStart.X)/Zoom));item.Bounds.Y=Math.Max(0,Snap(dragBounds[item.Id].Y+(position.Y-dragStart.Y)/Zoom));}
-        Draw();
+        // Moving items only changes where they are, so the canvas and Layers aren't rebuilt until the drag ends.
+        UpdateCanvasBounds(dragBounds.Keys);
+        MoveCanvasOverlays();
     }
 
 
@@ -790,12 +803,14 @@ public partial class MainWindow : Window {
 
 	private void Heading(StackPanel panel, string text)
 	{
+		// In Properties a heading is later folded into a collapsible section (FoldSections); the tag is how it is found.
 		panel.Children.Add(new TextBlock
 		{
 			Text = text.ToUpperInvariant(),
 			Foreground = Brushes.LightSkyBlue,
 			FontWeight = FontWeights.SemiBold,
-			Margin = new Thickness(4.0, 12.0, 4.0, 5.0)
+			Margin = new Thickness(4.0, 12.0, 4.0, 5.0),
+			Tag = panel == Properties ? new SectionHeading(text) : null
 		});
 	}
 
@@ -996,15 +1011,11 @@ public partial class MainWindow : Window {
 				}
 				if (name == "Id")
 				{
-                    if(obj is Element linked && ui.ComponentInstances.Any(i=>i.Root==linked.Id || i.Ids.Values.Contains(linked.Id)))throw new InvalidOperationException("Detach the component before renaming its element IDs.");
-					Element? element2 = obj as Element;
-					if (element2 != null)
+					if (obj is Element element2)
 					{
-						foreach (Element item2 in ui.Elements.Where((Element c) => c.Parent == element2.Id))
-						{
-							item2.Parent = text;
-						}
-						selected.Remove(element2.Id);
+						string oldId = element2.Id;
+						ReportScriptMentions(oldId, ElementIds.Rename(project, ui, oldId, text));
+						selected.Remove(oldId);
 						selected.Add(text);
 					}
 				}
@@ -1029,13 +1040,21 @@ public partial class MainWindow : Window {
 
 	private void RefreshInspector()
 	{
+		BuildInspector();
+		FoldSections();
+	}
+
+	private void BuildInspector()
+	{
 		Properties.Children.Clear();
 		Events.Children.Clear();
 		Element? element = ui.Elements.FirstOrDefault((Element e) => selected.Contains(e.Id));
+		// Ask Agent sits above everything, including Identity: it is about the thing as a whole, not one field of it.
+		AddAskAgent(Properties, element);
 		if (element == null)
 		{
 			BuildComponentFields(null); BuildScreenSettings();
-			if(!ui.IsComponent)BuildEvents(ui.Events, new string[2] { "open", "close" });
+			if(!ui.IsComponent)BuildEvents(ui.Events, EventNames(Registry.ScreenEvents, true));
             else Events.Children.Add(new TextBlock {Text="Component sources have control events. Configure screen open/close on the destination screen.",TextWrapping=TextWrapping.Wrap});
 			return;
 		}
@@ -1066,9 +1085,10 @@ public partial class MainWindow : Window {
 			array = value.Properties;
 			foreach (string text4 in array)
 			{
-				Field(Properties, text4, element, text4);
+				if (!SpecialField(element, text4)) Field(Properties, text4, element, text4);
 			}
-			BuildEvents(element.Events, value.Events);
+			BuildAdvancedFields(element);
+			BuildEvents(element.Events, EventNames(value.Events, false));
 		}
         if(element.Type=="item") {var picker=new Button {Content="Browse Minecraft items"};picker.Click+=(_,_)=>ShowDock("items");Properties.Children.Add(picker);}
         BuildRowTemplateFields(element);
@@ -1106,11 +1126,18 @@ public partial class MainWindow : Window {
 		{
 			content.Children.Clear();
 			string name = (string)pick.SelectedItem;
+			// Tick and Key only ever run on the player's screen, so their Server side is locked.
+			bool clientOnly = ClientOnlyEvent(name);
+			side.IsEnabled = !clientOnly;
+			if (clientOnly && side.SelectedIndex != 0) { side.SelectedIndex = 0; return; }
 			bool server = side.SelectedIndex == 1;
 			Wysicraft.Models.EventHandler? h = ((!events.TryGetValue(name, out UiEvent? value2)) ? null : (server ? value2.Server : value2.Client));
 			content.Children.Add(new TextBlock
 			{
-				Text = (server ? "Trusted server actions. Preview simulates these." : "Runs locally for this screen."),
+				Text = name == "tick" ? (ui.TickInterval >= 50 ? $"Runs on the player's screen every {ui.TickInterval} ms (Tick interval in Screen settings)." : "Runs on the player's screen on a timer. Set a Tick interval in Screen settings to turn it on.")
+					: AdvancedEventHelp(name) is string advancedHelp ? advancedHelp
+					: name == "key" ? "Runs on the player's screen for each key press while no text box is being typed in. The script's value is the key name: a–z, 0–9, space, enter, tab, backspace, left, right, up, down, f1–f12. Escape always closes the screen."
+					: (server ? "Trusted server actions. Preview simulates these." : "Runs locally for this screen."),
 				TextWrapping = TextWrapping.Wrap,
 				Margin = new Thickness(4.0)
 			});
@@ -1172,11 +1199,16 @@ public partial class MainWindow : Window {
 						{
 							Change();
 							action.Type = type2;
+							if (type2 == "play_sound") Dispatcher.BeginInvoke(Populate); // show the sound picker
 						}
 					};
 					stackPanel.Children.Add(type);
-					Field(stackPanel, "Target / Variable", action, "Target");
-					Field(stackPanel, "Value / Command", action, "Value");
+					if (action.Type == "play_sound") SoundPicker(stackPanel, "Sound", action.Value, v => action.Value = v, "Plays when this event fires.");
+					else
+					{
+						Field(stackPanel, "Target / Variable", action, "Target");
+						Field(stackPanel, "Value / Command", action, "Value");
+					}
 					StackPanel stackPanel2 = new StackPanel
 					{
 						Orientation = Orientation.Horizontal
@@ -1307,11 +1339,20 @@ public partial class MainWindow : Window {
 		{
 			Field(stackPanel, text, clone, text);
 		}
+		// Made for: which limits and tools apply. Minecraft hides the Advanced toolbox; Web & desktop uses the larger
+		// limits without Minecraft warnings; Both allows everything and flags what Minecraft can't run.
+		var targets = new (string Key, string Label)[] { ("both", "Minecraft and web & desktop"), ("minecraft", "Minecraft only"), ("web", "Web & desktop only") };
+		var targetRow = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+		targetRow.Children.Add(new TextBlock { Text = "Made for", Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center });
+		var target = new ComboBox { ItemsSource = targets.Select(t => t.Label).ToArray(), SelectedIndex = Math.Max(0, Array.FindIndex(targets, t => t.Key == clone.Target)) };
+		target.SelectionChanged += (_, _) => clone.Target = targets[target.SelectedIndex].Key;
+		targetRow.Children.Add(target); stackPanel.Children.Add(targetRow);
+		stackPanel.Children.Add(new TextBlock { Text = "Web & desktop projects can use the Advanced toolbox and bigger screens. Minecraft exports list anything Minecraft can't run.", TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 0, 0, 8) });
 		Window window = new Window
 		{
 			Title = "Project settings",
 			Width = 490.0,
-			Height = 470.0,
+			Height = 540.0,
 			Owner = this,
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Content = stackPanel
@@ -1501,14 +1542,9 @@ public partial class MainWindow : Window {
 		case "image":
 		case "texture_region":
 		{
-			if (TextureAssets.TryGet(project, e.Texture, out byte[] bytes))
+			if (TryTexture(e.Texture, out byte[] bytes))
 			{
-				BitmapImage source = DecodeTexture(bytes);
-				frameworkElement = new Image
-				{
-					Source = source,
-					Stretch = Stretch.Fill
-				};
+				frameworkElement = e.Type == "image" ? TextureImage(e.Texture, bytes) : new Image { Source = DecodeTexture(bytes), Stretch = Stretch.Fill };
 			}
 			else
 			{
@@ -1544,6 +1580,8 @@ public partial class MainWindow : Window {
 			frameworkElement = list;
 			break;
 		}
+        case "sprite": case "shape": case "collider": case "camera": case "particles": case "tilemap":
+            frameworkElement = RenderNewControl(e); break;
         case "item":
             var icon=ItemImage(e.Item);frameworkElement=icon!=null?new Image {Source=icon,Stretch=Stretch.Uniform}:new TextBlock {Text=e.Item,Foreground=Brush(e.Foreground),TextWrapping=TextWrapping.Wrap};RenderOptions.SetBitmapScalingMode(frameworkElement,BitmapScalingMode.NearestNeighbor);break;
 		default:

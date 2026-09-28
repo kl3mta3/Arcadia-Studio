@@ -7,14 +7,15 @@ public static class ContainerTree
         while(id.Length>0) {
             if(!seen.Add(id) || seen.Count>33)throw new InvalidDataException("Container cycle or nesting exceeds 32 levels");
             var parent=screen.Elements.FirstOrDefault(e=>e.Id==id);
-            if(parent==null || parent.Type is not ("panel" or "scroll_panel"))throw new InvalidDataException("Parent must identify a panel or scroll panel");
+            if(parent==null || !IsContainer(parent))throw new InvalidDataException("Parent must identify a panel, scroll panel or camera");
             yield return parent;id=parent.Parent;
         }
     }
     public static IEnumerable<Element> Moving(UiDefinition screen,IEnumerable<string> selected) {
         var ids=selected.ToHashSet();return screen.Elements.Where(e=>ids.Contains(e.Id) || Ancestors(screen,e).Any(p=>ids.Contains(p.Id)));
     }
-    public static bool IsContainer(Element e) => e.Type is "panel" or "scroll_panel";
+    // A camera holds controls that stay in view when it moves (score, lives, menus), like a screen-fixed layer.
+    public static bool IsContainer(Element e) => e.Type is "panel" or "scroll_panel" or "camera";
     public static bool IsDescendant(UiDefinition screen,Element candidate,string ancestorId) => Ancestors(screen,candidate).Any(p=>p.Id==ancestorId);
     // Panels an element may be placed inside: never itself or anything inside it (that would be a cycle).
     public static IEnumerable<Element> ValidParents(UiDefinition screen,Element child) =>
@@ -26,7 +27,7 @@ public static class ContainerTree
         var child=screen.Elements.Single(e=>e.Id==id);
         if(parent.Length>0) {
             var panel=screen.Elements.FirstOrDefault(e=>e.Id==parent) ?? throw new InvalidOperationException("No element named "+parent);
-            if(!IsContainer(panel))throw new InvalidOperationException(parent+" is not a panel or scroll panel");
+            if(!IsContainer(panel))throw new InvalidOperationException(parent+" is not a panel, scroll panel or camera");
             if(panel.Id==child.Id || IsDescendant(screen,panel,child.Id))throw new InvalidOperationException("Can't put "+child.Id+" inside its own child "+parent);
         }
         string previous=child.Parent;child.Parent=parent;

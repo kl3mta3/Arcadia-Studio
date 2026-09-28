@@ -13,7 +13,7 @@ public partial class MainWindow
         ("Center selection horizontally on screen",ArrangeOperation.CanvasHorizontalCenter),("Center selection vertically on screen",ArrangeOperation.CanvasVerticalCenter)
     ];
     MenuItem ArrangeMenu(System.Action? selectTarget=null) {
-        var menu=new MenuItem {Header="Arrange"};
+        var menu=new MenuItem {Header="Align"};
         foreach(var (label,operation) in ArrangeChoices) {
             if(operation is ArrangeOperation.HorizontalGaps or ArrangeOperation.CanvasHorizontalCenter)menu.Items.Add(new Separator());
             var entry=new MenuItem {Header=label,Tag=operation};

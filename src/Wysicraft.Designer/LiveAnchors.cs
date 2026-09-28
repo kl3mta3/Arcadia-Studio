@@ -12,11 +12,19 @@ public partial class MainWindow
 {
     UiDefinition? resizeBase;
     static readonly Brush AnchorBrush=new SolidColorBrush(Color.FromRgb(255,170,60));
+    // Repositions the handles of whatever is currently drawn, so a move drag doesn't have to rebuild the canvas.
+    readonly List<Action> handlePlacers=[];
+    void MoveCanvasOverlays() {
+        foreach(var place in handlePlacers)place();
+        foreach(var line in Surface.Children.OfType<Line>().ToList())Surface.Children.Remove(line);
+        DrawAnchorMarkers();
+    }
 
     // Eight handles (corners and edge midpoints). Dragging a left/top handle moves that edge and keeps the opposite one fixed.
     void AddResizeHandles(Element e) {
         var handles=new List<(System.Windows.Controls.Primitives.Thumb Thumb,int X,int Y)>();
         void Place() {foreach(var (t,hx,hy) in handles){Canvas.SetLeft(t,(e.Bounds.X+e.Bounds.Width*(hx+1)/2)*Zoom-5);Canvas.SetTop(t,(e.Bounds.Y+e.Bounds.Height*(hy+1)/2)*Zoom-5);}}
+        handlePlacers.Add(Place);
         foreach(int hy in new[]{-1,0,1})foreach(int hx in new[]{-1,0,1}) {
             if(hx==0 && hy==0)continue;
             var thumb=new System.Windows.Controls.Primitives.Thumb {Width=9,Height=9,Background=Brushes.DeepSkyBlue,
@@ -69,9 +77,11 @@ public partial class MainWindow
     // Moves existing canvas borders without rebuilding the canvas, which would cancel an in-progress Thumb drag.
     void UpdateCanvasBounds(ICollection<string> ids) {
         var affected=new HashSet<string>(ids);
+        var byId=new Dictionary<string,Element>(ui.Elements.Count);
+        foreach(var e in ui.Elements)byId[e.Id]=e;
         foreach(var e in ui.Elements)if(ContainerTree.Ancestors(ui,e).Any(a=>affected.Contains(a.Id)))affected.Add(e.Id);
         foreach(var border in Surface.Children.OfType<Border>()) {
-            if(border.Tag is not string id || !affected.Contains(id) || ui.Elements.FirstOrDefault(x=>x.Id==id) is not Element e)continue;
+            if(border.Tag is not string id || !affected.Contains(id) || !byId.TryGetValue(id,out var e))continue;
             Canvas.SetLeft(border,e.Bounds.X*Zoom);Canvas.SetTop(border,e.Bounds.Y*Zoom);border.Width=e.Bounds.Width*Zoom;border.Height=e.Bounds.Height*Zoom;
             var rect=new Rect(e.Bounds.X*Zoom,e.Bounds.Y*Zoom,e.Bounds.Width*Zoom,e.Bounds.Height*Zoom);
             foreach(var a in ContainerTree.Ancestors(ui,e))rect.Intersect(new Rect(a.Bounds.X*Zoom,a.Bounds.Y*Zoom,a.Bounds.Width*Zoom,a.Bounds.Height*Zoom));

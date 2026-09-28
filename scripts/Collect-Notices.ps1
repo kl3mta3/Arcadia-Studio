@@ -29,6 +29,12 @@ foreach($framework in $assets.project.frameworks.psobject.Properties.Value) {
     }
 }
 $inventory.Add('Bundled GraalVM libraries 24.1.2: polyglot, js-language, regex, truffle-api, collections, nativeimage, word, shaded icu4j. See Graal*, Truffle* and SDK* notices. Upstream: oracle/graal and oracle/graaljs, tag vm-24.1.2.')
+Copy-Item "$repo/tools/Wysicraft.AppHost/NOTICES.txt" (Join-Path $destination 'Microsoft.Web.WebView2-NOTICES.txt') -Force
+$inventory.Add('Microsoft.Web.WebView2 SDK loader (BSD-3-Clause), linked into Runtime/WysicraftAppHost.exe and copied into exported Windows apps with its notice.')
+$inventory.Add('Basic Pitch note detection model (Spotify AB, Apache-2.0), embedded in Wysicraft.Core.dll for turning recordings into notes. See BasicPitch-LICENSE.txt.')
+$inventory.Add('Demucs v4 (htdemucs) instrument splitter (Meta Platforms, MIT), not bundled: downloaded once on request from huggingface.co/StemSplitio/htdemucs-onnx into the user''s app data folder.')
+$inventory.Add('GeneralUser GS SoundFont v2.0.3 (S. Christian Collins, GeneralUser GS License v2.0: free to use and redistribute), bundled as Designer/SoundFonts/GeneralUser GS.sf2. See GeneralUserGS-LICENSE.txt.')
+$inventory.Add('Optional SoundFonts, not bundled: downloaded on request into the user''s app data folder. FluidR3 GM (Frank Wen, MIT), FatBoy (CC BY-SA 3.0), Arachno SoundFont (Maxime Abbey, free for non-commercial use).')
 $inventory.Add('Gradle wrapper/distribution: Apache-2.0; Gradle distribution is downloaded separately by Test in Minecraft.')
 $inventory.Add('Microsoft package license expressions above use the MIT text included in the .NET LICENSE files; their additional notices are copied individually.')
 $inventory | Set-Content (Join-Path $destination 'COMPONENTS.txt')

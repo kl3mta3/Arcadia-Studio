@@ -13,6 +13,8 @@
    </Style.Triggers>
   </Style>
   <Style TargetType="Window"><Setter Property="Background" Value="#1D2025"/><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="12"/></Style>
+  <!-- Sliders jump to where they are clicked, rather than a step towards it. -->
+  <Style TargetType="Slider"><Setter Property="IsMoveToPointEnabled" Value="True"/></Style>
   <Style TargetType="TextBox"><Setter Property="Background" Value="#181B20"/><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="BorderBrush" Value="#454B56"/><Setter Property="Padding" Value="4"/><Setter Property="Margin" Value="2"/></Style>
   <!-- Standard button: soft rounded chrome in the VS dark palette. Background can be overridden (e.g. the MCP accent). -->
   <Style TargetType="Button">
@@ -24,8 +26,106 @@
    <Setter Property="Padding" Value="3,1"/><Setter Property="Margin" Value="1,0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#3A4250"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
-  <Style TargetType="ComboBox"><Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="4"/></Style>
+  <!-- Dropdowns. The system template keeps a white field whatever Background says, so a setter alone would only make
+       the text invisible; the whole template is replaced instead. It has to serve both kinds of ComboBox the editor
+       uses: plain ones, and IsEditable ones where you can type a value that is not in the list. -->
+  <Style x:Key="ComboToggle" TargetType="ToggleButton">
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="ToggleButton">
+     <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3">
+      <Path x:Name="Arrow" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0" Data="M0,0 L8,0 L4,5 Z" Fill="#9AA3B0"/>
+     </Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#6C7686"/><Setter TargetName="Arrow" Property="Fill" Value="#E2E6ED"/></Trigger>
+      <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#3794FF"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.5"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBoxItem">
+   <Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="Padding" Value="6,3"/><Setter Property="Background" Value="Transparent"/>
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="ComboBoxItem">
+     <Border x:Name="Chrome" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+      <ContentPresenter/>
+     </Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsSelected" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#2C3542"/></Trigger>
+      <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#3A4250"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBox">
+   <Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="6,3"/>
+   <Setter Property="Background" Value="#181B20"/><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="BorderBrush" Value="#454B56"/>
+   <Setter Property="MinHeight" Value="22"/>
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="ComboBox">
+     <Grid>
+      <ToggleButton Style="{StaticResource ComboToggle}" Focusable="False" ClickMode="Press"
+                    Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
+      <ContentPresenter x:Name="Selected" Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                        IsHitTestVisible="False" TextElement.Foreground="{TemplateBinding Foreground}"/>
+      <!-- Explicit values here, so the editor's global TextBox style does not repaint the typing area. -->
+      <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" VerticalAlignment="Center" Margin="4,0,22,0" Padding="0"
+               Background="Transparent" Foreground="{TemplateBinding Foreground}" CaretBrush="#E2E6ED" BorderThickness="0"/>
+      <Popup x:Name="PART_Popup" Placement="Bottom" Focusable="False" AllowsTransparency="True" PopupAnimation="Fade"
+             IsOpen="{TemplateBinding IsDropDownOpen}">
+       <Border Background="#20242B" BorderBrush="#454B56" BorderThickness="1" CornerRadius="3"
+               MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
+       </Border>
+      </Popup>
+     </Grid>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsEditable" Value="True">
+       <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+       <Setter TargetName="Selected" Property="Visibility" Value="Collapsed"/>
+      </Trigger>
+      <Trigger Property="HasItems" Value="False"><Setter TargetName="PART_Popup" Property="Height" Value="28"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
+  </Style>
+  <!-- Properties sections. The header is the heading TextBlock the builders made; the arrow says open or closed. -->
+  <Style TargetType="Expander">
+   <Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="Background" Value="Transparent"/>
+   <Setter Property="Template"><Setter.Value>
+    <ControlTemplate TargetType="Expander">
+     <StackPanel>
+      <ToggleButton x:Name="Head" IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" Content="{TemplateBinding Header}" Cursor="Hand" Focusable="False">
+       <ToggleButton.Template>
+        <ControlTemplate TargetType="ToggleButton">
+         <Border x:Name="Row" Background="Transparent" Padding="4,8,4,4" CornerRadius="3">
+          <DockPanel>
+           <Path x:Name="Arrow" DockPanel.Dock="Left" Width="10" Margin="0,0,6,0" VerticalAlignment="Center" Data="M0,0 L5,4 L0,8 Z" Fill="#9AA3B0"/>
+           <ContentPresenter VerticalAlignment="Center"/>
+          </DockPanel>
+         </Border>
+         <ControlTemplate.Triggers>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="Data" Value="M0,0 L8,0 L4,5 Z"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="#2C3542"/><Setter TargetName="Arrow" Property="Fill" Value="#E2E6ED"/></Trigger>
+         </ControlTemplate.Triggers>
+        </ControlTemplate>
+       </ToggleButton.Template>
+      </ToggleButton>
+      <ContentPresenter x:Name="Body" Visibility="Collapsed" Margin="0,0,0,2"/>
+     </StackPanel>
+     <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="True"><Setter TargetName="Body" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value></Setter>
+  </Style>
   <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="Margin" Value="4"/></Style>
+  <!-- Without this a radio button keeps the default black label, which is unreadable on the dark background. -->
+  <Style TargetType="RadioButton"><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="Margin" Value="4"/></Style>
+  <!-- A GroupBox or Label in a tool window has the same problem. -->
+  <Style TargetType="GroupBox"><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="BorderBrush" Value="#454B56"/></Style>
+  <Style TargetType="Label"><Setter Property="Foreground" Value="#E2E6ED"/></Style>
   <Style TargetType="ListBox"><Setter Property="Background" Value="#25282E"/><Setter Property="Foreground" Value="#E2E6ED"/><Setter Property="BorderBrush" Value="#454B56"/></Style>
   <Style TargetType="TabControl"><Setter Property="Background" Value="#25282E"/><Setter Property="BorderBrush" Value="#454B56"/></Style>
  </Application.Resources>

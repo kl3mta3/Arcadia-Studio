@@ -27,9 +27,12 @@
                 <ad:LayoutAnchorable ContentId="layers" Title="Layers" CanClose="False">
                   <DockPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
+                      <Button x:Name="LayerTop" ToolTip="Bring to front" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
                       <Button x:Name="LayerUp" Content="↑" ToolTip="Bring forward" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
                       <Button x:Name="LayerDown" Content="↓" ToolTip="Send backward" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
+                      <Button x:Name="LayerBottom" ToolTip="Send to back" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
                       <Button x:Name="LayerDuplicate" Content="Duplicate" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
+                      <Button x:Name="LayerNewGroup" ToolTip="New empty group" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
                     </StackPanel>
                     <ListBox x:Name="Layers" SelectionMode="Extended" BorderThickness="0" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
                   </DockPanel>

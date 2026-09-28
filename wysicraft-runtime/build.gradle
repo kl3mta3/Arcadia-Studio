@@ -2,7 +2,7 @@ plugins {
     id 'java-library'
     id 'net.neoforged.moddev' version '2.0.146'
 }
-version = '1.5.0'
+version = '1.7.0'
 group = 'com.wysicraft.runtime'
 base { archivesName = 'wysicraft' }
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)

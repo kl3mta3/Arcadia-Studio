@@ -38,6 +38,11 @@ public static class Distribution
         string metadata=$"modLoader=\"lowcodefml\"\nloaderVersion=\"[4,)\"\nlicense=\"All Rights Reserved\"\n[[mods]]\nmodId=\"{id}\"\nversion={Json.Write(project.Manifest.Version)}\ndisplayName={Json.Write(project.Manifest.Name)}\n[[dependencies.{id}]]\nmodId=\"wysicraft\"\ntype=\"required\"\nversionRange=\"[{RuntimeVersion},)\"\nordering=\"AFTER\"\nside=\"BOTH\"\n[[dependencies.{id}]]\nmodId=\"minecraft\"\ntype=\"required\"\nversionRange=\"[1.21.1]\"\nordering=\"NONE\"\nside=\"BOTH\"\n";
         var files=new Dictionary<string,byte[]> { ["META-INF/neoforge.mods.toml"]=Encoding.UTF8.GetBytes(metadata),["wysicraft/"+id+".wysicraft"]=Zip(packFiles) };
         foreach(var file in packFiles.Where(f=>f.Key.StartsWith("assets/"))) files[file.Key]=file.Value;
+        // Project sounds: Minecraft finds them through the mod's sounds.json (one entry per .ogg file).
+        foreach(var group in packFiles.Keys.Where(k=>SoundAssets.IsSound(k) && k.EndsWith(".ogg",StringComparison.OrdinalIgnoreCase)).GroupBy(k=>k.Split('/')[1])) {
+            var events=group.ToDictionary(path=>SoundAssets.Resource(path).Split(':',2)[1],path=>new { sounds=new[]{ SoundAssets.Resource(path) } });
+            files[$"assets/{group.Key}/sounds.json"]=Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(events));
+        }
         return Zip(files);
     }
     public static bool UsesKube(Project p) => p.Screens.Where(s=>!s.IsComponent).SelectMany(s=>s.Events.Values.Concat(s.Elements.SelectMany(e=>e.Events.Values))).Any(e=>e.Server.Script.Length>0 && e.Server.ScriptEngine=="kubejs");

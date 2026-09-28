@@ -1,5 +1,7 @@
 # Wysicraft
 
+**Latest:** Properties sections fold and remember; controls take **components** Unity-style (a searchable **+ Add component**, cards with a ✕ for Collider, Rigidbody, Character controller, Top-down mover, Follower and Pickup, with the script's tunable numbers editable on the card); and the MCP panel gains **Ask Assistant (Requires CLI)** — the editor can ask your own command-line AI (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, opencode, Copilot CLI or a custom command, on your subscription, no API key) to do things from Ask Agent, Draw it… and the Input creator. The MCP port and token now stay the same across restarts. See [Advanced tools](wiki/Advanced-Tools.md) and [MCP and AI assistants](wiki/MCP-and-AI-Assistants.md).
+
 **1.2:** Project JARs now bundle the runtime and assigned Standard/KubeJS scripts. No separate Wysicraft installation is needed in-game; KubeJS projects still require KubeJS/Rhino. Script dropdowns include editable `[Template]` entries and global command examples. See [1.2 release notes](docs/RELEASE-1.2.md).
 
 **Version 1.1:** single-file .wysicraftproj saving, project-scoped screens, Standard Server scripts, Item Lists, installation ZIP/JAR exports and expanded MCP tools. See [1.1 workflow notes](docs/RELEASE-1.1.md).
@@ -8,10 +10,11 @@ A Windows visual GUI designer and portable NeoForge runtime for Minecraft Java E
 
 Wysicraft is intended for modpack authors and addon developers building menus, dashboards and control panels. Create and Create Aeronautics can be integrated through their documented commands or addon actions; neither mod is required.
 
+![Actual WPF designer displaying the Airship sample](docs/designer.png)
 
 ## Build and launch
 
-The designer includes a local MCP server. Click **Start MCP server** in the toolbar and copy its connection configuration into a local MCP client to inspect and edit the open project. See [MCP setup and tools](docs/MCP.md).
+The designer includes a local MCP server. Click **Start MCP server** in the toolbar and copy its connection configuration into a local MCP client to inspect and edit the open project. The same panel's **Ask Assistant** row lets the editor send work to your own AI CLI. See [MCP setup and tools](docs/MCP.md).
 
 Requirements: Windows, .NET SDK 8 or newer, Java **21**, and internet access for the first Gradle dependency download.
 
@@ -145,9 +148,9 @@ Appearance controls include full-bound label backgrounds, optional fills, border
 
 In **Screen settings** (the screen rename dialog), check **Main screen** and save. This replaces the previous main screen. Renaming a screen also updates built-in `open_ui` action references. Each loaded project's lowercase **Id** automatically supplies two commands:
 
-- `/project_name.open` opens that project's Main screen for the executing player.
-- `/project_name.close` closes that project's current interface for the executing player.
-- `/project_name.open <player>` and `/project_name.close <player>` target a player from a server/block script or console (permission level 2).
+- `/airship_controls.open` opens that project's Main screen for the executing player.
+- `/airship_controls.close` closes that project's current interface for the executing player.
+- `/airship_controls.open <player>` and `/airship_controls.close <player>` target a player from a server/block script or console (permission level 2).
 
 Use `/wysicraft reload` after replacing or adding packs. Existing aliases resolve the latest Main screen; newly loaded projects get aliases immediately. Removed project aliases reject calls until the command tree is rebuilt or the server restarts. Conflicting command names are logged and never replace another mod's command. Screen IDs still need to be unique across installed packs.
 

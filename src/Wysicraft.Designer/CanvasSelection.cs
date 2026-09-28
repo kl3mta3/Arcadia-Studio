@@ -39,6 +39,11 @@ public partial class MainWindow
         bool twice=args.ClickCount==2 || (group.Length>0 && lastCanvasGroup==group && now-lastCanvasClick<500 && (point-lastCanvasPoint).Length<5);
         lastCanvasGroup=group;lastCanvasClick=now;lastCanvasPoint=point;
         if(twice && group.Length>0 && Keyboard.Modifiers==ModifierKeys.None){IsolateGroup(group);args.Handled=true;return;}
+        // Double-clicking a polygon collider opens its outline editor.
+        // Double-clicking a sprite opens its sprite sheet editor.
+        if(args.ClickCount==2 && group.Length==0 && element.Type=="tilemap" && Keyboard.Modifiers==ModifierKeys.None){selected.Clear();selected.Add(element.Id);args.Handled=true;Dispatcher.BeginInvoke(()=>Guard(()=>ShowTilemapEditor(element)));return;}
+        if(args.ClickCount==2 && group.Length==0 && element.Type=="sprite" && Keyboard.Modifiers==ModifierKeys.None){selected.Clear();selected.Add(element.Id);args.Handled=true;Dispatcher.BeginInvoke(()=>Guard(()=>ShowSpriteSheetEditor(element)));return;}
+        if(args.ClickCount==2 && group.Length==0 && element.Collider=="polygon" && (element.Type=="collider" || element.Body.Length>0) && Keyboard.Modifiers==ModifierKeys.None){selected.Clear();selected.Add(element.Id);args.Handled=true;Dispatcher.BeginInvoke(()=>Guard(()=>ShowColliderEditor(element)));return;}
         if(isolatedGroup.Length>0 && element.Type is "panel" or "scroll_panel" && ui.Elements.Any(e=>e.Parent==element.Id) && !selected.Contains(element.Id) && Keyboard.Modifiers==ModifierKeys.None){BeginMarquee(point,Keyboard.Modifiers);args.Handled=true;return;}
         PrepareElementDrag(element.Id,Keyboard.Modifiers,point);Surface.CaptureMouse();Surface.Focus();Draw();RefreshInspector();args.Handled=true;
     }
@@ -55,6 +60,7 @@ public partial class MainWindow
     }
     void UpdateMarquee(Point point) {
         if(marqueeStart is not Point start)return;marqueeEnd=point;var rectangle=new Rect(start,point);
+        var before=new HashSet<string>(selected);
         selected.Clear();selected.UnionWith(marqueeBase);
         if(rectangle.Width>=SystemParameters.MinimumHorizontalDragDistance || rectangle.Height>=SystemParameters.MinimumVerticalDragDistance)
             foreach(var e in ui.Elements.Where(e=>e.Visible&&!e.Locked&&InIsolation(e))) {
@@ -64,12 +70,19 @@ public partial class MainWindow
                 if(bounds.IsEmpty || !rectangle.IntersectsWith(bounds) || bounds.Contains(rectangle))continue;
                 var group=CanvasGroup(e);if(group.Length==0)selected.Add(e.Id);else selected.UnionWith(ui.Elements.Where(c=>InIsolation(c)&&!c.Locked&&LayerGroups.Contains(ui,group,c.LayerGroup)).Select(c=>c.Id));
             }
+        // Dragging the box only resizes it until it actually picks something up or drops it.
+        if(selected.SetEquals(before) && marqueeBox!=null){PlaceMarquee(marqueeBox,new Rect(start,point));return;}
         Draw();RefreshInspector();
     }
+    System.Windows.Shapes.Rectangle? marqueeBox;
+    static void PlaceMarquee(System.Windows.Shapes.Rectangle box,Rect rect) {
+        box.Width=rect.Width;box.Height=rect.Height;Canvas.SetLeft(box,rect.X);Canvas.SetTop(box,rect.Y);
+    }
     void DrawMarquee() {
-        if(marqueeStart is not Point start || marqueeEnd is not Point end)return;var rect=new Rect(start,end);
-        var box=new System.Windows.Shapes.Rectangle {Width=rect.Width,Height=rect.Height,Stroke=Brushes.DeepSkyBlue,StrokeThickness=1,Fill=new SolidColorBrush(Color.FromArgb(35,0,191,255)),IsHitTestVisible=false};
-        Canvas.SetLeft(box,rect.X);Canvas.SetTop(box,rect.Y);Panel.SetZIndex(box,2000);Surface.Children.Add(box);
+        marqueeBox=null;
+        if(marqueeStart is not Point start || marqueeEnd is not Point end)return;
+        var box=new System.Windows.Shapes.Rectangle {Stroke=Brushes.DeepSkyBlue,StrokeThickness=1,Fill=new SolidColorBrush(Color.FromArgb(35,0,191,255)),IsHitTestVisible=false};
+        PlaceMarquee(box,new Rect(start,end));Panel.SetZIndex(box,2000);Surface.Children.Add(box);marqueeBox=box;
     }
     void EndCanvasGesture() {dragBounds=null;dragChanged=false;marqueeStart=marqueeEnd=null;marqueeBase.Clear();if(Surface.IsMouseCaptured)Surface.ReleaseMouseCapture();}
     void CanvasBackgroundDown(MouseButtonEventArgs e) {
@@ -95,6 +108,13 @@ public partial class MainWindow
         if(isolatedGroup!="Group")throw new Exception("Double-click did not isolate group: "+clickDebug);
         SelectCanvasElement("a",ModifierKeys.None);if(selected.Count!=1)throw new Exception("Isolation selected the whole group");
         Draw();if(Surface.Children.OfType<Border>().Single(b=>Equals(b.Tag,"outside")).IsHitTestVisible)throw new Exception("Outside objects aren't locked");
+        // Canvas menus are filled when opened, not on every redraw: opening one twice must still list its actions once.
+        var menuBorder=Surface.Children.OfType<Border>().First(b=>Equals(b.Tag,"a"));
+        var canvasMenu=menuBorder.ContextMenu ?? throw new Exception("Canvas item has no context menu");
+        if(canvasMenu.Items.Count!=0)throw new Exception("Canvas menu was built before it was opened");
+        canvasMenu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));int opened=canvasMenu.Items.Count;
+        canvasMenu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+        if(opened==0 || canvasMenu.Items.Count!=opened)throw new Exception($"Canvas menu fill on open failed: {opened} then {canvasMenu.Items.Count}");
         BeginMarquee(new Point(0,0),ModifierKeys.None);UpdateMarquee(new Point(230,70));EndCanvasGesture();
         if(!selected.SetEquals(new[]{"a","b"}))throw new Exception("Isolation marquee selected outside objects");
         ExitIsolation();BeginMarquee(new Point(170,0),ModifierKeys.None);UpdateMarquee(new Point(230,70));EndCanvasGesture();
@@ -106,7 +126,7 @@ public partial class MainWindow
         var source=ComponentStarters.Add(project,"window_header");RefreshAll();if(Screens.Items.Cast<string>().Contains(source.Id))throw new Exception("Component is in screen dropdown");
         OpenComponentSource(source.Id);if(ComponentSourceBar.Visibility!=Visibility.Visible)throw new Exception("Source editing context missing");BackToScreen(this,new RoutedEventArgs());
         OpenComponentSource(source.Id);Screens.SelectedItem="main";
-        if(ui.IsComponent || ComponentSourceBar.Visibility!=Visibility.Collapsed ||Properties.Children.OfType<TextBlock>().Any(t=>t.Text.StartsWith("COMPONENT SOURCE")))throw new Exception("Leaving component source through the dropdown left stale source context");
+        if(ui.IsComponent || ComponentSourceBar.Visibility!=Visibility.Collapsed ||InspectorItems().OfType<TextBlock>().Any(t=>t.Text.StartsWith("COMPONENT SOURCE")))throw new Exception("Leaving component source through the dropdown left stale source context");
         project.Screens.Add(new(){Id="second",Events=new(){["open"]=new(){Client=new(){Actions=[new(){Type="open_ui",Value="main"}]}}}});
         DeleteScreenTo("second");if(project.Manifest.DefaultUi!="second" || ui.Events["open"].Client.Actions[0].Value!="second")throw new Exception("Screen deletion did not redirect links/main");history.Undo();if(!project.Screens.Any(s=>s.Id=="main"))throw new Exception("Screen deletion undo failed");
         dirty=false;System.IO.File.WriteAllText(output,"PASS: individual member movement/undo, isolation locking, scoped/additive marquee, component-screen separation, dropdown exit from source editing, deletion redirects and undo");Application.Current.Shutdown();

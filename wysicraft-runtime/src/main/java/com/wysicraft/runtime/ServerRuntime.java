@@ -78,8 +78,8 @@ public final class ServerRuntime {
             close(player,false); Session session = new Session(ui); sessions.put(player.getUUID(),session);
             // Only presentation/client actions leave the server. Server code and commands stay on the host.
             Ui client = ui.copy(); client.events.values().forEach(e -> e.server = new Handler()); client.elements.forEach(e -> e.events.values().forEach(v -> v.server = new Handler()));
-            String json = Models.JSON.toJson(client); if (json.length() > 200000) throw new IllegalArgumentException("UI exceeds network size limit");
-            PacketDistributor.sendToPlayer(player,new Payloads.OpenUi(session.token,json));
+            byte[] data = com.wysicraft.runtime.network.UiCompression.pack(Models.JSON.toJson(client));
+            PacketDistributor.sendToPlayer(player,new Payloads.OpenUi(session.token,data));
             Event ev = ui.events.get("open"); if (ev != null) { mirror(session,ev.client); execute(player,session,ev.server); if (sessions.get(player.getUUID()) == session) navigate(player,ev.client); }
         } catch (Exception ex) { sessions.remove(player.getUUID()); Wysicraft.LOG.warn("Open UI {} failed: {}",id,ex.toString()); }
         finally { depth--; }

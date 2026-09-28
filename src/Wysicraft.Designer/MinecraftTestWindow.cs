@@ -19,6 +19,7 @@ public partial class MainWindow
     {
         if (minecraftTest != null) { minecraftTest.Activate(); return; }
         SaveScriptText();
+        if (!MinecraftExportAllowed("Testing in Minecraft")) return;
         minecraftTest = new MinecraftTestWindow(this, () => { SaveScriptText(); return Json.CloneProject(project); }, RuntimeJar);
         minecraftTest.Closed += (_, _) => minecraftTest = null;
         minecraftTest.Show();

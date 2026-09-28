@@ -16,6 +16,8 @@ public final class Scripts {
         void message(String text);
         default String elementId() { return ""; }
         default String value() { return ""; }
+        // True when a screen Key event comes from a key being held down (auto-repeat) rather than a fresh press.
+        default boolean repeat() { return false; }
         default String text(String id) { return ""; }
         default String query(String operation, String argument) { throw new UnsupportedOperationException(operation); }
         default void action(String type, String target, String value) { throw new UnsupportedOperationException(type); }
@@ -28,7 +30,7 @@ public final class Scripts {
         try {
             String path = com.wysicraft.runtime.pack.PackRepository.safePath(handler.script);
             if (!path.startsWith("scripts/" + side.name().toLowerCase(java.util.Locale.ROOT) + "/")) throw new SecurityException("Wrong script side");
-            byte[] source = pack.files().get(path); if (source == null || source.length > 65536) throw new IllegalArgumentException("Missing/oversized script");
+            byte[] source = pack.files().get(path); if (source == null || source.length > ClientJavaScript.MAX_SCRIPT_BYTES) throw new IllegalArgumentException("Missing/oversized script");
             Provider executor = provider != null ? provider : ClientJavaScript.INSTANCE;
             executor.execute(side, new String(source, StandardCharsets.UTF_8), handler.function, context);
         } catch (Exception | LinkageError ex) { errors.accept(handler.script + ": " + ex.getMessage()); }

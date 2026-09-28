@@ -12,7 +12,7 @@ import java.util.zip.*;
 
 public final class PackRepository {
     public static final int MAX_FILE = 32 * 1024 * 1024, MAX_PACK = 256 * 1024 * 1024;
-    public static final Set<String> CONTROLS = new HashSet<>(List.of("button","label","image","textbox","checkbox","slider","progress","dropdown","panel","scroll_panel","item","item_list","texture_region"));
+    public static final Set<String> CONTROLS = new HashSet<>(List.of("button","label","image","textbox","checkbox","slider","progress","dropdown","panel","scroll_panel","item","item_list","texture_region","sprite","shape","sound"));
     public static final Set<String> CLIENT_ACTIONS = new HashSet<>(List.of("set_text","set_visible","set_enabled","set_value","open_ui","close_ui","play_sound","set_variable","toggle_variable","message","change_texture"));
     public static final Set<String> SERVER_ACTIONS = new HashSet<>(List.of("command","message","set_variable","toggle_variable","open_ui","close_ui","server_function","player_inventory"));
     /** This runtime's version, stamped from build.gradle at build time; packs may require at most this version. */
@@ -117,7 +117,7 @@ public final class PackRepository {
     public static void require(boolean value, String message) { if (!value) throw new IllegalArgumentException(message); }
     public static Set<String> events(String type) {
         Set<String> result = new HashSet<>(List.of("hover", "mouse_enter", "mouse_leave"));
-        switch (type) { case "button" -> result.add("click"); case "item_list" -> result.addAll(List.of("item_click","item_primary","item_secondary")); case "textbox" -> result.addAll(List.of("text_changed","submit")); case "checkbox" -> result.addAll(List.of("checked","unchecked")); case "slider", "dropdown" -> result.add("value_changed"); }
+        switch (type) { case "button" -> result.add("click"); case "item_list" -> result.addAll(List.of("item_click","item_primary","item_secondary")); case "textbox" -> result.addAll(List.of("text_changed","submit")); case "checkbox" -> result.addAll(List.of("checked","unchecked")); case "slider", "dropdown" -> result.add("value_changed"); case "shape" -> result.add("click"); }
         return result;
     }
     private static void validate(Ui ui, Manifest manifest, Map<String,Ui> screens, Map<String,byte[]> files) {
@@ -144,7 +144,11 @@ public final class PackRepository {
             if(!e.rowElements.isEmpty()) { require(e.type.equals("item_list"),"Row template requires Item List"); com.wysicraft.runtime.model.RowTemplates.check(e); var row=com.wysicraft.runtime.model.RowTemplates.layout(e); validate(row,manifest,screens,files,true); }
             validateEvents(e.events, events(e.type), location, ui, screens, files);
         }
-        validateEvents(ui.events, Set.of("open","close"), ui.id + ": ", ui, screens, files);
+        validateEvents(ui.events, Set.of("open","close","tick","key"), ui.id + ": ", ui, screens, files);
+        require(ui.tickInterval == 0 || (ui.tickInterval >= 50 && ui.tickInterval <= 60000), ui.id + ": tick interval must be 0 or 50-60000 ms");
+        require(ui.keyRepeat == 0 || (ui.keyRepeat >= 50 && ui.keyRepeat <= 2000), ui.id + ": key repeat must be 0 or 50-2000 ms");
+        // Tick and Key are client-only screen events: the server never receives them, so server handlers would never run.
+        for (String clientOnly : List.of("tick","key")) { Event ev = ui.events.get(clientOnly); if (ev != null) require(ev.server.actions.isEmpty() && ev.server.script.isEmpty(), ui.id + ": " + clientOnly + " event runs on the client only"); }
     }
     private static void validateEvents(Map<String,Event> events, Set<String> allowed, String location, Ui ui, Map<String,Ui> screens, Map<String,byte[]> files) {
         for (var entry : events.entrySet()) {
@@ -161,7 +165,7 @@ public final class PackRepository {
                     if (a.type.equals("open_ui")) require(screens.containsKey(a.value), location + "missing UI " + a.value);
                     if (a.type.equals("set_variable") || a.type.equals("toggle_variable")) require(variable(a.target), location + "invalid variable");
                 }
-                if (!h.script.isEmpty() || !h.function.isEmpty()) { safePath(h.script); require(h.script.startsWith("scripts/" + (server ? "server/" : "client/")) && files.containsKey(h.script), location + "missing/wrong-side script"); require(files.get(h.script).length <= 65536, location + "script exceeds 64 KiB"); require(h.function.matches("[a-zA-Z_][a-zA-Z0-9_]*"), location + "invalid function"); }
+                if (!h.script.isEmpty() || !h.function.isEmpty()) { safePath(h.script); require(h.script.startsWith("scripts/" + (server ? "server/" : "client/")) && files.containsKey(h.script), location + "missing/wrong-side script"); require(files.get(h.script).length <= com.wysicraft.runtime.api.ClientJavaScript.MAX_SCRIPT_BYTES, location + "script exceeds " + com.wysicraft.runtime.api.ClientJavaScript.MAX_SCRIPT_BYTES / 1024 + " KiB"); require(h.function.matches("[a-zA-Z_][a-zA-Z0-9_]*"), location + "invalid function"); }
             }
         }
     }

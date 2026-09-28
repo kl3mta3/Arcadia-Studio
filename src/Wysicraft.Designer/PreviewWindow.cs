@@ -1,300 +1,298 @@
 using System.Globalization;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
-using Wysicraft.Models;
+using System.Windows.Media.Imaging;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using Wysicraft.Core;
-using Element = Wysicraft.Models.Element;
-using Handler = Wysicraft.Models.EventHandler;
+using Wysicraft.Models;
+using Wysicraft.Packaging;
 using Validation = Wysicraft.Core.Validation;
 namespace Wysicraft.Designer;
 
+// Preview runs the project on the web runtime (wysicraft-web.js) in WebView2: the same engine as web, Windows and
+// Electron exports, and a close match for the Minecraft runtime. Minecraft textures and item icons come from the
+// player's own game files and are only ever used here, never exported.
 public partial class MainWindow
 {
+    static Task<CoreWebView2Environment>? previewEnvironment;
+    // Games play sound from the start (a title theme), as they would in the desktop app, rather than waiting for a click.
+    static Task<CoreWebView2Environment> PreviewEnvironment() => previewEnvironment ??= CoreWebView2Environment.CreateAsync(null,
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "PreviewWebView2"),
+        new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
+
     void Preview()
     {
-        SaveScriptText(); if (Validation.Check(project).Count > 0) { Validate(); return; }
-        activePreview?.Window.Close(); activePreview=new PreviewSession(this,Json.CloneProject(project),ui.Id);previewRevision=Revision();activePreview.Window.Show();
+        SaveScriptText(); if (Validation.Errors(project).Count > 0) { Validate(); return; }
+        activePreview?.Window.Close(); activePreview = new PreviewSession(this, Json.CloneProject(project), ui.Id); previewRevision = Revision(); activePreview.Window.Show();
     }
+
+    // Minecraft textures (and their animations) and item icons the project uses, from the loaded game JAR.
+    Dictionary<string, byte[]> PreviewMinecraftFiles(Project p)
+    {
+        var files = new Dictionary<string, byte[]>();
+        IEnumerable<Element> All(IEnumerable<Element> elements) => elements.SelectMany(e => new[] { e }.Concat(All(e.RowElements)));
+        var screens = p.Screens.ToList(); var elements = screens.SelectMany(s => All(s.Elements)).ToList();
+        var actions = screens.SelectMany(s => s.Events.Values.Concat(s.Elements.SelectMany(e => e.Events.Values))).SelectMany(ev => ev.Client.Actions.Concat(ev.Server.Actions)).ToList();
+        var textures = elements.Select(e => e.Texture).Concat(actions.Where(a => a.Type == "change_texture").Select(a => a.Value)).Where(t => t.Contains(':') && !t.StartsWith(p.Manifest.Id + ":")).Distinct();
+        foreach (var resource in textures)
+        {
+            if (!Validation.Resource(resource) || !TryTexture(resource, out var png)) continue;
+            string path = "assets/" + resource.Replace(':', '/'); files[path] = png;
+            try { if (minecraftAssets.TextureMeta(resource) is string meta) files[path + ".mcmeta"] = System.Text.Encoding.UTF8.GetBytes(meta); } catch { }
+        }
+        var items = elements.Where(e => e.Type == "item").Select(e => e.Item)
+            .Concat(elements.Where(e => e.Type == "item_list").SelectMany(e => { try { return ItemRows.Parse(e.Value).Select(r => r.Item); } catch { return []; } }))
+            .Concat(actions.Where(a => a.Type == "set_item").Select(a => a.Value)).Where(Validation.Resource).Distinct();
+        foreach (var item in items)
+        {
+            if (ItemImage(item) is not BitmapSource icon) continue;
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(icon)); using var stream = new MemoryStream(); encoder.Save(stream);
+            var parts = item.Split(':', 2); files.TryAdd($"assets/{parts[0]}/textures/item/{parts[1]}.png", stream.ToArray());
+        }
+        return files;
+    }
+
     sealed class PreviewSession
     {
-        internal async Task WaitReady() { while(busy || pending.Count>0) await Task.Delay(20); }
-        internal string Snapshot() => Json.Write(new { screen=screen.Id,variables=state,elements=screen.Elements,logs=output.Text.Length>12000?output.Text[^12000..]:output.Text });
-        internal async Task RunMcpEvent(string id,string eventName,string value) {
-            await WaitReady();
-            var events=id.Length==0?screen.Events:screen.Elements.Single(e=>e.Id==id).Events;
-            if(!events.ContainsKey(eventName))throw new InvalidOperationException("No assigned event: "+id+"."+eventName);
-            if(id.Length>0) {
-                var target=screen.Elements.Single(e=>e.Id==id);
-                if(target.Type=="checkbox" && eventName is "checked" or "unchecked") target.Value=value=eventName=="checked"?"true":"false";
-                else if(eventName=="value_changed") {
-                    if(target.Type=="slider" && (!double.TryParse(value,CultureInfo.InvariantCulture,out double number) || !double.IsFinite(number) || number<target.Minimum || number>target.Maximum))throw new InvalidOperationException("Slider value is outside its range.");
-                    if(target.Type=="dropdown" && (!int.TryParse(value,out int index) || index<0 || index>=target.Options.Count))throw new InvalidOperationException("Dropdown index is outside its options.");
-                    target.Value=value;
-                }
-                else if(target.Type=="textbox" && eventName is "text_changed" or "submit") target.Value=value;
-                Refresh();
-            }
-            Enqueue(id,eventName,value);await WaitReady();
-        }
-        internal void CaptureCanvas(string path) {
-            Window.UpdateLayout();var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)canvas.Width,(int)canvas.Height,96,96,PixelFormats.Pbgra32);bitmap.Render(canvas);
-            var png=new System.Windows.Media.Imaging.PngBitmapEncoder();png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using var stream=System.IO.File.Create(path);png.Save(stream);
-        }
+        const string Host = "preview.wysicraft";
         readonly MainWindow designer;
         readonly Project project;
-        readonly string initialUi;
-        UiDefinition screen;
-        Dictionary<string, string> state;
-        readonly Canvas canvas = new() { Background = new SolidColorBrush(Color.FromRgb(36, 40, 48)) };
+        readonly string initialUi, folder;
+        readonly WebView2 view = new();
         readonly TextBox output = new() { IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, TextWrapping = TextWrapping.Wrap };
         readonly TextBox code = new() { AcceptsReturn = true, AcceptsTab = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Text = "console.log('Hello from the preview!');\n// ui.setText('status', 'It works!');" };
-        readonly Dictionary<string, (FrameworkElement Control, Element Display)> controls = [];
-        readonly Dictionary<string, double> scrollOffsets = [];
-        readonly Queue<(string Element, string Event, string Value)> pending = new();
-        int? viewportWidth, viewportHeight;
-        bool syncing, busy, closed; int navigationDepth;
-        Task? closing;
+        readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool closed; Task? closing;
         public Window Window { get; }
         public PreviewSession(MainWindow designer, Project project, string id)
         {
-            this.designer = designer; this.project = project; initialUi = id; screen = Json.Clone(project.Screens.First(s => s.Id == id)); state = new(screen.Variables);
-            Window = new Window { Title = "Wysicraft • Interactive Preview", Owner = designer, Width = Math.Max(760, screen.Size.Width * Zoom + 40), Height = Math.Max(650, screen.Size.Height * Zoom + 320), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            this.designer = designer; this.project = project; initialUi = id;
+            folder = Path.Combine(Path.GetTempPath(), "Wysicraft", "Preview", Guid.NewGuid().ToString("N"));
+            var screen = project.Screens.First(s => s.Id == id);
+            Window = new Window { Title = "Wysicraft • Interactive Preview", Owner = designer, Width = Math.Max(760, screen.Size.Width * 2 + 60), Height = Math.Max(650, screen.Size.Height * 2 + 330), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var layout = new DockPanel(); Window.Content = layout;
             var tools = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(tools, Dock.Top); layout.Children.Add(tools);
-            var reset = new Button { Content = "Reset preview" }; reset.Click += (_, _) => { if (busy) return; Open(initialUi); }; tools.Children.Add(reset);
+            var reset = new Button { Content = "Reset preview" }; reset.Click += (_, _) => { if (view.CoreWebView2 != null) { output.Clear(); Print("RESET", "Starting again from " + initialUi); view.CoreWebView2.Reload(); } }; tools.Children.Add(reset);
             var clear = new Button { Content = "Clear console" }; clear.Click += (_, _) => output.Clear(); tools.Children.Add(clear);
-            tools.Children.Add(new TextBlock { Text = "Click controls to test • Server operations are simulated", Margin = new Thickness(12, 6, 4, 6), VerticalAlignment = VerticalAlignment.Center });
-            var sizes = new StackPanel { Orientation=Orientation.Horizontal }; DockPanel.SetDock(sizes,Dock.Top);layout.Children.Add(sizes);
-            sizes.Children.Add(new TextBlock {Text="Layout size (GUI pixels)",Margin=new Thickness(6)});
-            var vw=new TextBox {Text=screen.Size.Width.ToString(),Width=60};var vh=new TextBox {Text=screen.Size.Height.ToString(),Width=60};sizes.Children.Add(vw);sizes.Children.Add(vh);
-            var resize=new Button {Content="Apply size"};sizes.Children.Add(resize);
-            resize.Click+=(_,_)=>{if(busy)return;if(!int.TryParse(vw.Text,out int w)||!int.TryParse(vh.Text,out int h)||w<16||h<16||w>4096||h>4096){Print("LAYOUT","Use sizes from 16 to 4096.");return;}viewportWidth=w;viewportHeight=h;Render();Print("LAYOUT",screen.Responsive?$"Responsive layout: {w} × {h}":"This screen uses a fixed layout. Enable Responsive layout in screen settings to resize controls.");};
-            var bottom = new Grid { Height = 235 }; bottom.ColumnDefinitions.Add(new ColumnDefinition()); bottom.ColumnDefinitions.Add(new ColumnDefinition()); DockPanel.SetDock(bottom, Dock.Bottom); layout.Children.Add(bottom);
-            var consolePanel = new DockPanel(); consolePanel.Children.Add(Header("CONSOLE • clicks, actions and script output")); consolePanel.Children.Add(output); bottom.Children.Add(consolePanel);
-            var scriptPanel = new DockPanel(); Grid.SetColumn(scriptPanel, 1); bottom.Children.Add(scriptPanel); scriptPanel.Children.Add(Header("JAVASCRIPT • preview scratchpad"));
-            var run = new Button { Content = "Run JavaScript", HorizontalAlignment = HorizontalAlignment.Right }; DockPanel.SetDock(run, Dock.Bottom); scriptPanel.Children.Add(run); scriptPanel.Children.Add(code);
-            run.Click += async (_, _) => { if (busy) { Print("BUSY", "Wait for the current event."); return; } busy = true; try { await Script(code.Text, "", "", "", false); } finally { busy = false; Pump(); } };
-            var scroll = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = canvas }; layout.Children.Add(scroll);
-            canvas.PreviewMouseWheel += (_, args) => {
-                var point = args.GetPosition(canvas);
-                bool Hit(Element e) => point.X>=e.Bounds.X*Zoom && point.X<(e.Bounds.X+e.Bounds.Width)*Zoom && point.Y>=ContainerTree.Top(screen,e,scrollOffsets)*Zoom && point.Y<(ContainerTree.Top(screen,e,scrollOffsets)+e.Bounds.Height)*Zoom;
-                var panels=screen.Elements.AsEnumerable().Reverse().Where(e=>e.Type is "scroll_panel" or "item_list" && e.Visible && e.Enabled && Expressions.Evaluate(e.VisibleIf,state) && Expressions.Evaluate(e.EnabledIf,state) && Hit(e) && ContainerTree.Ancestors(screen,e).All(p=>p.Visible && p.Enabled && Expressions.Evaluate(p.VisibleIf,state) && Expressions.Evaluate(p.EnabledIf,state) && Hit(p))).OrderByDescending(e=>ContainerTree.Ancestors(screen,e).Count());
-                foreach(var panel in panels) {
-                    if(panel.Type=="item_list" && controls.TryGetValue(panel.Id,out var pair)) {
-                        var queue=new Queue<DependencyObject>();queue.Enqueue(pair.Control);ScrollViewer? viewer=null;
-                        while(queue.Count>0) {var node=queue.Dequeue();if(node is ScrollViewer found){viewer=found;break;}for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)queue.Enqueue(VisualTreeHelper.GetChild(node,i));}
-                        if(viewer==null)continue;double next=Math.Clamp(viewer.VerticalOffset-args.Delta/120d*24*Zoom,0,viewer.ScrollableHeight);
-                        if(next==viewer.VerticalOffset)continue;viewer.ScrollToVerticalOffset(next);args.Handled=true;return;
-                    }
-                    double bottom=screen.Elements.Where(e=>e.Parent==panel.Id && e.Visible).Select(e=>e.Bounds.Y+e.Bounds.Height).DefaultIfEmpty(panel.Bounds.Y+panel.Bounds.Height).Max();
-                    double offset=Math.Clamp(scrollOffsets.GetValueOrDefault(panel.Id)-args.Delta/120d*20,0,Math.Max(0,bottom-panel.Bounds.Y-panel.Bounds.Height));
-                    if(offset==scrollOffsets.GetValueOrDefault(panel.Id))continue;scrollOffsets[panel.Id]=offset;args.Handled=true;Refresh();return;
-                }
+            // Collider outlines are a Preview aid (apps never draw them); the runtime reads this setting every frame.
+            var colliders = new CheckBox { Content = "Show colliders", IsChecked = true, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Outline physics colliders. They're never drawn in exported apps." };
+            colliders.Click += async (_, _) => await Script($"window.wysicraftHost.showColliders = {(colliders.IsChecked == true ? "true" : "false")}; 0");
+            tools.Children.Add(colliders);
+            tools.Children.Add(new TextBlock { Text = "Click controls and use the keyboard to test • Server operations are simulated", Margin = new Thickness(12, 6, 4, 6), VerticalAlignment = VerticalAlignment.Center });
+            var sizes = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(sizes, Dock.Top); layout.Children.Add(sizes);
+            sizes.Children.Add(new TextBlock { Text = "Layout size (GUI pixels)", Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center });
+            var vw = new TextBox { Text = screen.Size.Width.ToString(), Width = 60 }; var vh = new TextBox { Text = screen.Size.Height.ToString(), Width = 60 }; sizes.Children.Add(vw); sizes.Children.Add(vh);
+            var resize = new Button { Content = "Apply size" }; sizes.Children.Add(resize);
+            var fit = new Button { Content = "Fit window" }; sizes.Children.Add(fit);
+            resize.Click += async (_, _) => {
+                if (!int.TryParse(vw.Text, out int w) || !int.TryParse(vh.Text, out int h) || w < 16 || h < 16 || w > 16384 || h > 16384) { Print("LAYOUT", "Use sizes from 16 to 16384."); return; }
+                await Script($"Wysicraft.app.setViewport({w},{h})"); Print("LAYOUT", project.Screens.Any(s => s.Responsive) ? $"Laid out for {w} × {h}." : "This screen uses a fixed layout. Enable Responsive layout in screen settings to resize controls.");
             };
+            fit.Click += async (_, _) => { await Script("Wysicraft.app.setViewport(0,0)"); Print("LAYOUT", "Laid out for the preview window."); };
+            var bottom = new Grid { Height = 235 }; bottom.ColumnDefinitions.Add(new ColumnDefinition()); bottom.ColumnDefinitions.Add(new ColumnDefinition()); DockPanel.SetDock(bottom, Dock.Bottom); layout.Children.Add(bottom);
+            var consolePanel = new DockPanel(); consolePanel.Children.Add(Header("CONSOLE • events, actions and script output")); consolePanel.Children.Add(output); bottom.Children.Add(consolePanel);
+            var scriptPanel = new DockPanel(); Grid.SetColumn(scriptPanel, 1); bottom.Children.Add(scriptPanel); scriptPanel.Children.Add(Header("JAVASCRIPT • runs like a client script on this screen"));
+            var run = new Button { Content = "Run JavaScript", HorizontalAlignment = HorizontalAlignment.Right }; DockPanel.SetDock(run, Dock.Bottom); scriptPanel.Children.Add(run); scriptPanel.Children.Add(code);
+            run.Click += async (_, _) => { await ready.Task; await Script("Wysicraft.app.runScript(" + JsonSerializer.Serialize(code.Text) + ")"); };
+            view.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D);
+            layout.Children.Add(view);
             Window.Closing += (_, args) => { if (!closed) { args.Cancel = true; closing ??= CloseAsync(); } };
-            Window.Closed += (_, _) => { closed = true; pending.Clear(); };
-            Render(); Print("READY", "Buttons are live. Every click is logged, even without an assigned action.");
-            Print("SCRIPTS", "Standard scripts run in the bundled Minecraft engine. Server operations here are simulated.");
-            Enqueue("", "open", "");
+            Window.Closed += (_, _) => { closed = true; view.Dispose(); try { Directory.Delete(folder, true); } catch { } };
+            Window.Loaded += async (_, _) => await StartAsync();
         }
         static TextBlock Header(string title) { var label = new TextBlock { Text = title, Margin = new Thickness(6), Foreground = Brushes.LightSkyBlue, FontSize = 11 }; DockPanel.SetDock(label, Dock.Top); return label; }
         void Print(string category, string text)
         {
+            if (closed) return;
             if (output.Text.Length > 100000) output.Text = output.Text[^50000..];
             output.AppendText($"[{category}] {text}\n"); output.ScrollToEnd();
         }
-        void Render()
+        async Task StartAsync()
         {
-            var design=project.Screens.First(s=>s.Id==screen.Id);
-            ResponsiveLayout.Apply(screen,design,viewportWidth??design.Size.Width,viewportHeight??design.Size.Height);
-            syncing = true; controls.Clear(); canvas.Children.Clear(); canvas.Width = screen.Size.Width * Zoom; canvas.Height = screen.Size.Height * Zoom;
-            foreach (var element in screen.Elements)
-            {
-                var display = Json.Clone(element); display.Text = Expressions.Bind(element.Text, state);
-                var widget = designer.RenderControl(display, true, name => { if (syncing || closed) return; element.Value = display.Value; Enqueue(element.Id, name, element.Type=="item_list"?display.Text:display.Value); });
-                widget.Width = element.Bounds.Width * Zoom; widget.Height = element.Bounds.Height * Zoom;
-                Canvas.SetLeft(widget, element.Bounds.X * Zoom); Canvas.SetTop(widget, element.Bounds.Y * Zoom); canvas.Children.Add(widget); controls[element.Id] = (widget, display);
-                // Decorative layers should not intercept a button beneath them.
-                if (element.Type is "panel" or "scroll_panel" or "image" or "texture_region" or "label" or "item" or "progress") widget.IsHitTestVisible = false;
-                else
-                {
-                    widget.MouseEnter += (_, _) => { if (!syncing && element.Events.ContainsKey("mouse_enter")) Enqueue(element.Id, "mouse_enter", ""); };
-                    widget.MouseLeave += (_, _) => { if (!syncing && element.Events.ContainsKey("mouse_leave")) Enqueue(element.Id, "mouse_leave", ""); };
-                }
-            }
-            syncing = false; Refresh();
-        }
-        void Refresh()
-        {
-            syncing = true;
             try
             {
-                foreach (var element in screen.Elements)
-                {
-                    if (!controls.TryGetValue(element.Id, out var pair)) continue;
-                    var widget = pair.Control; var display = pair.Display;
-                    display.Text = Expressions.Bind(element.Text, state); display.Value = element.Value; display.Texture = element.Texture; display.Item = element.Item;
-                    var parents = ContainerTree.Ancestors(screen,element).ToArray();
-                    double top = ContainerTree.Top(screen,element,scrollOffsets);
-                    Canvas.SetTop(widget, top * Zoom);
-                    {
-                        var bounds = new Rect(element.Bounds.X * Zoom, top * Zoom, element.Bounds.Width * Zoom, element.Bounds.Height * Zoom);
-                        foreach(var parent in parents) bounds.Intersect(new Rect(parent.Bounds.X * Zoom, ContainerTree.Top(screen,parent,scrollOffsets) * Zoom, parent.Bounds.Width * Zoom, parent.Bounds.Height * Zoom));
-                        widget.Clip = new RectangleGeometry(bounds.IsEmpty ? new Rect(0, 0, 0, 0) : new Rect(bounds.X - element.Bounds.X * Zoom, bounds.Y - top * Zoom, bounds.Width, bounds.Height));
-                    }
-                    widget.Visibility = element.Visible && Expressions.Evaluate(element.VisibleIf, state) && parents.All(parent=>parent.Visible && Expressions.Evaluate(parent.VisibleIf,state)) ? Visibility.Visible : Visibility.Collapsed;
-                    widget.IsEnabled = element.Enabled && Expressions.Evaluate(element.EnabledIf, state) && parents.All(parent=>parent.Enabled && Expressions.Evaluate(parent.EnabledIf,state)); widget.Opacity = element.Opacity;
-                    if (widget is Border frame && Equals(frame.Tag, "appearance")) { frame.Background = designer.FrameBrush(display); widget = (FrameworkElement)frame.Child; }
-                    switch (widget)
-                    {
-                        case Button button: button.Content = designer.StyledText(display); button.Template = designer.SkinTemplate(display); break;
-                        case TextBlock label: label.Text = element.Type == "item" ? "◆ " + display.Item.Split(':').Last() : display.Text; break;
-                        case ListBox list: if(!Equals(list.Tag,ItemListStamp(element.Value,element,state))) designer.FillItemList(list,element.Value,element,name=>Enqueue(element.Id,name,element.Text),state); break;
-                        case TextBox text: if (text.Text != element.Value) text.Text = element.Value; break;
-                        case CheckBox check: check.Content = display.Text; check.IsChecked = element.Value == "true"; break;
-                        case Slider slider: if (double.TryParse(element.Value, CultureInfo.InvariantCulture, out double value)) slider.Value = value; break;
-                        case ProgressBar progress: if (double.TryParse(element.Value, CultureInfo.InvariantCulture, out double progressValue)) progress.Value = progressValue; break;
-                        case ComboBox combo: if (int.TryParse(element.Value, out int index)) combo.SelectedIndex = index; break;
-                        case Border border: border.Background = designer.SkinBrush(display); break;
-                        case Image image: if (TextureAssets.TryGet(project, element.Texture, out var bytes)) image.Source = DecodeTexture(bytes); break;
-                    }
-                }
+                var files = WebExport.Files(project, new(ExtraAssets: designer.PreviewMinecraftFiles(project), HostScript: PreviewHost, Screen: initialUi));
+                foreach (var (name, bytes) in files) { var path = Path.Combine(folder, name.Replace('/', Path.DirectorySeparatorChar)); Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllBytes(path, bytes); }
+                await view.EnsureCoreWebView2Async(await PreviewEnvironment());
+                if (closed) return;
+                var web = view.CoreWebView2;
+                web.Settings.AreDefaultContextMenusEnabled = false; web.Settings.IsStatusBarEnabled = false; web.Settings.IsZoomControlEnabled = false; web.Settings.AreBrowserAcceleratorKeysEnabled = false;
+                web.SetVirtualHostNameToFolderMapping(Host, folder, CoreWebView2HostResourceAccessKind.DenyCors);
+                web.NavigationStarting += (_, e) => { if (!e.Uri.StartsWith($"https://{Host}/")) e.Cancel = true; };
+                web.NewWindowRequested += (_, e) => e.Handled = true;
+                web.WebMessageReceived += (_, e) => Received(e.WebMessageAsJson);
+                web.ProcessFailed += (_, e) => Print("ERROR", "The preview stopped (" + e.ProcessFailedKind + "). Click Reset preview to start again.");
+                Print("READY", "Buttons and keys are live. Every click is logged, even without an assigned action.");
+                Print("SCRIPTS", "Scripts run in the same web runtime as HTML and desktop exports. Server operations here are simulated.");
+                web.Navigate($"https://{Host}/index.html");
+                view.Focus();
             }
-            finally { syncing = false; }
+            catch (Exception ex) when (ex is WebView2RuntimeNotFoundException)
+            { Print("ERROR", "Preview needs the Microsoft Edge WebView2 Runtime, which comes with Windows 10 and 11: https://go.microsoft.com/fwlink/p/?LinkId=2124703"); ready.TrySetException(ex); }
+            catch (Exception ex) { Print("ERROR", ex.Message); ready.TrySetException(ex); }
         }
-        void Enqueue(string element, string name, string value)
+        // Messages from the page (see PreviewHost).
+        void Received(string json)
         {
-            if (closed) return;
-            if (pending.Count >= 32) { Print("WARNING", "Too many queued preview events"); return; }
-            pending.Enqueue((element, name, value)); Pump();
-        }
-        internal void TriggerTest(string element, string eventName)
-        {
-            string value = screen.Elements.FirstOrDefault(e => e.Id == element)?.Value ?? "";
-            if (eventName == "checked") value = "true"; if (eventName == "unchecked") value = "false";
-            Print("TEST", (element == "" ? screen.Id : element) + "." + eventName);
-            Enqueue(element, eventName, value);
-        }
-        async void Pump()
-        {
-            if (busy || closed) return; busy = true;
             try
             {
-                while (pending.Count > 0 && !closed)
+                var m = JsonNode.Parse(json)!.AsObject(); string kind = (string?)m["kind"] ?? "";
+                string S(string key) => m[key]?.ToString() ?? "";
+                switch (kind)
                 {
-                    var input = pending.Dequeue(); if (input.Element.Length > 0) navigationDepth = 0;
-                    var events = input.Element == "" ? screen.Events : screen.Elements.FirstOrDefault(e => e.Id == input.Element)?.Events;
-                    Print("EVENT", screen.Id + "." + (input.Element == "" ? "" : input.Element + ".") + input.Event);
-                    if (events == null || !events.TryGetValue(input.Event, out var ev)) { Print("INFO", "No actions or script assigned to this event."); continue; }
-                    string screenId = screen.Id;
-                    foreach (var action in ev.Client.Actions) { Action(action); if (closed || screen.Id != screenId) break; }
-                    if (closed || screen.Id != screenId) continue;
-                    await AssignedScript(ev.Client, input.Element, input.Value, false);
-                    foreach (var action in ev.Server.Actions) Print("SIMULATED SERVER", action.Type + " " + action.Target + " " + action.Value);
-                    await AssignedScript(ev.Server, input.Element, input.Value, true);
+                    case "ready": ready.TrySetResult(); break;
+                    case "event":
+                    {
+                        string ev = S("event"), where = S("screen") + "." + (S("element").Length > 0 ? S("element") + "." : "") + ev;
+                        bool assigned = m["assigned"]?.GetValue<bool>() ?? false;
+                        if (ev is "tick" or "key" or "hover" or "mouse_enter" or "mouse_leave") { if (assigned && ev is not ("tick" or "key" or "hover")) Print("EVENT", where); break; }
+                        Print("EVENT", where); if (!assigned) Print("INFO", "No actions or script assigned to this event."); break;
+                    }
+                    case "script": if (S("script") != "(scratchpad)") Print(m["server"]?.GetValue<bool>() == true ? "SIMULATED SERVER SCRIPT" : "SCRIPT", S("script") + " → " + S("function")); break;
+                    case "log": Print(S("level") switch { "error" => "ERROR", "warn" => "WARNING", "info" => "INFO", _ => "LOG" }, S("text")); break;
+                    case "server": Print("SIMULATED SERVER", S("text")); break;
+                    case "message": Print("MESSAGE", S("text")); break;
+                    case "sound": Print("SOUND", S("text")); break;
+                    case "closed": Print("CLOSED", S("screen") + " closed."); if (!closed) Window.Close(); break;
                 }
             }
             catch (Exception ex) { Print("ERROR", ex.Message); }
-            finally { busy = false; }
         }
-        async Task AssignedScript(Handler handler, string element, string value, bool server)
+        const string PreviewHost = """
+            // Preview host: reports what happens to the Wysicraft editor's console.
+            (function () {
+              const post = m => { try { window.chrome.webview.postMessage(m); } catch (e) { } };
+              window.wysicraftHost = {
+                closeOnEscape: false,
+                showColliders: true, // colliders are invisible in apps; Preview outlines them
+                onEvent(e) { post(Object.assign({ kind: 'event' }, e)); },
+                onScript(s) { post(Object.assign({ kind: 'script' }, s)); },
+                onLog(level, text) { post({ kind: 'log', level, text: String(text) }); },
+                onCommand(command) { post({ kind: 'server', text: 'command ' + command }); },
+                onServerFunction(name, value) { post({ kind: 'server', text: 'server_function ' + name + ' ' + value }); },
+                onServerAction(a) { post({ kind: 'server', text: a.type + ' ' + a.target + ' ' + a.value }); },
+                onMessage(text) { post({ kind: 'message', text }); },
+                onSound(sound) { post({ kind: 'sound', text: sound }); },
+                onClose(screen) { post({ kind: 'closed', screen }); }
+              };
+              window.addEventListener('load', () => setTimeout(() => post({ kind: 'ready' }), 0));
+            })();
+            """;
+        async Task<string> Script(string code)
         {
-            if (handler.Script.Length == 0 || closed) return;
-            if (handler.ScriptEngine == "kubejs") { Print("KUBEJS", "Test this script in Minecraft using Export for KubeJS: " + handler.Script); return; }
-            if (!project.Scripts.TryGetValue(handler.Script, out string? source)) { Print("ERROR", "Missing script " + handler.Script); return; }
-            Print(server ? "SIMULATED SERVER SCRIPT" : "SCRIPT", handler.Script + " → " + handler.Function);
-            await Script(source, handler.Function, element, value, server,handler.Script);
+            if (closed || view.CoreWebView2 == null) return "null";
+            return await view.CoreWebView2.ExecuteScriptAsync(code);
         }
-        async Task Script(string source, string function, string element, string value, bool server,string sourceName="preview.js")
+        internal async Task WaitReady()
         {
-            var result = await PreviewScripts.RunAsync(new() { Source = source,SourceName=sourceName,Server=server, Function = function, Element = element, Value = value, Variables = new(state), Texts = screen.Elements.ToDictionary(e => e.Id, e => Expressions.Bind(e.Text, state)) });
-            if (closed) return;
-            if (result.Error.Length > 0) Print("SCRIPT ERROR", result.Error);
-            foreach (var action in result.Actions)
+            await ready.Task;
+            for (int i = 0; i < 500 && !closed; i++) { if (await Script("Wysicraft.app.busy") != "true") return; await Task.Delay(20); }
+        }
+        internal async Task<string> SnapshotAsync()
+        {
+            await WaitReady();
+            var node = JsonNode.Parse(JsonSerializer.Deserialize<string>(await Script("JSON.stringify(Wysicraft.app.snapshot())")) ?? "{}")!.AsObject();
+            node["logs"] = output.Text.Length > 12000 ? output.Text[^12000..] : output.Text;
+            return node.ToJsonString();
+        }
+        async Task<UiDefinition> CurrentScreenAsync() { await WaitReady(); string id = JsonSerializer.Deserialize<string>(await Script("Wysicraft.app.screen")) ?? initialUi; return project.Screens.First(s => s.Id == id); }
+        internal async Task RunMcpEvent(string id, string eventName, string value)
+        {
+            var screen = await CurrentScreenAsync();
+            var events = id.Length == 0 ? screen.Events : screen.Elements.Single(e => e.Id == id).Events;
+            if (!events.ContainsKey(eventName)) throw new InvalidOperationException("No assigned event: " + id + "." + eventName);
+            if (id.Length > 0 && eventName == "value_changed")
             {
-                if (server && !action.Type.StartsWith("console_")) Print("SIMULATED SERVER", action.Type + " " + action.Target + " " + action.Value);
-                else Action(action);
-                if (closed) break;
+                var target = screen.Elements.Single(e => e.Id == id);
+                if (target.Type == "slider" && (!double.TryParse(value, CultureInfo.InvariantCulture, out double number) || !double.IsFinite(number) || number < target.Minimum || number > target.Maximum)) throw new InvalidOperationException("Slider value is outside its range.");
+                if (target.Type == "dropdown" && (!int.TryParse(value, out int index) || index < 0 || index >= target.Options.Count)) throw new InvalidOperationException("Dropdown index is outside its options.");
             }
+            await Script($"Wysicraft.app.testEvent({JsonSerializer.Serialize(id)},{JsonSerializer.Serialize(eventName)},{JsonSerializer.Serialize(value)})");
+            await WaitReady();
         }
-        void Action(VisualAction action)
+        // Runs JavaScript as a client script on the current screen (same API and limits as scripts), then waits for it.
+        internal async Task RunScriptAsync(string source)
         {
-            string value = Expressions.Bind(action.Value, state); var target = screen.Elements.FirstOrDefault(e => e.Id == action.Target);
-            switch (action.Type)
+            await WaitReady();
+            // The preview is the web runtime, whatever the project targets, so it uses the web limit.
+            if (Limits.SizeOf(source) > Limits.Web.ScriptBytes) throw new InvalidOperationException($"Scripts are at most {Limits.Web.ScriptBytes / 1024} KiB.");
+            await Script("Wysicraft.app.runScript(" + JsonSerializer.Serialize(source) + ")"); await Task.Delay(30); await WaitReady();
+        }
+        internal async void TriggerTest(string element, string eventName)
+        {
+            try
             {
-                case "set_text": if (target != null) target.Text = value; break;
-                case "set_visible": if (target != null) target.Visible = value == "true"; break;
-                case "set_enabled": if (target != null) target.Enabled = value == "true"; break;
-                case "set_value": if (target != null) { if(target.Type=="item_list") { try { ItemRows.Parse(value); } catch(Exception ex) { Print("ERROR",ex.Message); return; } } target.Value = value; } break;
-                case "set_item":
-                    if (target?.Type != "item" || !Wysicraft.Core.Validation.Resource(value)) { Print("ERROR", "setItem requires an item element and namespaced item ID: " + action.Target + " = " + value); return; }
-                    target.Item = value; break;
-                case "change_texture": if (target != null) target.Texture = value; break;
-                case "set_variable": state[action.Target] = value; break;
-                case "toggle_variable": state[action.Target] = state.GetValueOrDefault(action.Target) == "true" ? "false" : "true"; break;
-                case "message": case "console_log": Print("LOG", value); return;
-                case "console_warn": Print("WARNING", value); return;
-                case "console_error": Print("ERROR", value); return;
-                case "simulated_command": case "simulated_message": Print("SIMULATED SERVER", value); return;
-                case "play_sound": System.Media.SystemSounds.Beep.Play(); Print("SOUND", value); return;
-                case "open_ui": Open(value); return;
-                case "close_ui": Window.Close(); return;
-                default: Print("ERROR", "Unsupported preview action " + action.Type); return;
+                await WaitReady(); Print("TEST", (element == "" ? initialUi : element) + "." + eventName);
+                string value = eventName switch { "checked" => "true", "unchecked" => "false", _ => "" };
+                await Script($"Wysicraft.app.testEvent({JsonSerializer.Serialize(element)},{JsonSerializer.Serialize(eventName)},{(value.Length > 0 ? JsonSerializer.Serialize(value) : "undefined")})");
             }
-            Print("ACTION", action.Type + " " + action.Target + " = " + value); Refresh();
+            catch (Exception ex) { Print("ERROR", ex.Message); }
         }
-        void Open(string id)
+        internal async Task CaptureCanvas(string path)
         {
-            if (closing != null) return;
-            var definition = project.Screens.FirstOrDefault(s => s.Id == id); if (definition == null) { Print("ERROR", "Unknown UI " + id); return; }
-            if (++navigationDepth > 16) { pending.Clear(); Print("ERROR", "Preview navigation limit reached; reset the preview to continue."); navigationDepth = 0; return; }
-            screen = Json.Clone(definition); state = new(screen.Variables); pending.Clear(); scrollOffsets.Clear(); Render(); Enqueue("", "open", "");
+            await WaitReady(); await Task.Delay(100);
+            using var stream = File.Create(path);
+            await view.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
         }
         internal async Task CloseAsync()
         {
             // Yield until WPF has returned from its Closing event before closing again.
             await Task.Yield();
-            Enqueue("", "close", "");
-            while (busy && !closed) await Task.Delay(20);
+            if (!closed && ready.Task.IsCompletedSuccessfully) { try { await Script("Wysicraft._app.process({ ui: Wysicraft._app.ui, element: null, event: 'close', value: '' })"); await Task.Delay(50); } catch { } }
             closed = true; Window.Close();
         }
         internal async Task VerifyClickAsync()
         {
-            while (busy) await Task.Delay(20);
+            await WaitReady();
+            var screen = project.Screens.First(s => s.Id == initialUi);
             var button = screen.Elements.First(e => e.Type == "button");
-            button.Events["click"] = new UiEvent { Client = new Handler { Script = "scripts/client/preview_test.js", Function = "clicked" } };
-            project.Scripts["scripts/client/preview_test.js"] = "function clicked(ctx) { console.log('Clicked!', ctx.elementId); ui.setText('status', 'Script ran'); }";
-            ((Button)controls[button.Id].Control).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-            while (busy) await Task.Delay(20);
-            if (!output.Text.Contains("Clicked!") || screen.Elements.First(e => e.Id == "status").Text != "Script ran") throw new InvalidOperationException("Preview button did not execute its assigned JavaScript:\n" + output.Text);
-            var result = await PreviewScripts.RunAsync(new() { Source = "while (true) {}" });
-            if (result.Error.Length == 0) throw new InvalidOperationException("Infinite script was not stopped");
-            result = await PreviewScripts.RunAsync(new() { Source = "console.log(typeof System, typeof require, typeof fetch);" });
-            if (!result.Actions.Any(a => a.Value == "undefined undefined undefined")) throw new InvalidOperationException("Unexpected script host API exposure");
+            await Script($"Wysicraft._app.project.scripts['scripts/client/preview_test.js'] = \"function clicked(ctx) {{ console.log('Clicked!', ctx.elementId); ui.setText('status', 'Script ran'); }}\";" +
+                         $"Wysicraft._app.ui.elements.find(e => e.id === {JsonSerializer.Serialize(button.Id)}).events.click = {{ client: {{ actions: [], script: 'scripts/client/preview_test.js', function: 'clicked' }}, server: {{ actions: [], script: '', function: '' }} }}; 0");
+            await Script($"Wysicraft.app.testEvent({JsonSerializer.Serialize(button.Id)},'click','')"); await WaitReady();
+            var state = JsonNode.Parse(await SnapshotAsync())!;
+            if (!output.Text.Contains("Clicked!") || state["elements"]!.AsArray().First(e => (string?)e!["id"] == "status")!["text"]!.ToString() != "Script ran") throw new InvalidOperationException("Preview button did not execute its assigned JavaScript:\n" + output.Text);
+            // A script stuck in a loop is stopped after 2 seconds and the preview keeps working.
+            await Script("Wysicraft.app.runScript('while (true) {}')"); await WaitReady();
+            if (!output.Text.Contains("longer than 2 seconds")) throw new InvalidOperationException("Infinite script was not stopped:\n" + output.Text);
+            await Script("Wysicraft.app.runScript(\"console.log('exposed', typeof fetch, typeof XMLHttpRequest, typeof document)\")"); await WaitReady();
+            if (!output.Text.Contains("exposed undefined undefined undefined")) throw new InvalidOperationException("Unexpected script API exposure:\n" + output.Text);
+            await VerifyCameraAsync(button.Id);
+        }
+        // A camera over the top-left quarter of the screen shows it at 2×; points map through it both ways, controls
+        // outside it can't be clicked, and scripts can resize it.
+        async Task VerifyCameraAsync(string buttonId)
+        {
+            string result = await Script("(() => { const app = Wysicraft._app, ui = app.ui, w = ui.size.width, h = ui.size.height;" +
+                "const cam = { id: 'cam_test', type: 'camera', parent: '', visible: true, enabled: true, visibleIf: '', enabledIf: '', events: {}, fillEnabled: false, borderWidth: 0, bounds: { x: 0, y: 0, width: w / 2, height: h / 2 } };" +
+                "ui.elements.push(cam); app.render(); const v = app.view(cam), r = app.canvas.getBoundingClientRect();" +
+                "const wx = app.originX + 10, wy = app.originY + 12, p = app.point({ clientX: r.left + (v.ox + wx * v.k) * app.scale, clientY: r.top + (v.oy + wy * v.k) * app.scale });" +
+                $"const b = ui.elements.find(e => e.id === {JsonSerializer.Serialize(buttonId)}), outside = b.bounds.x + 1 < w / 2 || b.bounds.y + 1 < h / 2;" +
+                "cam.bounds.x = w / 2; cam.bounds.y = h / 2; app.render(); const blocked = outside ? !app.inside(b, app.x(b) + 1, app.y(b) + 1) : true;" +
+                "cam.bounds.x = 0; cam.bounds.y = 0;" +
+                "return JSON.stringify({ active: app._cam && app._cam.id, k: v.k, dx: Math.abs(p.x - wx), dy: Math.abs(p.y - wy), blocked }); })()");
+            var check = JsonNode.Parse(JsonNode.Parse(result)!.GetValue<string>())!;
+            if ((string?)check["active"] != "cam_test" || Math.Abs((double)check["k"]! - 2) > 0.001 || (double)check["dx"]! > 0.01 || (double)check["dy"]! > 0.01 || check["blocked"]!.GetValue<bool>() != true)
+                throw new InvalidOperationException("Camera view is wrong: " + check.ToJsonString());
+            await Script("Wysicraft.app.runScript(\"ui.setSize('cam_test', 120, 60)\")"); await WaitReady();
+            string size = await Script("(() => { const c = Wysicraft._app.ui.elements.find(e => e.id === 'cam_test'); const s = c.bounds.width + 'x' + c.bounds.height; Wysicraft._app.ui.elements.splice(Wysicraft._app.ui.elements.indexOf(c), 1); Wysicraft._app.render(); return s; })()");
+            if (JsonNode.Parse(size)!.GetValue<string>() != "120x60") throw new InvalidOperationException("ui.setSize did not resize the camera: " + size);
         }
         internal async Task VerifyEventTestAsync(string element, string eventName, string expected)
         {
-            while (busy) await Task.Delay(20);
-            TriggerTest(element, eventName);
-            while (busy) await Task.Delay(20);
+            await WaitReady(); TriggerTest(element, eventName); await Task.Delay(100); await WaitReady();
+            for (int i = 0; i < 50 && !output.Text.Contains(expected); i++) await Task.Delay(20);
             if (!output.Text.Contains(expected)) throw new InvalidOperationException("Assigned event test failed:\n" + output.Text);
         }
     }
     internal async Task VerifyPreviewAsync(string capture)
     {
         var preview = new PreviewSession(this, Json.CloneProject(project), ui.Id);
-        try
-        {
-            preview.Window.Show(); await preview.VerifyClickAsync(); preview.Window.UpdateLayout();
-            var image = new System.Windows.Media.Imaging.RenderTargetBitmap((int)preview.Window.ActualWidth, (int)preview.Window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-            image.Render(preview.Window); var png = new System.Windows.Media.Imaging.PngBitmapEncoder(); png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
-            using var stream = System.IO.File.Create(capture); png.Save(stream);
-        }
+        try { preview.Window.Show(); await preview.VerifyClickAsync(); await preview.CaptureCanvas(capture); }
         finally { await preview.CloseAsync(); }
     }
 }
-
-
-

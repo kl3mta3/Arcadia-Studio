@@ -1,4 +1,14 @@
 {
+  "isComponent": false,
+  "componentInstances": [],
+  "tickInterval": 0,
+  "keyRepeat": 150,
+  "responsive": false,
+  "groupParents": {},
+  "showFrame": false,
+  "dimBackground": false,
+  "fitToScreen": true,
+  "clipToScreen": false,
   "schemaVersion": 1,
   "id": "cockpit",
   "title": "AIRSHIP / CONTROL DECK",
@@ -13,8 +23,21 @@
   "events": {},
   "elements": [
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "heading",
       "name": "",
+      "layerGroup": "",
       "type": "label",
       "bounds": {
         "x": 20,
@@ -22,6 +45,7 @@
         "width": 270,
         "height": 20
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -61,11 +85,53 @@
       "textureY": 0,
       "textureWidth": 256,
       "textureHeight": 256,
-      "events": {}
+      "events": {},
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "engine_start",
       "name": "",
+      "layerGroup": "",
       "type": "button",
       "bounds": {
         "x": 20,
@@ -73,6 +139,7 @@
         "width": 132,
         "height": 24
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -115,6 +182,8 @@
       "events": {
         "click": {
           "client": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -132,6 +201,8 @@
             "function": ""
           },
           "server": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -144,11 +215,53 @@
             "function": ""
           }
         }
-      }
+      },
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "engine_stop",
       "name": "",
+      "layerGroup": "",
       "type": "button",
       "bounds": {
         "x": 168,
@@ -156,6 +269,7 @@
         "width": 132,
         "height": 24
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -198,6 +312,8 @@
       "events": {
         "click": {
           "client": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -215,6 +331,8 @@
             "function": ""
           },
           "server": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -227,11 +345,53 @@
             "function": ""
           }
         }
-      }
+      },
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "status",
       "name": "",
+      "layerGroup": "",
       "type": "label",
       "bounds": {
         "x": 20,
@@ -239,6 +399,7 @@
         "width": 270,
         "height": 20
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -278,11 +439,53 @@
       "textureY": 0,
       "textureWidth": 256,
       "textureHeight": 256,
-      "events": {}
+      "events": {},
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "altitude",
       "name": "",
+      "layerGroup": "",
       "type": "label",
       "bounds": {
         "x": 20,
@@ -290,6 +493,7 @@
         "width": 270,
         "height": 20
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -329,11 +533,53 @@
       "textureY": 0,
       "textureWidth": 256,
       "textureHeight": 256,
-      "events": {}
+      "events": {},
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "navigation",
       "name": "",
+      "layerGroup": "",
       "type": "button",
       "bounds": {
         "x": 20,
@@ -341,6 +587,7 @@
         "width": 132,
         "height": 24
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -383,6 +630,8 @@
       "events": {
         "click": {
           "client": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -395,17 +644,61 @@
             "function": ""
           },
           "server": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [],
             "script": "",
             "function": ""
           }
         }
-      }
+      },
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     },
     {
+      "horizontalAnchor": "left",
+      "verticalAnchor": "top",
+      "minWidth": 1,
+      "minHeight": 1,
+      "rowTemplateWidth": 0,
+      "rowTemplate": "",
+      "rowAction": "",
+      "rowElements": [],
+      "rowHeight": 30,
+      "primaryLabel": "",
+      "secondaryLabel": "",
+      "showItemId": true,
       "id": "close",
       "name": "",
+      "layerGroup": "",
       "type": "button",
       "bounds": {
         "x": 168,
@@ -413,6 +706,7 @@
         "width": 132,
         "height": 24
       },
+      "locked": false,
       "visible": true,
       "enabled": true,
       "tooltip": "",
@@ -455,6 +749,8 @@
       "events": {
         "click": {
           "client": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [
               {
@@ -467,13 +763,48 @@
             "function": ""
           },
           "server": {
+            "permissionLevel": 0,
+            "cooldownTicks": 4,
             "scriptEngine": "standard",
             "actions": [],
             "script": "",
             "function": ""
           }
         }
-      }
+      },
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "clips": "",
+      "shape": "rectangle",
+      "body": "",
+      "collider": "box",
+      "colliderPoints": [],
+      "bounce": 0,
+      "friction": 0.2,
+      "trigger": false,
+      "input": "",
+      "sound": "",
+      "autoplay": true,
+      "delay": 0,
+      "volume": 1,
+      "repeat": 1,
+      "loop": false,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "columns": 20,
+      "rows": 12,
+      "tiles": "",
+      "solid": "",
+      "tags": [],
+      "behaviours": [],
+      "layer": 0,
+      "collidesWith": -1,
+      "touchOnly": false,
+      "effect": ""
     }
-  ]
+  ],
+  "gravity": 0,
+  "animations": [],
+  "shader": "",
+  "stateGraphs": []
 }

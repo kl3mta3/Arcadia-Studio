@@ -3,6 +3,11 @@
   <PackageReference Include="Dirkster.AvalonDock.Themes.VS2013" Version="4.72.1" />
   <PackageReference Include="Jint" Version="4.16.2" />
   <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+  <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  <PackageReference Include="NAudio" Version="2.2.1" />
+  <PackageReference Include="NVorbis" Version="0.10.5" />
+  <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  <None Include="SoundFonts\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 </ItemGroup><PropertyGroup><ApplicationIcon>../../assets/branding/wysicraft.ico</ApplicationIcon></PropertyGroup><ItemGroup><Resource Include="../../assets/branding/wysicraft.ico" Link="Assets/Wysicraft.ico" /></ItemGroup></Project>
 
 

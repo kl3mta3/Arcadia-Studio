@@ -26,7 +26,7 @@ public partial class MainWindow
     string ChosenComponent()=>(componentList.SelectedItem as UiDefinition)?.Id??throw new InvalidOperationException("Choose a component source first.");
     void ComponentEdit(System.Action<Project,UiDefinition> action) {
         SaveScriptText();var candidate=Json.CloneProject(project);var screen=candidate.Screens.Single(s=>s.Id==ui.Id);action(candidate,screen);
-        var errors=Validation.Check(candidate);if(errors.Count>0)throw new InvalidOperationException(string.Join("\n",errors));
+        var errors=Validation.Errors(candidate);if(errors.Count>0)throw new InvalidOperationException(string.Join("\n",errors));
         Change();project=candidate;ui=screen;selected.IntersectWith(ui.Elements.Select(e=>e.Id));RefreshAll();
     }
     void CaptureComponent() {
@@ -60,7 +60,7 @@ public partial class MainWindow
         if(ui.ComponentInstances.Count!=1)throw new Exception("Component panel placement failed");
         history.Undo();if(ui.ComponentInstances.Count!=0)throw new Exception("Placement undo failed");history.Redo();if(ui.ComponentInstances.Count!=1)throw new Exception("Placement redo failed");
         var root=ui.ComponentInstances[0].Root;selected.Clear();selected.Add(root);RefreshInspector();
-        if(!Properties.Children.OfType<WrapPanel>().Any())throw new Exception("Instance controls missing");
+        if(!InspectorItems().OfType<WrapPanel>().Any())throw new Exception("Instance controls missing");
         componentList.SelectedItem=project.Screens.Single(s=>s.Id=="badge");project.Screens.Single(s=>s.Id=="badge").Elements[0].Text="Updated";UpdateAllComponents();
         if(ui.Elements.Single(e=>e.Id==ui.ComponentInstances[0].Ids["caption"]).Text!="Updated")throw new Exception("Update all failed");
         ShowDock("components");UpdateLayout();dirty=false;System.IO.File.WriteAllText(output,"PASS: component panel placement, undo/redo, instance Properties, update all and panel opening");Application.Current.Shutdown();

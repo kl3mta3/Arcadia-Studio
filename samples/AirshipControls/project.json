@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "airship_controls",
   "name": "Airship Controls",
-  "author": "WYSICRAFT",
+  "author": "Wysicraft",
   "version": "1.0.0",
-  "runtimeVersion": "1.0.0",
+  "runtimeVersion": "1.7.0",
   "defaultUi": "cockpit",
   "ui": [
     "cockpit",
@@ -12,5 +12,11 @@
   ],
   "dependencies": [],
   "gridSize": 8,
-  "snap": true
+  "snap": true,
+  "target": "both",
+  "inputs": [],
+  "collisionLayers": [],
+  "collisionMatrix": [],
+  "particles": [],
+  "shaders": []
 }

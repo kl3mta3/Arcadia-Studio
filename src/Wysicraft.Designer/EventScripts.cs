@@ -66,7 +66,7 @@ public partial class MainWindow
     void SaveEventScript(Dictionary<string, UiEvent> events, string eventName, bool server, string path, string function, string source, string engine = "standard")
     {
         ValidateScriptPath(path); CheckFunction(function);
-        if (!path.StartsWith(server ? "scripts/server/" : "scripts/client/") || System.Text.Encoding.UTF8.GetByteCount(source) > 65536) throw new InvalidDataException("Wrong script side or script exceeds 64 KiB.");
+        if (!path.StartsWith(server ? "scripts/server/" : "scripts/client/") || Limits.SizeOf(source) > Limits.For(project).ScriptBytes) throw new InvalidDataException($"Wrong script side or script exceeds {Limits.For(project).ScriptBytes / 1024} KiB.");
         Jint.Engine.PrepareScript(source); // Parse only: saving never executes user code.
         Change(); project.Scripts[path] = source;
         var handler = EnsureEventHandler(events, eventName, server); handler.Script = path; handler.Function = function; handler.ScriptEngine = engine;
@@ -140,9 +140,7 @@ public partial class MainWindow
             if (handler.Script != draft.Path || handler.Function != draft.Function || project.Scripts[draft.Path] != draft.Source) throw new InvalidOperationException("Save & Assign did not attach the new script");
             preview = new PreviewSession(this, Json.CloneProject(project), ui.Id); preview.Window.Show();
             await preview.VerifyEventTestAsync(element.Id, "click", element.Id + ".click fired!");
-            preview.Window.UpdateLayout();
-            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)preview.Window.ActualWidth, (int)preview.Window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(preview.Window); var png = new System.Windows.Media.Imaging.PngBitmapEncoder(); png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var stream = File.Create(capture); png.Save(stream);
+            await preview.CaptureCanvas(capture);
         }
         finally
         {

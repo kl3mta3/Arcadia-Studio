@@ -1,1 +1,5 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Models/Wysicraft.Models.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Models/Wysicraft.Models.csproj" /></ItemGroup><ItemGroup><EmbeddedResource Include="Audio/Models/basic-pitch.onnx" LogicalName="basic-pitch.onnx" /></ItemGroup><ItemGroup>
+  <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+  <PackageReference Include="OggVorbisEncoder" Version="1.2.2" />
+  <PackageReference Include="MeltySynth" Version="2.4.1" />
+</ItemGroup></Project>

@@ -4,12 +4,18 @@
   "name": "KubeJS Bridge Demo",
   "author": "",
   "version": "1.0.0",
-  "runtimeVersion": "1.0.0",
+  "runtimeVersion": "1.7.0",
   "defaultUi": "kube_main",
   "ui": [
     "kube_main"
   ],
   "dependencies": [],
   "gridSize": 8,
-  "snap": true
+  "snap": true,
+  "target": "both",
+  "inputs": [],
+  "collisionLayers": [],
+  "collisionMatrix": [],
+  "particles": [],
+  "shaders": []
 }

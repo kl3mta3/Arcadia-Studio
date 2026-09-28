@@ -13,8 +13,10 @@ public final class Models {
         public List<String> ui = new ArrayList<>(), dependencies = new ArrayList<>();
     }
     public static class Ui {
+        public int tickInterval = 0; // ms between Tick events while open; 0 = off
+        public int keyRepeat = 150; // ms between Key events while a key is held; 0 = a held key sends one event
         public boolean responsive = false;
-        public boolean showFrame = false, dimBackground = false, fitToScreen = true;
+        public boolean showFrame = false, dimBackground = false, fitToScreen = true, clipToScreen = false;
         public int schemaVersion = 1;
         public String id = "", title = "";
         public Size size = new Size();
@@ -45,6 +47,12 @@ public final class Models {
         public double borderWidth, shadowOpacity = .75, shadowOffsetX = 1, shadowOffsetY = 1, shadowBlur;
         public double cornerRadius;
         public int textureX, textureY, textureWidth = 256, textureHeight = 256;
+        // Sprite sheets (frame size + clips), shape outlines and Sound controls.
+        public int frameWidth = 16, frameHeight = 16;
+        public String clips = "", shape = "rectangle", sound = "";
+        public boolean autoplay = true, loop;
+        public int delay, repeat = 1;
+        public double volume = 1;
         public List<String> options = new ArrayList<>();
         public Map<String,Event> events = new LinkedHashMap<>();
     }

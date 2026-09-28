@@ -41,6 +41,13 @@ public partial class MainWindow
         var ids=selection.ToHashSet();var groups=ui.Elements.SelectMany(e=>LayerGroups.Path(ui,e.LayerGroup)).Distinct().Where(g=>ui.Elements.Where(e=>LayerGroups.Contains(ui,g,e.LayerGroup)).All(e=>ids.Contains(e.Id))).ToHashSet();
         return groups.Where(g=>!LayerGroups.Path(ui,g).Skip(1).Any(groups.Contains)).ToList();
     }
+    void NewLayerGroup() {
+        int n=1;while(ui.GroupParents.ContainsKey("Group "+n)||ui.Elements.Any(e=>e.LayerGroup=="Group "+n))n++;
+        var name=Prompt("New group","Group name","Group "+n);if(name==null)return;name=name.Trim();
+        if(name.Length==0||name.Length>64||name.Any(char.IsControl))throw new InvalidOperationException("Group names are 1–64 characters.");
+        if(ui.GroupParents.ContainsKey(name)||ui.Elements.Any(e=>e.LayerGroup==name))throw new InvalidOperationException("There is already a group called "+name+".");
+        Change();ui.GroupParents[name]=isolatedGroup;RefreshLayers();Log("Made the empty group "+name+". Drag layers onto it to put them inside.");
+    }
     void RenameLayerGroup(string group,string name) {
         name=name.Trim();if(name==group)return;if(name.Length is <1 or >64 || name.Any(char.IsControl) || ui.GroupParents.ContainsKey(name) || ui.Elements.Any(e=>e.LayerGroup==name))throw new InvalidOperationException("Choose a unique group name (1–64 characters)");
         Change();string parent=ui.GroupParents.GetValueOrDefault(group,"");ui.GroupParents.Remove(group);ui.GroupParents[name]=parent;
@@ -63,6 +70,8 @@ public partial class MainWindow
                 foreach(var group in path) {if(seen.Add(group))keys.Add(GroupPrefix+group);if(collapsedGroups.Contains(group)){hidden=true;break;}}
                 if(!hidden)keys.Add(e.Id);
             }
+            // Empty groups (made with New group) show at the top, ready for things to be dragged in.
+            foreach(var group in ui.GroupParents.Keys.Where(g=>!seen.Contains(g) && (isolatedGroup.Length==0 || LayerGroups.Contains(ui,isolatedGroup,g))).OrderBy(g=>g).Reverse())keys.Insert(0,GroupPrefix+group);
             if(!Layers.Items.Cast<ListBoxItem>().Select(i=>(string)i.Tag).SequenceEqual(keys)) {
                 Layers.Items.Clear(); foreach(string key in keys) Layers.Items.Add(new ListBoxItem {Tag=key,Padding=new Thickness(6,4,2,4)});
             }
@@ -104,7 +113,7 @@ public partial class MainWindow
     }
     void InitializeLayerDragging() {
         Layers.AllowDrop=true;
-        Layers.MouseDoubleClick+=(_,e)=>{var row=ItemsControl.ContainerFromElement(Layers,e.OriginalSource as DependencyObject) as ListBoxItem;if(row?.Tag is string key && key.StartsWith(GroupPrefix)){IsolateGroup(key[GroupPrefix.Length..]);e.Handled=true;}};
+        Layers.MouseDoubleClick+=(_,e)=>{var row=ItemsControl.ContainerFromElement(Layers,e.OriginalSource as DependencyObject) as ListBoxItem;if(row?.Tag is string key && key.StartsWith(GroupPrefix)){IsolateGroup(key[GroupPrefix.Length..]);e.Handled=true;}else if(row?.Tag is string id && ui.Elements.FirstOrDefault(x=>x.Id==id) is Element element && !InsideButton(e.OriginalSource as DependencyObject)){e.Handled=true;Guard(()=>RenameElement(element));}};
         Layers.PreviewMouseLeftButtonDown+=(_,e)=> {
             pendingLayerClick=null;
             layerDragStart=e.GetPosition(Layers); var row=ItemsControl.ContainerFromElement(Layers,e.OriginalSource as DependencyObject) as ListBoxItem;
@@ -191,7 +200,17 @@ public partial class MainWindow
         Wysicraft.Packaging.ProjectStore.SaveProject(project,output+".wysicraftproj");
         if(Wysicraft.Packaging.ProjectStore.Load(output+".wysicraftproj").Screens[0].Elements.Count(e=>e.LayerGroup.Length>0)!=4)throw new Exception("Groups were not saved");
         UngroupSelected();if(ui.Elements.Where(e=>selected.Contains(e.Id)).Any(e=>e.LayerGroup.Length>0))throw new Exception("Ungroup failed");
-        dirty=false;System.IO.File.WriteAllText(output,"PASS: grouping, order, canvas/Alt selection, drop into group, undo, independent duplication, save/load and ungroup.");
+        // Bring to front / Send to back stay inside the selection's group and keep groups intact.
+        ui.Elements=[new Element {Id="a"},new Element {Id="b",LayerGroup="G"},new Element {Id="c",LayerGroup="G"},new Element {Id="d"}];ui.GroupParents=new();history.Clear();
+        string Order()=>string.Join(",",ui.Elements.Select(e=>e.Id));
+        selected.Clear();selected.Add("a");BringToFront();if(Order()!="b,c,d,a")throw new Exception("Bring to front: "+Order());
+        SendToBack();if(Order()!="a,b,c,d")throw new Exception("Send to back: "+Order());
+        selected.Clear();selected.Add("b");BringToFront();if(Order()!="a,c,b,d" || ui.Elements.First(e=>e.Id=="b").LayerGroup!="G")throw new Exception("Front within group: "+Order());
+        SendToBack();if(Order()!="a,b,c,d")throw new Exception("Back within group: "+Order());
+        history.Undo();if(Order()!="a,c,b,d")throw new Exception("Undo order: "+Order());
+        selected.Clear();selected.Add("d");Duplicate();if(!ui.Elements.Any(e=>e.Id=="d1"))throw new Exception("Duplicate ID not numbered: "+Order());
+        VerifyLockChildren();
+        dirty=false;System.IO.File.WriteAllText(output,"PASS: grouping, order, front/back, canvas/Alt selection, drop into group, undo, independent duplication, numbered IDs, locking items inside panels, save/load and ungroup.");
     }
 }
 
@@ -208,7 +227,7 @@ public partial class MainWindow
             DockPanel.SetDock(button,Dock.Right);row.Children.Add(button);return button;
         }
         Toggle(allLocked?"lock":"unlock",allLocked?1:.35,allLocked?"Locked: can't be clicked or moved on the canvas. Click to unlock.":"Click to lock (it can't then be clicked or moved on the canvas).",
-            ()=>{foreach(var t in targets)t.Locked=!allLocked;if(!allLocked)selected.ExceptWith(targets.Select(t=>t.Id));});
+            ()=>SetLocked(targets,!allLocked));
         Toggle(allHidden?"eye-off":"eye",allHidden?1:.6,allHidden?"Starts hidden when the screen opens. Click to show it.":"Shown when the screen opens. Click to start it hidden.",
             ()=>{foreach(var t in targets)t.Visible=allHidden;});
     }

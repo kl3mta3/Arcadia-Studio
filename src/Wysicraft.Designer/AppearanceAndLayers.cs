@@ -86,31 +86,52 @@ public partial class MainWindow
         InitializeLayerDragging();
         LayerUp.Click += (_, _) => MoveLayers(1);
         LayerDown.Click += (_, _) => MoveLayers(-1);
+        LayerTop.Click += (_, _) => Guard(BringToFront);
+        LayerBottom.Click += (_, _) => Guard(SendToBack);
         LayerDuplicate.Click += (_, _) => Duplicate();
+        LayerNewGroup.Click += (_, _) => Guard(NewLayerGroup);
     }
     void RefreshLayers() => RefreshLayerRows();
     ContextMenu ElementMenu(Element element)
     {
-        var menu = new ContextMenu();
+        var menu = new ContextMenu(); FillElementMenu(menu, element); return menu;
+    }
+    void FillElementMenu(ContextMenu menu, Element element)
+    {
+        menu.Items.Clear();
         var group=CanvasGroup(element);
         if(group.Length>0){var isolate=new MenuItem {Header="Isolate group"};isolate.Click+=(_,_)=>IsolateGroup(group);menu.Items.Add(isolate);}
         if(isolatedGroup.Length>0){var exit=new MenuItem {Header="Exit isolation"};exit.Click+=(_,_)=>ExitIsolation();menu.Items.Add(exit);}
         // Select the right-clicked element when executing an action. Keeping its
         // visual alive while the menu opens avoids losing the WPF placement target.
         void SelectTarget() { if (!selected.Contains(element.Id)) { selected.Clear(); selected.Add(element.Id); } }
-        foreach (var (label, action) in new (string, System.Action)[] {
-            ("Select", () => { selected.Clear(); selected.Add(element.Id); Draw(); RefreshInspector(); }),
-            ("Group selected", GroupSelected), ("Ungroup", UngroupSelected), ("Duplicate", Duplicate), ("Bring forward", () => MoveLayers(1)), ("Send backward", () => MoveLayers(-1)),
-            (element.Visible ? "Hide" : "Show", () => { Change(); element.Visible = !element.Visible; Draw(); RefreshInspector(); }),
-            (element.Locked ? "Unlock" : "Lock", () => { Change(); element.Locked = !element.Locked; if (element.Locked) selected.Remove(element.Id); Draw(); RefreshInspector(); }),
-            ("Delete", Delete) })
+        MenuItem Item(string label, System.Action action)
         {
             var item = new MenuItem { Header = label, InputGestureText = ContextShortcut(label) };
-            item.Click += (_, _) => Guard(() => { SelectTarget(); action(); }); menu.Items.Add(item);
+            item.Click += (_, _) => Guard(() => { SelectTarget(); action(); }); return item;
         }
-        menu.Items.Add(ArrangeMenu(SelectTarget));
+        foreach (var (label, action) in new (string, System.Action)[] {
+            ("Select", () => { selected.Clear(); selected.Add(element.Id); Draw(); RefreshInspector(); }),
+            ("Group selected", GroupSelected), ("Ungroup", UngroupSelected), ("Duplicate", Duplicate), ("Rename…", () => RenameElement(element)),
+            (element.Visible ? "Hide" : "Show", () => { Change(); element.Visible = !element.Visible; Draw(); RefreshInspector(); }),
+            (element.Locked ? "Unlock" : "Lock", () => { Change(); SetLocked([element], !element.Locked); Draw(); RefreshInspector(); }),
+            ("Delete", Delete) })
+            menu.Items.Add(Item(label, action));
+        // Drawing order and lining things up each get their own submenu.
+        var order = new MenuItem { Header = "Arrange" };
+        foreach (var (label, action) in new (string, System.Action)[] { ("Bring to front", BringToFront), ("Bring forward", () => MoveLayers(1)), ("Send backward", () => MoveLayers(-1)), ("Send to back", SendToBack) })
+            order.Items.Add(Item(label, action));
+        menu.Items.Add(new Separator()); menu.Items.Add(order); menu.Items.Add(ArrangeMenu(SelectTarget));
+        // Pictures: open this control's image in the pixel editor, and a sprite's clips in the sprite sheet editor.
+        if (element.Type is "image" or "sprite" or "texture_region" || element.Texture.Length > 0)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item(element.Texture.Length > 0 ? "Edit in pixel editor…" : "Draw in pixel editor…", () => PixelEditorForElement(element)));
+            if (element.Type == "sprite") menu.Items.Add(Item("Sprite sheet editor…", () => ShowSpriteSheetEditor(element)));
+            if (element.Type == "sprite" && AdvancedAllowed) menu.Items.Add(Item("State graphs…", ShowStateGraphsWindow));
+            if (element.Type == "tilemap") menu.Items.Add(Item("Tile painter…", () => ShowTilemapEditor(element)));
+        }
         AddPanelMenuItems(menu, element);
-        return menu;
     }
     void MoveLayers(int direction)
     {
@@ -160,7 +181,9 @@ public partial class MainWindow
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         var browse = new Button { Content = "Choose PNG…" }; browse.Click += (_, _) => Guard(() => AssignSkin(e));
         var clear = new Button { Content = "Use color only" }; clear.Click += (_, _) => { Change(); e.Texture = ""; Draw(); RefreshInspector(); };
-        var assets=new Button {Content="Assets"};assets.Click+=(_,_)=>{RefreshAssetBrowser();ShowDock("assets");};buttons.Children.Add(browse); buttons.Children.Add(assets); buttons.Children.Add(clear); Properties.Children.Add(buttons);
+        var assets=new Button {Content="Assets"};assets.Click+=(_,_)=>{RefreshAssetBrowser();ShowDock("assets");};buttons.Children.Add(browse); buttons.Children.Add(assets); buttons.Children.Add(clear);
+        var pixels = new Button { Content = e.Texture.Length > 0 ? "Edit pixels…" : "Draw…", ToolTip = e.Texture.Length > 0 ? "Edit this image in the pixel editor" : "Draw a new image in the pixel editor" };
+        pixels.Click += (_, _) => Guard(() => PixelEditorForElement(e)); buttons.Children.Add(pixels); Properties.Children.Add(buttons);
         Properties.Children.Add(new TextBlock { Text = "An assigned image replaces the fill. Transparent pixels reveal the canvas.", Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
         Field(Properties, "Opacity", e, "Opacity");
         Heading(Properties, "Corners");
@@ -175,16 +198,29 @@ public partial class MainWindow
         Field(Properties, "Border color", e, "BorderColor");
         NumericSlider(Properties, "Width (px)", e.BorderWidth, 0, 32, value => e.BorderWidth = value);
         Heading(Properties, "Font");
-        var font = new ComboBox { IsEditable = true, ItemsSource = new[] { "minecraft:default", "minecraft:uniform", "minecraft:alt" }, Text = e.Font };
-        void SetFont(string? name) { if (name == e.Font || name == null || !Wysicraft.Core.Validation.Resource(name)) return; Change(); e.Font = name; Draw(); }
+        // Both of these used to be bare dropdowns with nothing naming them: "Typeface" sat under the Font heading and
+        // "Alignment" sat under Underline, looking like it belonged to it.
+        var fontRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+        fontRow.Children.Add(new TextBlock { Text = "Typeface", Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4) });
+        var font = new ComboBox { IsEditable = true, ItemsSource = FontChoices(), Text = e.Font };
+        void SetFont(string? name) { if (name == e.Font || name == null || !Wysicraft.Core.Validation.Resource(name)) return; Change(); e.Font = name; Draw(); RefreshInspector(); }
         font.SelectionChanged += (_, _) => SetFont(font.SelectedItem as string);
         font.LostKeyboardFocus += (_, _) => SetFont(font.Text);
-        Properties.Children.Add(font);
+        fontRow.Children.Add(font); Properties.Children.Add(fontRow);
+        if (AdvancedAllowed)
+        {
+            var addFont = new Button { Content = "Import a font…", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(4, 2, 0, 2), ToolTip = "Bring a .ttf, .otf or .woff2 into the project and use it here. Web and desktop only — Minecraft draws its own fonts." };
+            addFont.Click += (_, _) => Guard(() => { if (ImportFontFile() is string added) { Change(); e.Font = added; Draw(); RefreshInspector(); } });
+            Properties.Children.Add(addFont);
+        }
         Field(Properties, "Size scale", e, "FontScale");
         foreach (string property in new[] { "Bold", "Italic", "Underline" }) Field(Properties, property, e, property);
+        var alignRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2), ToolTip = "How the text sits inside the control." };
+        alignRow.Children.Add(new TextBlock { Text = "Alignment", Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4) });
         var align = new ComboBox { ItemsSource = new[] { "left", "center", "right" }, SelectedItem = e.Alignment };
-        align.SelectionChanged += (_, _) => { if (align.SelectedItem is string value) { Change(); e.Alignment = value; Draw(); } }; Properties.Children.Add(align);
-        Properties.Children.Add(new TextBlock { Text = "Fonts use Minecraft resource IDs. Desktop preview approximates their glyphs; custom fonts need a matching Minecraft resource pack.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.LightGray });
+        align.SelectionChanged += (_, _) => { if (align.SelectedItem is string value && value != e.Alignment) { Change(); e.Alignment = value; Draw(); } };
+        alignRow.Children.Add(align); Properties.Children.Add(alignRow);
+        Properties.Children.Add(new TextBlock { Text = FontNote(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.LightGray });
         Heading(Properties, "Text shadow");
         Field(Properties, "Enabled", e, "TextShadow"); Field(Properties, "Shadow color", e, "ShadowColor");
         NumericSlider(Properties, "Opacity", e.ShadowOpacity, 0, 1, value => e.ShadowOpacity = value, .05);
@@ -208,7 +244,7 @@ public partial class MainWindow
         string stem = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(dialog.FileName).ToLowerInvariant(), "[^a-z0-9_-]", "_");
         string name = stem + ".png"; int suffix = 1;
         while (Wysicraft.Core.TextureAssets.TryGet(project, Wysicraft.Core.TextureAssets.Resource(project.Manifest.Id, name, element.Type), out var existing) && !existing.SequenceEqual(bytes)) name = stem + "_" + suffix++ + ".png";
-        Change(); project.Assets[Wysicraft.Core.TextureAssets.Path(project.Manifest.Id, name, element.Type)] = bytes; element.Texture = Wysicraft.Core.TextureAssets.Resource(project.Manifest.Id, name, element.Type); RefreshAssetBrowser(); Draw(); RefreshInspector();
+        Change(); project.Assets[Wysicraft.Core.TextureAssets.Path(project.Manifest.Id, name, element.Type)] = bytes; element.Texture = Wysicraft.Core.TextureAssets.Resource(project.Manifest.Id, name, element.Type); if (element.Type is not ("image" or "texture_region")) element.FillEnabled = true; RefreshAssetBrowser(); Draw(); RefreshInspector();
     }
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], BitmapImage> TexturePreviews = new();
     static BitmapImage DecodeTexture(byte[] bytes) => TexturePreviews.GetValue(bytes, DecodePreview);
@@ -224,16 +260,17 @@ public partial class MainWindow
     {
         if (!e.FillEnabled) return Brushes.Transparent;
         if (e.Texture.Length == 0) return Brush(e.Background);
-        if (Wysicraft.Core.TextureAssets.TryGet(project, e.Texture, out var bytes))
-            try { return new ImageBrush(DecodeTexture(bytes)) { Stretch = Stretch.Fill }; } catch { return Brushes.Magenta; }
+        if (TryTexture(e.Texture, out var bytes))
+            try { return TextureBrush(e.Texture, bytes); } catch { return Brushes.Magenta; }
         return Brush(e.Background);
     }
-    Brush FrameBrush(Element e) => e.Type is "image" or "texture_region" ? e.FillEnabled ? Brush(e.Background) : Brushes.Transparent : SkinBrush(e);
+    Brush FrameBrush(Element e) => e.Type is "shape" or "collider" or "camera" ? Brushes.Transparent : e.Type is "image" or "texture_region" or "sprite" ? e.FillEnabled ? Brush(e.Background) : Brushes.Transparent : SkinBrush(e);
     Border DecorateControl(FrameworkElement content, Element e)
     {
         if (content is Control control) { control.Background = Brushes.Transparent; control.BorderThickness = new Thickness(0); }
         if (content is TextBlock text) { text.Background = Brushes.Transparent; text.VerticalAlignment = VerticalAlignment.Center; }
-        var frame = new Border { Tag = "appearance", Background = FrameBrush(e), BorderBrush = Brush(e.BorderColor), BorderThickness = new Thickness(Math.Clamp(e.BorderWidth, 0, 32) * Zoom), CornerRadius = new CornerRadius(Math.Clamp(e.CornerRadius, 0, 128) * Zoom), Child = content };
+        bool drawsOwn = e.Type is "shape" or "collider" or "camera"; // shapes draw their own fill and outline
+        var frame = new Border { Tag = "appearance", Background = drawsOwn ? Brushes.Transparent : FrameBrush(e), BorderBrush = Brush(e.BorderColor), BorderThickness = new Thickness(drawsOwn ? 0 : Math.Clamp(e.BorderWidth, 0, 32) * Zoom), CornerRadius = new CornerRadius(Math.Clamp(e.CornerRadius, 0, 128) * Zoom), Child = content };
         if (content is System.Windows.Controls.Image or Grid) content.SizeChanged += (_, _) => { double r = Math.Max(0, e.CornerRadius - e.BorderWidth) * Zoom; content.Clip = new RectangleGeometry(new Rect(0, 0, Math.Max(0, content.ActualWidth), Math.Max(0, content.ActualHeight)), r, r); };
         return frame;
     }
@@ -260,7 +297,7 @@ public partial class MainWindow
     }
     void ApplyFont(FrameworkElement widget, Element e)
     {
-        var family = new FontFamily(e.Font == "minecraft:uniform" ? "Segoe UI" : "Consolas");
+        var family = FamilyFor(e.Font);
         double size = Math.Clamp(9 * Zoom * e.FontScale, 6, 144);
         if (widget is Control control) { control.FontFamily = family; control.FontSize = size; control.FontWeight = e.Bold ? FontWeights.Bold : FontWeights.Normal; control.FontStyle = e.Italic ? FontStyles.Italic : FontStyles.Normal; control.Foreground = Brush(e.Foreground); }
         if (widget is TextBlock text)
@@ -286,6 +323,6 @@ public partial class MainWindow
     string ContextShortcut(string label) => label switch {
         "Group selected"=>DisplayGesture(GestureFor("edit.group")),"Ungroup"=>DisplayGesture(GestureFor("edit.ungroup")),
         "Duplicate"=>DisplayGesture(GestureFor("edit.duplicate")),"Delete"=>DisplayGesture(GestureFor("edit.delete")),
-        "Bring forward"=>DisplayGesture(GestureFor("edit.bringForward")),"Send backward"=>DisplayGesture(GestureFor("edit.sendBackward")),
+        "Rename…"=>DisplayGesture(GestureFor("edit.rename")),"Bring to front"=>DisplayGesture(GestureFor("edit.bringToFront")),"Send to back"=>DisplayGesture(GestureFor("edit.sendToBack")),"Bring forward"=>DisplayGesture(GestureFor("edit.bringForward")),"Send backward"=>DisplayGesture(GestureFor("edit.sendBackward")),
         "Lock" or "Unlock"=>DisplayGesture(GestureFor("edit.toggleLock")),_=>""};
 }

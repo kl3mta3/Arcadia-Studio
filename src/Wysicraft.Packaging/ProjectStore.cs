@@ -59,8 +59,9 @@ public static class ProjectStore
         }
         var usedScripts = p.Screens.Where(s=>!s.IsComponent).SelectMany(s => s.Events.Values.Concat(s.Elements.SelectMany(e => e.Events.Values)))
             .SelectMany(e => new[] { e.Client.Script, e.Server.Script }).Where(s => s.Length > 0).ToHashSet(StringComparer.Ordinal);
-        foreach (var (path, code) in p.Scripts) { if (pack && !usedScripts.Contains(path)) continue; if (!path.StartsWith("scripts/") || !path.EndsWith(".js") || Encoding.UTF8.GetByteCount(code) > 65536) throw new InvalidDataException("Invalid script"); files.Add(Validation.SafePath(path), Encoding.UTF8.GetBytes(code)); }
-        foreach (var (path, data) in TextureAssets.CanonicalAssets(p)) { if (data.Length > MaxEntry) throw new InvalidDataException("Invalid asset"); files.Add(path, data); }
+        int scriptBytes = Limits.For(p).ScriptBytes;
+        foreach (var (path, code) in p.Scripts) { if (pack && !usedScripts.Contains(path)) continue; if (!path.StartsWith("scripts/") || !path.EndsWith(".js") || Limits.SizeOf(code) > scriptBytes) throw new InvalidDataException("Invalid script"); files.Add(Validation.SafePath(path), Encoding.UTF8.GetBytes(code)); }
+        foreach (var (path, data) in TextureAssets.CanonicalAssets(p)) { if (pack && TextureAssets.IsEditorOnly(path)) continue; if (data.Length > MaxEntry) throw new InvalidDataException("Invalid asset"); files.Add(path, data); }
         if (files.Sum(f => (long)f.Value.Length) > MaxPack) throw new InvalidDataException("Pack exceeds 256 MiB");
         return files;
     }
@@ -68,6 +69,7 @@ public static class ProjectStore
     {
         if (project.Screens.Where(s=>!s.IsComponent).SelectMany(s => s.Events.Values.Concat(s.Elements.SelectMany(e => e.Events.Values))).Any(e => e.Server.Script.Length > 0 && e.Server.ScriptEngine == "kubejs")) throw new InvalidDataException("This project has KubeJS scripts. Use Export for KubeJS.");
         var errors = Validation.Check(project); if (errors.Count != 0) throw new InvalidDataException(string.Join("\n", errors));
+        Compatibility.RequireMinecraftScripts(project);
         var files = Files(project, true);
         string temporary = destination + ".tmp";
         try {

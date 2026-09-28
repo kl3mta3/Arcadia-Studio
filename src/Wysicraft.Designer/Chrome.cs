@@ -21,16 +21,18 @@ public partial class MainWindow
             foreach(var entry in entries)menu.Items.Add(entry switch {string id when id=="-"=>new Separator(),string id=>CommandItem(id),_=>entry});
             TrackChecks(menu);Menus.Items.Add(menu);return menu;
         }
-        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","-","file.export","file.exportKube","-","file.exit");
+        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","file.looseCopy","-","file.export","file.exportKube","-","file.exit");
         Top("_Edit","edit.undo","edit.redo","-","edit.cut","edit.copy","edit.paste","edit.duplicate","edit.delete","edit.selectAll","-",
-            "edit.group","edit.ungroup","edit.isolate","-","edit.attach","edit.detach","edit.toggleLock","-","edit.bringForward","edit.sendBackward","-",ArrangeMenu());
+            "edit.group","edit.ungroup","edit.newGroup","edit.isolate","-","edit.attach","edit.detach","edit.toggleLock","-","edit.rename","-",OrderMenu(),ArrangeMenu());
+        MenuItem OrderMenu(){var order=new MenuItem {Header="Arrange"};foreach(var id in new[]{"edit.bringToFront","edit.bringForward","edit.sendBackward","edit.sendToBack"})order.Items.Add(CommandItem(id));return order;}
         var panels=new MenuItem {Header="_Panels"};
         foreach(var (title,id) in new[]{("Toolbox","toolbox"),("Assets","assets"),("Components","components"),("Minecraft items","items"),("Layers","layers"),("Properties","properties"),("Events","events"),("Scripts","scripts"),("Output","output")}) {
             var item=new MenuItem {Header=title};item.Click+=(_,_)=>Guard(()=>ShowDock(id));panels.Items.Add(item);
         }
-        Top("_View",panels,"view.resetLayout","-","view.zoomIn","view.zoomOut","view.zoomActual","view.zoomFit","-","view.grid","view.snap","-","view.shortcuts");
-        Top("_Project","project.preview","project.test","project.validate","-","project.screen","project.settings","project.importTexture","-","project.mcp");
-        Top("_Help","help.scriptApi","view.shortcuts","-","help.about");
+        Top("_View",panels,"view.resetLayout","-","view.zoomIn","view.zoomOut","view.zoomActual","view.zoomFit","-","view.grid","view.snap","-","view.shortcuts","view.askLockChildren");
+        advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.toolbox");
+        Top("_Project","project.preview","project.test","project.validate","-","project.screen","project.settings","-","project.importTexture","project.pixelEditor","project.spriteSheet","-","project.musicMaker","project.soundEffects","project.importAudio","-","project.mcp");
+        Top("_Help","help.manual","help.scriptApi","view.shortcuts","-","help.about");
 
         // Toolbar: every action stays visible; the AI (MCP) button is highlighted so it's easy to find.
         void Tool(string icon,string text,string command,string tip) {
@@ -68,8 +70,8 @@ public partial class MainWindow
         AddScreen.Content=Icons.WithText("add","New screen");AddScreen.ToolTip="Add a screen to this project.";
         ScreenSettings.Content=Icons.WithText("settings","Screen settings");ScreenSettings.ToolTip="Show every setting for this screen in Properties, and its open/close events in Events.";
         DeleteScreenButton.Content=Icons.WithText("delete","Delete screen");
-        LayerUp.Content=Icons.Get("up");LayerDown.Content=Icons.Get("down");LayerDuplicate.Content=Icons.Get("duplicate");
-        LayerUp.ToolTip="Bring forward";LayerDown.ToolTip="Send backward";LayerDuplicate.ToolTip="Duplicate";
+        LayerTop.Content=Icons.Get("top");LayerBottom.Content=Icons.Get("bottom");LayerUp.Content=Icons.Get("up");LayerDown.Content=Icons.Get("down");LayerDuplicate.Content=Icons.Get("duplicate");LayerNewGroup.Content=Icons.WithText("add","Group");
+        LayerTop.ToolTip="Bring to front";LayerBottom.ToolTip="Send to back";LayerUp.ToolTip="Bring forward";LayerDown.ToolTip="Send backward";LayerDuplicate.ToolTip="Duplicate";
     }
     void ShowScreenSettings() {
         selected.Clear();dragBounds=null;Surface.ReleaseMouseCapture();Draw();RefreshInspector();ShowDock("properties");
@@ -77,6 +79,13 @@ public partial class MainWindow
     void ShowAbout() {
         string version=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
         MessageBox.Show(this,$"Wysicraft {version}\nVisual GUI designer for Minecraft 1.21.1 / NeoForge\nBundled Minecraft runtime {RuntimeInfo.Version}\nClient and server JavaScript use the bundled engine.","About Wysicraft");
+    }
+    // The release ships the manual as Docs\Wysicraft-Manual.html beside the Designer folder; development builds fall back to the online wiki.
+    internal static string ManualPath => System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "Docs", "Wysicraft-Manual.html"));
+    const string OnlineManual = "https://github.com/kl3mta3/WYSICRAFT/wiki";
+    void OpenManual() {
+        string target = System.IO.File.Exists(ManualPath) ? ManualPath : OnlineManual;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
     }
     void IsolateSelectedGroup() {
         var element=ui.Elements.FirstOrDefault(e=>selected.Contains(e.Id)) ?? throw new InvalidOperationException("Select something in a group first.");
@@ -86,7 +95,7 @@ public partial class MainWindow
     // Locked controls stay visible but can't be clicked, dragged, box-selected or nudged on the canvas.
     void ToggleSelectionLock() {
         var items=ui.Elements.Where(e=>selected.Contains(e.Id)).ToList();if(items.Count==0)return;
-        bool lockThem=items.Any(e=>!e.Locked);Change();foreach(var e in items)e.Locked=lockThem;
+        bool lockThem=items.Any(e=>!e.Locked);Change();SetLocked(items,lockThem);
         if(lockThem)selected.Clear();Draw();RefreshInspector();Log(lockThem?$"Locked {items.Count} item(s). Unlock them from Layers.":$"Unlocked {items.Count} item(s).");
     }
 }
@@ -105,7 +114,7 @@ public partial class MainWindow
         if(duplicateItem.InputGestureText!="F9")throw new Exception("Rebinding did not update the menu");
         selected.Add("b");Surface.Focus();UpdateLayout();var source=PresentationSource.FromVisual(this)!;
         Surface.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,source,0,System.Windows.Input.Key.F9){RoutedEvent=System.Windows.Input.Keyboard.PreviewKeyDownEvent});
-        if(ui.Elements.Count!=3)throw new Exception("Rebound shortcut did not run");
+        if(ui.Elements.Count!=3)throw new Exception("Rebound shortcut did not run (focus: "+System.Windows.Input.Keyboard.FocusedElement+", modifiers: "+System.Windows.Input.Keyboard.Modifiers+")");
         shortcutOverrides=saved;RefreshShortcutHints();history.Undo();
         // Screen ID rename updates links and the Main screen; variables are validated.
         RenameScreen("cockpit");if(ui.Id!="cockpit" || project.Manifest.DefaultUi!="cockpit" || E("a").Events["click"].Client.Actions[0].Value!="cockpit")throw new Exception("Screen rename did not update references");
@@ -129,7 +138,7 @@ public partial class MainWindow
         // Zoom label follows the view zoom.
         SetViewScale(2);if(!zoomLabel.Text.StartsWith("Zoom 200%") || !zoomLabel.Text.Contains("= 4 screen"))throw new Exception("Zoom label is stale: "+zoomLabel.Text);ZoomActual();
         // Screen settings button shows the merged settings.
-        ShowScreenSettings();if(!Properties.Children.OfType<DockPanel>().Any(d=>d.Children.OfType<TextBlock>().Any(t=>t.Text=="Screen ID")))throw new Exception("Screen settings not shown in Properties");
+        ShowScreenSettings();if(!InspectorItems().OfType<DockPanel>().Any(d=>d.Children.OfType<TextBlock>().Any(t=>t.Text=="Screen ID")))throw new Exception("Screen settings not shown in Properties");
         ShowShortcutSettings(output+".shortcuts.png");
         dirty=false;System.IO.File.WriteAllText(output,"PASS: gesture normalization, menu shortcut hints, rebinding and key dispatch, screen rename references, variables, lock click-through and marquee skip, select all, box selection from outside the canvas, live zoom label, merged screen settings");Application.Current.Shutdown();
     }

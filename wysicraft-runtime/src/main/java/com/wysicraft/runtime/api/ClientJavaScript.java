@@ -7,18 +7,33 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /** Per-event JS scopes with no Java/IO access and bounded statements/output/time.
- * In-process execution does not provide a separate heap quota; install trusted packs. */
+ * In-process execution does not provide a separate heap quota; install trusted packs.
+ *
+ * Every event gets its own context, so nothing carries over between them. The contexts share one engine, which caches
+ * parsed sources: the parse happens on the first event and is reused after, instead of re-parsing the whole script
+ * twenty times a second under a tick handler. Sharing an engine shares compiled code and nothing else — globals,
+ * bindings and resource limits all stay per-context, which ScriptEngineSharingTests holds to. */
 public final class ClientJavaScript implements Scripts.Provider {
+    /** UTF-8 bytes. Past this a single event costs a sizeable share of a 50 ms tick even with the parse cached, and
+     *  Scripts/PackRepository refuse the pack before it gets that far. Raise all three together, or not at all. */
+    public static final int MAX_SCRIPT_BYTES = 256 * 1024;
     public static final ClientJavaScript INSTANCE = new ClientJavaScript();
     private static final ScheduledExecutorService TIMER = Executors.newSingleThreadScheduledExecutor(r -> { var t = new Thread(r,"wysicraft-js-timeout"); t.setDaemon(true); return t; });
+    private static final Engine ENGINE = Engine.newBuilder().option("engine.WarnInterpreterOnly","false").build();
+    /** Parsed sources, keyed by the script text. Bounded so a pack that swaps scripts cannot grow it without end;
+     *  the engine's own cache is what does the work, this only avoids rebuilding the Source wrapper. */
+    private static final Map<String,Source> SOURCES = Collections.synchronizedMap(new LinkedHashMap<>(16,0.75f,true) {
+        protected boolean removeEldestEntry(Map.Entry<String,Source> eldest) { return size() > 64; }
+    });
     private record Output(String type,String target,String value) {}
     public void execute(Scripts.Side side,String source,String function,Scripts.Context host) {
-        if (source.length() > 65536 || !function.matches("[a-zA-Z_][a-zA-Z0-9_]*|")) throw new IllegalArgumentException("Invalid script/function");
+        if (source.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_SCRIPT_BYTES || !function.matches("[a-zA-Z_][a-zA-Z0-9_]*|")) throw new IllegalArgumentException("Invalid script/function");
+        Source parsed = SOURCES.computeIfAbsent(source,text -> Source.newBuilder("js",text,"script.js").cached(true).buildLiteral());
         List<Output> output = new ArrayList<>();
         Map<String,String> variables = new HashMap<>();
-        try (var js = Context.newBuilder("js").allowHostAccess(HostAccess.NONE).allowHostClassLookup(name -> false)
+        try (var js = Context.newBuilder("js").engine(ENGINE).allowHostAccess(HostAccess.NONE).allowHostClassLookup(name -> false)
                 .allowIO(IOAccess.NONE).allowCreateThread(false).allowNativeAccess(false)
-                .allowEnvironmentAccess(EnvironmentAccess.NONE).option("engine.WarnInterpreterOnly","false")
+                .allowEnvironmentAccess(EnvironmentAccess.NONE)
                 .resourceLimits(ResourceLimits.newBuilder().statementLimit(100000,null).build()).build()) {
             js.getBindings("js").putMember("__bridge",(ProxyExecutable)args -> {
                 String op = str(args,0), target = str(args,1), value = str(args,2);
@@ -28,6 +43,7 @@ public final class ClientJavaScript implements Scripts.Provider {
                     case "get_text": return host.text(target);
                     case "element": return host.elementId();
                     case "value": return host.value();
+                    case "repeat": return host.repeat() ? "true" : "false";
                     case "is_server": return side == Scripts.Side.SERVER ? "true" : "false";
                     case "player_name", "player_uuid", "player_position", "player_inventory", "player_permission":
                         if (side != Scripts.Side.SERVER) throw new IllegalArgumentException("Player data requires a Server script");
@@ -37,10 +53,10 @@ public final class ClientJavaScript implements Scripts.Provider {
                 if (op.equals("set_variable")) variables.put(target,value);
                 output.add(new Output(op,target,value)); return null;
             });
-            js.eval("js",BOOTSTRAP);
+            js.eval(BOOTSTRAP_SOURCE);
             var timeout = TIMER.schedule(()->js.close(true),2,TimeUnit.SECONDS);
             try {
-                js.eval("js",source);
+                js.eval(parsed);
                 if (!function.isEmpty()) {
                     var callback = js.getBindings("js").getMember(function);
                     if (callback == null || !callback.canExecute()) throw new IllegalArgumentException("Function not found: " + function);
@@ -66,7 +82,7 @@ public final class ClientJavaScript implements Scripts.Provider {
           }
           var ui = Object.freeze({
             setText:(id,v)=>emit('set_text',id,v), setValue:(id,v)=>emit('set_value',id,v),
-            setItem:setItem,
+            setItem:setItem, play:(id,clip)=>emit('set_value',id,clip),
             setItems:(id,items)=>emit('set_value',id,JSON.stringify(items)),
             setVisible:(id,v)=>emit('set_visible',id,!!v), setEnabled:(id,v)=>emit('set_enabled',id,!!v),
             changeTexture:(id,v)=>emit('change_texture',id,v),
@@ -75,7 +91,7 @@ public final class ClientJavaScript implements Scripts.Provider {
             close:()=>emit('close_ui','',''), open:isServer?(id=>emit('open_ui','',id)):unsupported
           });
           this.ui=ui;
-          this.ctx=Object.freeze({ui:ui,elementId:b('element'),value:b('value'),
+          this.ctx=Object.freeze({ui:ui,elementId:b('element'),value:b('value'),repeat:b('repeat')==='true',
             state:Object.freeze({get:ui.getVariable,set:ui.setVariable}),
             getVariable:ui.getVariable,setVariable:ui.setVariable,
             message:v=>emit('message','',v),
@@ -88,4 +104,6 @@ public final class ClientJavaScript implements Scripts.Provider {
         })(__bridge);
         delete this.__bridge;
         """;
+    // Declared after BOOTSTRAP so it reads in initialisation order rather than relying on constant folding.
+    private static final Source BOOTSTRAP_SOURCE = Source.newBuilder("js",BOOTSTRAP,"wysicraft-bootstrap.js").cached(true).buildLiteral();
 }

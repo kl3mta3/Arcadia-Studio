@@ -20,8 +20,8 @@ public final class ClientRuntime {
         try {
             var mc = Minecraft.getInstance();
             PACKS.reload(Wysicraft.packRoot(),(message,error) -> { if (error != null) Wysicraft.LOG.warn("{}: {}",message,error.toString()); }, dependency -> true, com.wysicraft.runtime.pack.EmbeddedPacks.paths());
-            for (var location : TEXTURES.values()) mc.getTextureManager().release(location); TEXTURES.clear();
-            var ui = Models.JSON.fromJson(packet.json(),Models.Ui.class);
+            for (var location : TEXTURES.values()) mc.getTextureManager().release(location); TEXTURES.clear(); INFO.clear();
+            var ui = Models.JSON.fromJson(com.wysicraft.runtime.network.UiCompression.unpack(packet.data()),Models.Ui.class);
             if (ui == null || !PackRepository.screenId(ui.id) || ui.elements.size() > 512 || ui.schemaVersion != 1) throw new IllegalArgumentException("Invalid UI payload");
             if (mc.screen instanceof DynamicScreen old) old.remoteClosing = true;
             mc.setScreen(new DynamicScreen(ui,packet.session()));
@@ -34,6 +34,28 @@ public final class ClientRuntime {
         if (!Set.of("set_text","set_value","set_visible","set_enabled","set_variable","set_item").contains(packet.action())) return;
         var action = new Models.Action(); action.type = packet.action(); action.target = packet.target(); action.value = packet.value();
         screen.execute(action);
+    }
+    // A texture plus its animation, when a .png.mcmeta sits next to it (Minecraft, resource packs or the project).
+    public record TextureInfo(ResourceLocation location, com.wysicraft.runtime.model.TextureAnimation animation, int width, int height) {}
+    private static final Map<String,TextureInfo> INFO = new HashMap<>();
+    public static TextureInfo textureInfo(String resource) {
+        var cached = INFO.get(resource); if (cached != null) return cached;
+        var location = texture(resource); com.wysicraft.runtime.model.TextureAnimation animation = null; int width = 0, height = 0;
+        try {
+            byte[] png = null; String meta = null; var manager = Minecraft.getInstance().getResourceManager();
+            var found = manager.getResource(location);
+            if (found.isPresent()) {
+                try (var in = found.get().open()) { png = in.readNBytes(24); }
+                var metaFile = manager.getResource(location.withPath(location.getPath() + ".mcmeta"));
+                if (metaFile.isPresent()) try (var in = metaFile.get().open()) { meta = new String(in.readNBytes(65536), java.nio.charset.StandardCharsets.UTF_8); }
+            } else for (var pack : new HashSet<>(PACKS.all().values())) {
+                byte[] data = PackRepository.textureFile(pack,resource); if (data == null) continue;
+                png = data; byte[] metaData = PackRepository.textureFile(pack,resource + ".mcmeta");
+                if (metaData != null) meta = new String(metaData, java.nio.charset.StandardCharsets.UTF_8); break;
+            }
+            if (png != null && png.length >= 24) { var header = java.nio.ByteBuffer.wrap(png); width = header.getInt(16); height = header.getInt(20); if (meta != null) animation = com.wysicraft.runtime.model.TextureAnimation.parse(meta, width, height); }
+        } catch (Exception ex) { Wysicraft.LOG.warn("Texture animation {}: {}",resource,ex.toString()); }
+        var info = new TextureInfo(location, animation, width, height); INFO.put(resource, info); return info;
     }
     public static ResourceLocation texture(String resource) {
         var location = ResourceLocation.parse(resource);
