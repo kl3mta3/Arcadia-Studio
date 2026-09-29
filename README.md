@@ -12,7 +12,6 @@ A Windows visual GUI designer and portable NeoForge runtime for Minecraft Java E
 
 Arcadia Studio is intended for modpack authors and addon developers building menus, dashboards and control panels. Create and Create Aeronautics can be integrated through their documented commands or addon actions; neither mod is required.
 
-![Actual WPF designer displaying the Airship sample](docs/designer.png)
 
 ## Build and launch
 
