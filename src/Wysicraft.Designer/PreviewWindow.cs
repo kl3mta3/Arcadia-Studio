@@ -67,7 +67,8 @@ public partial class MainWindow
         readonly TextBox output = new() { IsReadOnly = true, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, TextWrapping = TextWrapping.Wrap };
         readonly TextBox code = new() { AcceptsReturn = true, AcceptsTab = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Text = "console.log('Hello from the preview!');\n// ui.setText('status', 'It works!');" };
         readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        bool closed; Task? closing;
+        readonly CheckBox profilerBox = new() { Content = "Profiler", IsChecked = false, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Show frame, engine, drawing and script times and counts over the game. Never shown in exported apps." };
+        bool closed, profiling; Task? closing;
         public Window Window { get; }
         public PreviewSession(MainWindow designer, Project project, string id)
         {
@@ -83,6 +84,9 @@ public partial class MainWindow
             var colliders = new CheckBox { Content = "Show colliders", IsChecked = true, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Outline physics colliders. They're never drawn in exported apps." };
             colliders.Click += async (_, _) => await Script($"window.wysicraftHost.showColliders = {(colliders.IsChecked == true ? "true" : "false")}; 0");
             tools.Children.Add(colliders);
+            // The live profiler: frame, engine, draw and script times and what's on screen, over the game.
+            profilerBox.Click += async (_, _) => { profiling = profilerBox.IsChecked == true; await Script(ProfilerScript(profiling)); };
+            tools.Children.Add(profilerBox);
             tools.Children.Add(new TextBlock { Text = "Click controls and use the keyboard to test • Server operations are simulated", Margin = new Thickness(12, 6, 4, 6), VerticalAlignment = VerticalAlignment.Center });
             var sizes = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(sizes, Dock.Top); layout.Children.Add(sizes);
             sizes.Children.Add(new TextBlock { Text = "Layout size (GUI pixels)", Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center });
@@ -105,6 +109,7 @@ public partial class MainWindow
             Window.Closed += (_, _) => { closed = true; view.Dispose(); try { Directory.Delete(folder, true); } catch { } };
             Window.Loaded += async (_, _) => await StartAsync();
         }
+        static string ProfilerScript(bool on) => $"window.wysicraftHost.profiler = {(on ? "true" : "false")}; Wysicraft.app.setProfiler({(on ? "true" : "false")}); 0";
         static TextBlock Header(string title) { var label = new TextBlock { Text = title, Margin = new Thickness(6), Foreground = Brushes.LightSkyBlue, FontSize = 11 }; DockPanel.SetDock(label, Dock.Top); return label; }
         void Print(string category, string text)
         {
@@ -145,7 +150,7 @@ public partial class MainWindow
                 string S(string key) => m[key]?.ToString() ?? "";
                 switch (kind)
                 {
-                    case "ready": ready.TrySetResult(); break;
+                    case "ready": ready.TrySetResult(); if (profiling) _ = Script(ProfilerScript(true)); break;
                     case "event":
                     {
                         string ev = S("event"), where = S("screen") + "." + (S("element").Length > 0 ? S("element") + "." : "") + ev;
@@ -193,11 +198,18 @@ public partial class MainWindow
             await ready.Task;
             for (int i = 0; i < 500 && !closed; i++) { if (await Script("Wysicraft.app.busy") != "true") return; await Task.Delay(20); }
         }
+        // MCP: ticks or clears the Profiler box, then (on) waits for its first figures.
+        internal async Task SetProfilerAsync(bool on)
+        {
+            await WaitReady(); profiling = on; profilerBox.IsChecked = on; await Script(ProfilerScript(on));
+            if (on) for (int i = 0; i < 50 && await Script("Wysicraft.app.profile() !== null") != "true"; i++) await Task.Delay(20);
+        }
         internal async Task<string> SnapshotAsync()
         {
             await WaitReady();
             var node = JsonNode.Parse(JsonSerializer.Deserialize<string>(await Script("JSON.stringify(Wysicraft.app.snapshot())")) ?? "{}")!.AsObject();
             node["logs"] = output.Text.Length > 12000 ? output.Text[^12000..] : output.Text;
+            if (profiling && JsonSerializer.Deserialize<string>(await Script("JSON.stringify(Wysicraft.app.profile())")) is string figures && figures != "null") node["profile"] = JsonNode.Parse(figures);
             return node.ToJsonString();
         }
         async Task<UiDefinition> CurrentScreenAsync() { await WaitReady(); string id = JsonSerializer.Deserialize<string>(await Script("Wysicraft.app.screen")) ?? initialUi; return project.Screens.First(s => s.Id == id); }

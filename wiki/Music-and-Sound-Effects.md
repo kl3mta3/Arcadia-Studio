@@ -1,6 +1,6 @@
 # Music and sound effects
 
-In web and desktop apps, songs a Sound control plays stream while they play; short sound effects are decoded when the game opens so they play instantly. See [[How big should a game be?|Web-and-Desktop-Apps#how-big-should-a-game-be]].
+When a new screen opens with a looping Sound control that autoplays the same song as one still playing (a title theme carried into the next screen), the song carries on from where it is instead of starting again. Give that control no delay. In web and desktop apps, songs a Sound control plays stream while they play; short sound effects are decoded when the game opens so they play instantly. See [[How big should a game be?|Web-and-Desktop-Apps#how-big-should-a-game-be]].
 
 Wysicraft makes its own 8-bit sounds: songs in the **Music maker** and game sounds in the **Sound effect maker**. Both save into **Assets** as ordinary sounds, so you can use them anywhere a sound goes: a Sound control, the *Play sound* action, or `ctx.client.playSound('myproject:theme')` in a script. Each sound also keeps what made it, beside the file, so you can open it again and change it. That file is saved with the project but never exported.
 

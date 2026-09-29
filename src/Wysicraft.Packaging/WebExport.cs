@@ -84,7 +84,19 @@ public static class WebExport
         var collisionMatrix = JsonDocument.Parse(Json.Write(manifest.CollisionMatrix)).RootElement.Clone();
         var shaders = manifest.Shaders.ToDictionary(s => s.Id, s => s.Source);
         var limits = new { scriptOps = manifest.Target == "web" ? Limits.Web.ScriptOps : Limits.Minecraft.ScriptOps, tickMin = manifest.Target == "minecraft" ? Limits.Minecraft.MinTick : Limits.Web.MinTick };
-        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, screens, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
+        // Components travel too, so a script can spawn one while the game runs (ctx.ui.spawn), with the scripts their
+        // controls use even when no screen has one placed.
+        var packed = Json.Clone(project); packed.Manifest.RuntimeVersion = Distribution.RuntimeVersion;
+        var components = new Dictionary<string, JsonElement>();
+        foreach (var component in packed.Screens.Where(s => s.IsComponent))
+        {
+            components[component.Id] = JsonDocument.Parse(Json.Write(ProjectStore.PackScreen(packed, component, true))).RootElement.Clone();
+            foreach (var handler in component.Events.Values.Concat(component.Elements.SelectMany(e => e.Events.Values)))
+                foreach (var script in new[] { handler.Client.Script, handler.Server.Script })
+                    if (script.Length > 0 && !scripts.ContainsKey(script) && project.Scripts.TryGetValue(script, out var code) && script.StartsWith("scripts/") && script.EndsWith(".js") && Limits.SizeOf(code) <= Limits.For(project).ScriptBytes)
+                        scripts[script] = code;
+        }
+        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, screens, components, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
         // JSON inside a <script>: escape "</" so a string can never end the script block.
         string projectJs = "window.WYSICRAFT_PROJECT = " + JsonSerializer.Serialize(data).Replace("</", "<\\/") + ";\n";
         string hostJs = options.HostScript ?? HostTemplate(options.Desktop);

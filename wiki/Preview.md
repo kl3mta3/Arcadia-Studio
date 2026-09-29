@@ -20,6 +20,7 @@ Preview runs your project on the same engine as [[web page, Windows and Electron
 | **Layout size (GUI pixels)** + **Apply size** | Lays the screen out at another size, to test [[anchors|Anchors-and-Responsive-Layouts]]. Only works when **Responsive layout** is on for the screen. Doesn't change your design. |
 | **Console** | Clicks, actions, script output (`console.log`) and errors with file and line. |
 | **JavaScript scratchpad** + **Run JavaScript** | Try script code instantly against the previewed screen. |
+| **Profiler** | Shows where each frame's time goes, over the game. See [Profiler](#profiler). |
 
 Try this in the scratchpad:
 
@@ -27,6 +28,22 @@ Try this in the scratchpad:
 console.log('Hello from the preview!');
 ui.setText('status', 'It works!');
 ```
+
+## Profiler
+
+Tick **Profiler** to see where the time goes, over the game. The figures are averages over the last quarter second:
+
+| Line | What it is |
+| --- | --- |
+| **FRAME**, **fps**, **worst** | Time from one frame to the next, and the longest in that quarter second. 16.7 ms is 60 frames a second. |
+| **engine** | The engine's own work each frame, split into **logic** (inputs, state graphs, animations), **objects** (spawned copies moving and keeping apart), **physics** and **particles**. |
+| **draw** | Drawing the screen, and how many batches went to the graphics card (`canvas` when there's no WebGL). |
+| **script** | One script run from start to finish (sending the screen, running, applying its changes), how many run a second, the slowest, and how many changes each makes. Scripts run apart from drawing, so a slow one delays its own changes, not the frame. |
+| **controls**, **spawned**, **bodies**, **pairs**, **particles** | What's on screen: all controls, spawned copies, shown controls with a body, the pairs of bodies physics tested in its last step, and live particles. |
+
+Under the figures there's a bar for each recent frame: green within a 60 fps frame, yellow over it, red over 33 ms.
+
+The profiler is never shown in exported apps. It stays on through **Reset preview**. An AI assistant can tick it too (MCP `preview_control`, action `profile`), and while it's on, Preview results include its figures as `profile`. In a web export you can still turn it on from the browser's developer console with `Wysicraft.app.setProfiler(true)`. `Wysicraft.app.profile()` gives the same figures as data.
 
 ## How close is it to Minecraft?
 

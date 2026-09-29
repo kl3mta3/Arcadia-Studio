@@ -404,7 +404,16 @@
   }
 
   // ---- Layout (model/ContainerTree.java, model/ResponsiveLayout.java) ----
-  function elementOf(ui, id) { return ui.elements.find(e => e.id === id) || null; }
+  // An ID -> control index, rebuilt when the list of controls changes (spawned objects come and go), so a lookup
+  // doesn't scan every control. The first control with an ID wins, as a scan would.
+  function elementOf(ui, id) {
+    let index = ui._index;
+    if (!index || ui._indexCount !== ui.elements.length) {
+      index = new Map(); for (const e of ui.elements) if (!index.has(e.id)) index.set(e.id, e);
+      ui._index = index; ui._indexCount = ui.elements.length;
+    }
+    return index.get(id) || null;
+  }
   function ancestors(ui, child) {
     const result = [], seen = new Set([child.id]); let id = child.parent;
     while (id) { if (seen.has(id) || seen.size > 33) break; seen.add(id); const p = elementOf(ui, id); if (!p || (p.type !== 'panel' && p.type !== 'scroll_panel' && p.type !== 'camera')) break; result.push(p); id = p.parent; }
@@ -453,6 +462,8 @@
     constructor(container, project, host, options) {
       this.project = project; this.host = host || {}; this.container = container;
       this.screens = {}; for (const [id, ui] of Object.entries(project.screens)) this.screens[id] = normalizeUi(ui);
+      // Components (reusable groups of controls) that scripts can spawn while the game runs.
+      this.components = {}; for (const [id, ui] of Object.entries(project.components || {})) this.components[id] = normalizeUi(ui);
       this.images = new Map(); this.animations = new Map(); this.loadImages(); this.loadFonts();
       // A touch device: a game can ask, and put its own buttons on screen only where they are needed.
       this.isTouch = (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) || 'ontouchstart' in window;
@@ -477,7 +488,9 @@
       if (project && project.sounds) { const streamed = this.streamedSounds(); for (const [id, url] of Object.entries(project.sounds)) if (!streamed.has(id)) this.soundBuffer(url); }
       window.addEventListener('resize', () => this.layout());
       this.switchTo((options && options.screen) || project.main || Object.keys(this.screens)[0]);
-      const frame = () => { this.tick(); this.render(); requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+      this.prof = null; this.physicsCounts = { bodies: 0, pairs: 0 };
+      const frame = t => { if (this.prof) this.profiledFrame(t); else { this.tick(); this.render(); } requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+      if (this.host.profiler) this.setProfiler(true);
       // Keeps ticking in background tabs, where animation frames pause. While the page is visible the frame loop
       // already ticks, so this stays out of the way instead of doubling the work.
       setInterval(() => { if (document.hidden) this.tick(); }, 16);
@@ -685,7 +698,7 @@
         case 'slider': case 'progress': {
           let v = parseFloat(e.value); if (isNaN(v)) v = e.minimum;
           const f = Math.floor(w * Math.min(1, Math.max(0, (v - e.minimum) / (e.maximum - e.minimum || 1))));
-          g.fillStyle = '#318DB5'; g.fillRect(x, y, f, h); this.text(e, x, y, w, h, e.value); break;
+          g.save(); g.globalAlpha *= Math.min(1, Math.max(0, e.opacity)); g.fillStyle = '#318DB5'; g.fillRect(x, y, f, h); g.restore(); this.text(e, x, y, w, h, e.value); break;
         }
         case 'dropdown': {
           const i = parseInt(e.value, 10) || 0; const t = e.options.length ? e.options[Math.min(Math.max(i, 0), e.options.length - 1)] : '(empty)';
@@ -1116,10 +1129,12 @@
       const inputs = {}; for (const n of this.inputsDown || []) inputs[n] = true;
       // Only what changed since the script side last heard: it keeps its own copy of the screen (scriptDelta).
       this.scripts.prepare();
+      const started = this.prof ? performance.now() : 0;
       const delta = this.scriptDelta();
-      const result = await this.scripts.run(Object.assign(delta, { source, sourceKey: this.sourceKey(handler, source), fn: handler.function || '', isServer, element: element ? element.id : '', value: String(value ?? ''), repeat: !!repeat, player, maxOps: this.limits.scriptOps, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, touching: this.touchingMap ? this.touchingMap() : {} }));
+      const result = await this.scripts.run(Object.assign(delta, { source, sourceKey: this.sourceKey(handler, source), fn: handler.function || '', isServer, element: element ? element.id : '', value: String(value ?? ''), repeat: !!repeat, player, maxOps: this.limits.scriptOps, spawnSeq: this.instanceSeq, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, touching: this.touchingMap ? this.touchingMap() : {} }));
       for (const line of result.logs || []) this.log(line.level, '[' + handler.script + '] ' + line.text);
       if (result.error) { this.log('error', 'Script ' + name + ': ' + result.error); return; }
+      if (started) queueMicrotask(() => this.profileScript(performance.now() - started, result.ops.length));
       for (const [type, target, v] of result.ops) {
         if (this.ui !== screen) break;
         const e = elementOf(this.ui, target);
@@ -1132,7 +1147,7 @@
           case 'change_texture': if (e) e.texture = v; break;
           case 'set_variable': this.state[target] = v; if (this.scriptSent && this.scriptSent.ui === screen) this.scriptSent.vars.set(target, v); break;
           case 'message': this.message(v); break;
-          case 'play_sound': this.playSound(v); break;
+          case 'play_sound': this.playSound(v, target === '' ? undefined : Number(target)); break;
           case 'close_ui': await this.close(); return;
           case 'open_ui': await this.open(v); return;
           case 'command': if (this.host.onCommand) this.hook('onCommand', v, this.info(element, '', value)); else this.log('info', 'Command (add onCommand in host.js to handle it): ' + v); break;
@@ -1145,7 +1160,28 @@
       switch (type) {
         case 'set_velocity': if (element && nums.every(Number.isFinite)) this.velocity.set(element.id, { x: nums[0], y: nums[1] }); return;
         case 'set_position': if (element && nums.every(Number.isFinite)) this.moveElement(element, nums[0] - element.bounds.x, nums[1] - element.bounds.y); return;
+        case 'set_volume': if (element && element.type === 'sound' && Number.isFinite(nums[0])) { element.volume = Math.min(1, Math.max(0, nums[0])); const a = this.playingSounds && this.playingSounds.get(element.id); if (a) a.volume = element.volume * (this.host.volume ?? 1); } return;
         case 'set_size': if (element && nums.every(Number.isFinite)) { element.bounds.width = Math.min(16384, Math.max(1, nums[0])); element.bounds.height = Math.min(16384, Math.max(1, nums[1])); } return;
+        case 'spawn': { let spec = null; try { spec = JSON.parse(value); } catch (ex) { } if (spec) this.spawnInstance(target, spec); return; }
+        case 'despawn': {
+          const member = elementOf(this.ui, target);
+          if (member && member._memberOf) { this.log('warn', 'despawn: ' + target + ' is part of the spawned component ' + member._memberOf + '; despawn that'); return; }
+          if (!this.despawnInstance(target)) this.log('warn', 'despawn: ' + target + ' is not a spawned object');
+          return;
+        }
+        case 'separate': {
+          // A copy: its spacing. A template: all its live copies and the ones spawned later.
+          const px = Math.max(0, Number(value) || 0), inst = this.instances.get(target);
+          if (inst) inst.separate = px;
+          else if (element || this.components[target]) { if (!this.separateDefaults) this.separateDefaults = new Map(); this.separateDefaults.set(target, px); for (const i of this.instances.values()) if (i.template === target) i.separate = px; }
+          return;
+        }
+        case 'seek': {
+          const inst = this.instances.get(target); if (!inst) return;
+          const parts = value.split(','); inst.seek = parts[0] || ''; inst.speed = Number(parts[1]) || 0; inst.path = parts[2] || '';
+          if (!inst.seek) this.velocity.set(target, { x: 0, y: 0 });
+          return;
+        }
         case 'emit_particles': this.emitParticles(target); return;
         case 'stop_particles': this.stopParticles(target, value === 'clear'); return;
         case 'play_animation': this.playAnimation(target); return;
@@ -1166,7 +1202,7 @@
       }
       this.log('warn', 'Unsupported script action ' + type);
     }
-    playSound(sound) { this.hook('onSound', sound); this.playAudio(sound); }
+    playSound(sound, volume) { this.hook('onSound', sound); this.playAudio(sound, volume); }
     // What host.js can use to drive the UI from outside (for example after a fetch), and what Preview uses.
     api() {
       const self = this;
@@ -1190,7 +1226,11 @@
           self.enqueue(e, event, value);
         },
         runScript: source => self.request({ kind: 'script', source: String(source) }),
-        setViewport: (width, height) => { self.viewport = width > 0 && height > 0 ? { width, height } : null; self.layout(); }
+        setViewport: (width, height) => { self.viewport = width > 0 && height > 0 ? { width, height } : null; self.layout(); },
+        // The live profiler: an overlay of frame, engine, draw and script times and what's on screen. profile() gives
+        // the latest figures (null while it's off or before its first quarter second).
+        setProfiler: on => self.setProfiler(!!on),
+        profile: () => (self.prof && self.prof.figures ? Object.assign({}, self.prof.figures) : null)
       };
     }
   }
@@ -1270,9 +1310,23 @@
 
   Object.assign(App.prototype, {
     resetGame() {
+      // Music carries on across screens: a looping sound still playing continues, from where it is, into a new screen
+      // that autoplays the same sound on a looping Sound control, instead of stopping and starting again.
+      const carried = new Map();
+      if (this.playingSounds && this.project.sounds) for (const e of this.ui.elements) {
+        if (e.type !== 'sound' || !e.autoplay || !e.loop || !e.sound || e.delay > 0) continue;
+        const url = this.project.sounds[e.sound];
+        for (const [id, a] of this.playingSounds) if (a.loop && !a.paused && a.wysicraftUrl === url && ![...carried.values()].includes(a)) { carried.set(e.id, a); this.playingSounds.delete(id); break; }
+      }
       this.stopAllSounds(); this.resetParticles();
-      for (const e of this.ui.elements) if (e.type === 'sound' && e.autoplay && e.sound) this.soundTimers.push(setTimeout(() => this.startSound(e), Math.max(0, e.delay)));
+      for (const [id, a] of carried) {
+        const e = this.ui.elements.find(x => x.id === id);
+        if (!this.controlAudio) this.controlAudio = new Map();
+        this.controlAudio.set(id, a); this.playingSounds.set(id, a); a.volume = Math.min(1, Math.max(0, e.volume)) * (this.host.volume ?? 1);
+      }
+      for (const e of this.ui.elements) if (e.type === 'sound' && e.autoplay && e.sound && !carried.has(e.id)) this.soundTimers.push(setTimeout(() => this.startSound(e), Math.max(0, e.delay)));
       for (const e of this.ui.elements) if (e.type === 'particles' && e.autoplay && e.effect) this.emitParticles(e.id);
+      this.separateDefaults = new Map(); this.instances = new Map(); this.instanceSeq = 1; this.instanceTime = performance.now(); this.instancesVersion = 0; this.instanceCapWarned = false;
       this.spriteClock = new Map(); this.graphStates = new Map(); this.velocity = new Map(); this.contacts = new Set(); this.overlaps = new Set(); this.stayTimes = new Map(); this.playing = new Map();
       this.virtualInputs = new Set(); this.inputsDown = new Set(); this.inputAxes = {}; this.stick = null; this.physicsTime = performance.now(); this.children = null;
       for (const a of this.ui.animations || []) if (a.autoplay) this.playing.set(a.id, { anim: a, start: performance.now() });
@@ -1364,10 +1418,10 @@
     // (a few dozen), after which effects went silent for the rest of the run while music already playing carried on.
     // Where Web Audio cannot load a sound (a page opened from disk cannot fetch its files) a few elements per sound
     // are reused instead.
-    playAudio(sound) {
+    playAudio(sound, level) {
       const url = this.project.sounds && this.project.sounds[sound];
       if (!url) return;
-      const volume = this.host.volume ?? 1, entry = this.soundBuffer(url), ac = this.audioCtx;
+      const volume = (this.host.volume ?? 1) * (Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 1), entry = this.soundBuffer(url), ac = this.audioCtx;
       if (entry.state === 'ready' && ac) {
         if (ac.state !== 'running') { this.unlockAudio(); return; } // would only play late, all at once, after the first click
         const source = ac.createBufferSource(), gain = ac.createGain();
@@ -1654,7 +1708,7 @@
       let cache = this._tiles.get(e.id);
       const columns = Math.max(1, e.columns | 0), rows = Math.max(1, e.rows | 0);
       if (!cache || (!cache.dirty && cache.text !== e.tiles) || cache.columns !== columns || cache.rows !== rows || cache.solidText !== e.solid) {
-        cache = { text: e.tiles, columns, rows, grid: readTiles(e.tiles, columns, rows), solid: solidTiles(e.solid), solidText: e.solid, dirty: false };
+        cache = { text: e.tiles, columns, rows, grid: readTiles(e.tiles, columns, rows), solid: solidTiles(e.solid), solidText: e.solid, dirty: false, version: this.tileVersion = (this.tileVersion || 0) + 1 };
         this._tiles.set(e.id, cache);
       }
       return cache;
@@ -1670,7 +1724,7 @@
       if (column < 0 || row < 0 || column >= cache.columns || row >= cache.rows) return false;
       const at = row * cache.columns + column;
       if (cache.grid[at] === index) return true;
-      cache.grid[at] = index; cache.dirty = true;
+      cache.grid[at] = index; cache.dirty = true; cache.version = this.tileVersion = (this.tileVersion || 0) + 1;
       return true;
     },
     shapeOf(e) {
@@ -1680,13 +1734,14 @@
         const key = JSON.stringify(e.colliderPoints); if (!e._tris || e._trisKey !== key) { e._tris = triangulate(flattenPoints(e.colliderPoints)); e._trisKey = key; }
         return { polys: e._tris.map(t => t.map(p => [x + p[0], y + p[1]])) };
       }
-      return { polys: [[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]] };
+      return { polys: [[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]], rect: true };
     },
     // Triggers (element.trigger) notice overlaps but never push or get pushed: pickups, checkpoints, zones.
     // A trigger pair needs something that moves (dynamic or kinematic) so zones sitting still don't report
     // each other when the screen opens.
     stepPhysics(now) {
       const bodies = this.ui.elements.filter(e => (e.body || e.type === 'collider') && e.visible);
+      this.physicsCounts.bodies = bodies.length; if (!bodies.length) this.physicsCounts.pairs = 0;
       const active = bodies.some(b => b.body === 'dynamic' || b.trigger);
       let elapsed = active ? Math.min(0.1, (now - this.physicsTime) / 1000) : 0; this.physicsTime = now;
       if (active && elapsed <= 0) return; // no time passed: keep the current contacts rather than ending them all
@@ -1701,39 +1756,87 @@
         // anything), and pairs whose outlines don't overlap skip the full separating-axis test.
         const shapes = bodies.map(() => null);
         const shapeAt = i => shapes[i] || (shapes[i] = boxOf(this.shapeOf(bodies[i])));
-        for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
+        // One pair of bodies: overlap for triggers, a push apart and a bounce for solid bodies.
+        const test = (i, j) => {
           const a = bodies[i], b = bodies[j];
-          if (!this.layersMeet(a, b)) continue;
-          const pair = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
+          if (!this.layersMeet(a, b)) return;
           if (a.trigger || b.trigger) {
-            if (overlapping.has(pair) || (!moves(a) && !moves(b))) continue;
+            if (!moves(a) && !moves(b)) return;
             const sa = shapeAt(i), sb = shapeAt(j);
-            if (sa.box[0] > sb.box[2] || sb.box[0] > sa.box[2] || sa.box[1] > sb.box[3] || sb.box[1] > sa.box[3]) continue;
-            if (collide(sa, sb)) overlapping.add(pair);
-            continue;
+            if (sa.box[0] > sb.box[2] || sb.box[0] > sa.box[2] || sa.box[1] > sb.box[3] || sb.box[1] > sa.box[3]) return;
+            const pair = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
+            if (!overlapping.has(pair) && collide(sa, sb)) overlapping.add(pair);
+            return;
           }
-          const ad = a.body === 'dynamic', bd = b.body === 'dynamic'; if (!ad && !bd) continue;
+          const ad = a.body === 'dynamic', bd = b.body === 'dynamic'; if (!ad && !bd) return;
           const sa = shapeAt(i), sb = shapeAt(j);
-          if (sa.box[0] > sb.box[2] || sb.box[0] > sa.box[2] || sa.box[1] > sb.box[3] || sb.box[1] > sa.box[3]) continue;
-          const hit = collide(sa, sb); if (!hit) continue;
-          shapes.fill(null); // resolving the hit moves bodies (and anything inside them)
+          if (sa.box[0] > sb.box[2] || sb.box[0] > sa.box[2] || sa.box[1] > sb.box[3] || sb.box[1] > sa.box[3]) return;
+          const hit = collide(sa, sb); if (!hit) return;
+          const pair = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
+          // Resolving the hit moves the two bodies (and anything inside them): their shapes are built again.
+          if (this.hasChildren(a) || this.hasChildren(b)) shapes.fill(null); else { shapes[i] = null; shapes[j] = null; }
           touching.add(pair);
           const [nx, ny] = hit.normal, depth = hit.depth; // normal points from a to b
           const share = ad && bd ? 0.5 : 1;
           if (ad) this.moveElement(a, -nx * depth * share, -ny * depth * share);
           if (bd) this.moveElement(b, nx * depth * share, ny * depth * share);
           const va = this.velocity.get(a.id) || { x: 0, y: 0 }, vb = this.velocity.get(b.id) || { x: 0, y: 0 };
-          const rel = (vb.x - va.x) * nx + (vb.y - va.y) * ny; if (rel >= 0) continue;
+          const rel = (vb.x - va.x) * nx + (vb.y - va.y) * ny; if (rel >= 0) return;
           const bounce = Math.max(a.bounce, b.bounce), friction = Math.max(a.friction, b.friction);
           const impulse = -(1 + bounce) * rel * (ad && bd ? 0.5 : 1);
           const slide = v => { const vn = v.x * nx + v.y * ny, tx = v.x - vn * nx, ty = v.y - vn * ny, keep = Math.max(0, 1 - friction * 0.25); return { x: vn * nx + tx * keep, y: vn * ny + ty * keep }; };
           if (ad) this.velocity.set(a.id, slide({ x: va.x - impulse * nx, y: va.y - impulse * ny }));
           if (bd) this.velocity.set(b.id, slide({ x: vb.x + impulse * nx, y: vb.y + impulse * ny }));
-        }
+        };
+        if (bodies.length <= BROADPHASE_MIN) { for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) test(i, j); this.physicsCounts.pairs = bodies.length * (bodies.length - 1) / 2; }
+        else { const near = this.nearPairs(bodies, shapeAt); for (let k = 0; k < near.length; k += 2) test(near[k], near[k + 1]); this.physicsCounts.pairs = near.length / 2; }
         for (const map of maps) for (const b of bodies) if (b.body === 'dynamic' && this.tileCollide(b, map)) touching.add(b.id < map.id ? b.id + '|' + map.id : map.id + '|' + b.id);
       }
       this.contacts = this.contactChanges(this.contacts, touching, 'collide', 'collide_end', 'collide_stay', now);
       this.overlaps = this.contactChanges(this.overlaps, overlapping, 'trigger_enter', 'trigger_exit', 'trigger_stay', now);
+    },
+    // Pairs of bodies whose outlines overlap, as a flat [i, j, i, j, ...] list with i < j. Each body goes into the
+    // grid cells its outline covers; cells are about twice the size of a typical body, so a cell holds a handful. A
+    // pair is listed only by the cell where the overlap of the two outlines begins, so a pair sharing several cells
+    // is still listed once. A body covering a great many cells (a wide floor) is checked against every body instead.
+    nearPairs(bodies, shapeAt) {
+      const n = bodies.length, boxes = new Array(n), big = [], out = [];
+      let size = 0, counted = 0;
+      for (let i = 0; i < n; i++) { const bx = boxes[i] = shapeAt(i).box, span = Math.max(bx[2] - bx[0], bx[3] - bx[1]); if (span < 1024) { size += span; counted++; } }
+      const cell = Math.min(256, Math.max(BROADPHASE_CELL / 4, counted ? 2 * size / counted : BROADPHASE_CELL));
+      const grid = new Map();
+      for (let i = 0; i < n; i++) {
+        const bx = boxes[i], x0 = Math.floor(bx[0] / cell), x1 = Math.floor(bx[2] / cell), y0 = Math.floor(bx[1] / cell), y1 = Math.floor(bx[3] / cell);
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 64) { big.push(i); continue; }
+        for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) { const key = (cx + 32768) * 65536 + (cy + 32768); let list = grid.get(key); if (!list) grid.set(key, list = []); list.push(i); }
+      }
+      for (const [key, list] of grid) {
+        const cx = Math.floor(key / 65536) - 32768, cy = key % 65536 - 32768;
+        for (let p = 0; p < list.length; p++) {
+          const i = list[p], bi = boxes[i];
+          for (let q = p + 1; q < list.length; q++) {
+            const j = list[q], bj = boxes[j];
+            if (bi[0] > bj[2] || bj[0] > bi[2] || bi[1] > bj[3] || bj[1] > bi[3]) continue;
+            // Only the cell holding the start of the overlap lists the pair.
+            if (Math.floor(Math.max(bi[0], bj[0]) / cell) !== cx || Math.floor(Math.max(bi[1], bj[1]) / cell) !== cy) continue;
+            if (i < j) out.push(i, j); else out.push(j, i);
+          }
+        }
+      }
+      if (big.length) {
+        const isBig = new Set(big);
+        for (const i of big) for (let j = 0; j < n; j++) {
+          if (j === i || (isBig.has(j) && j < i)) continue; // two big bodies are listed once
+          const bi = boxes[i], bj = boxes[j];
+          if (bi[0] > bj[2] || bj[0] > bi[2] || bi[1] > bj[3] || bj[1] > bi[3]) continue;
+          if (i < j) out.push(i, j); else out.push(j, i);
+        }
+      }
+      return out;
+    },
+    hasChildren(e) {
+      if (!this.children) { this.children = new Map(); for (const c of this.ui.elements) if (c.parent) { if (!this.children.has(c.parent)) this.children.set(c.parent, []); this.children.get(c.parent).push(c); } }
+      return this.children.has(e.id);
     },
     // Pushes one body out of a tilemap's solid tiles. Only the tiles under the body's own box are looked at, and a
     // face with a solid tile against it is skipped, so a body sliding along a tiled floor doesn't catch on the seams.
@@ -1800,11 +1903,22 @@
     scriptDelta() {
       const runner = this.scripts, elements = this.ui.elements;
       let sent = this.scriptSent, reset = false;
-      if (!sent || sent.generation !== runner.generation || sent.ui !== this.ui || sent.count !== elements.length) {
-        sent = this.scriptSent = { generation: runner.generation, ui: this.ui, count: elements.length, texts: new Map(), bodies: new Map(), vars: new Map(), tags: new Map(), tilemaps: new Map() };
+      if (!sent || sent.generation !== runner.generation || sent.ui !== this.ui) {
+        sent = this.scriptSent = { generation: runner.generation, ui: this.ui, count: elements.length, instancesVersion: -1, texts: new Map(), bodies: new Map(), vars: new Map(), tags: new Map(), tilemaps: new Map() };
         reset = true;
       }
-      let texts = null, bodies = null, tilemaps = null, tagsChanged = reset;
+      let texts = null, bodies = null, tilemaps = null, tagsChanged = reset, gone = null, instances = null;
+      // Controls that have gone since last time (spawned objects removed) are named, so the script side drops them;
+      // new ones arrive below like any changed control.
+      if (!reset && (sent.count !== elements.length || sent.instancesVersion !== this.instancesVersion)) {
+        for (const id of [...sent.bodies.keys()]) if (!elementOf(this.ui, id)) { (gone = gone || []).push(id); sent.bodies.delete(id); sent.texts.delete(id); sent.tags.delete(id); sent.tilemaps.delete(id); }
+        if (gone) tagsChanged = true;
+      }
+      sent.count = elements.length;
+      if (reset || sent.instancesVersion !== this.instancesVersion) {
+        instances = {}; for (const [id, inst] of this.instances) (instances[inst.template] = instances[inst.template] || []).push(id);
+        sent.instancesVersion = this.instancesVersion;
+      }
       for (const e of elements) {
         const id = e.id;
         if (reset || sent.texts.get(id) !== e.text) { (texts = texts || {})[id] = e.text; sent.texts.set(id, e.text); }
@@ -1812,19 +1926,21 @@
         const sprite = e.type === 'sprite', clip = sprite ? this.spriteProgress(e) : null;
         const frame = sprite ? this.spriteFrame(e) : 0, clipName = e.value || '', step = clip ? clip.step : 0, done = clip ? clip.done : true, state = this.stateOf(id);
         const tags = e.tags || [], tagKey = tags.length ? tags.join('\u0001') : '';
+        // For raycasts: the body kind ('' for none), whether it's a trigger, and a round collider.
+        const kind = (e.body || (e.type === 'collider' ? 'static' : '')) + (e.trigger ? '/trigger' : '') + (e.collider === 'circle' ? '/circle' : '');
         if (!reset && sent.tags.get(id) !== tagKey) tagsChanged = true;
         sent.tags.set(id, tagKey);
         const b = sent.bodies.get(id), r = e.bounds;
         if (reset || !b || b.x !== r.x || b.y !== r.y || b.width !== r.width || b.height !== r.height || b.vx !== vx || b.vy !== vy || b.visible !== e.visible
-            || b.frame !== frame || b.clip !== clipName || b.clipStep !== step || b.clipDone !== done || b.state !== state || b.tagKey !== tagKey) {
-          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice() };
+            || b.frame !== frame || b.clip !== clipName || b.clipStep !== step || b.clipDone !== done || b.state !== state || b.tagKey !== tagKey || b.kind !== kind) {
+          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice(), kind };
           (bodies = bodies || {})[id] = body; sent.bodies.set(id, Object.assign({ tagKey }, body));
         }
         if (e.type === 'tilemap') {
           const text = this.tilesText(e), m = sent.tilemaps.get(id);
           const columns = Math.max(1, e.columns | 0), rows = Math.max(1, e.rows | 0), tw = Math.max(1, e.tileWidth | 0), th = Math.max(1, e.tileHeight | 0);
-          if (reset || !m || m.tiles !== text || m.x !== r.x || m.y !== r.y || m.columns !== columns || m.rows !== rows || m.tileWidth !== tw || m.tileHeight !== th) {
-            const map = { columns, rows, tileWidth: tw, tileHeight: th, x: r.x, y: r.y, tiles: text };
+          if (reset || !m || m.tiles !== text || m.x !== r.x || m.y !== r.y || m.columns !== columns || m.rows !== rows || m.tileWidth !== tw || m.tileHeight !== th || m.solid !== (e.solid || '') || m.visible !== e.visible) {
+            const map = { columns, rows, tileWidth: tw, tileHeight: th, x: r.x, y: r.y, tiles: text, solid: e.solid || '', visible: e.visible };
             (tilemaps = tilemaps || {})[id] = map; sent.tilemaps.set(id, map);
           }
         }
@@ -1834,7 +1950,7 @@
       let vars = null, varsGone = null, count = 0;
       for (const k in this.state) { count++; const v = this.state[k]; if (reset || sent.vars.get(k) !== v) { (vars = vars || {})[k] = v; sent.vars.set(k, v); } }
       if (sent.vars.size > count) for (const k of [...sent.vars.keys()]) if (!(k in this.state)) { (varsGone = varsGone || []).push(k); sent.vars.delete(k); }
-      return { reset, texts, bodies, tagged, tilemaps, vars, varsGone };
+      return { reset, texts, bodies, tagged, tilemaps, vars, varsGone, gone, instances };
     },
     // A name for a script's source that stays the same while the source does, so the script side compiles it once.
     // The scratchpad and other one-off sources get none and are compiled every time, as before.
@@ -1852,10 +1968,267 @@
       for (const set of [this.contacts, this.overlaps]) for (const pair of set || []) { const [a, b] = pair.split('|'); (map[a] = map[a] || []).push(b); (map[b] = map[b] || []).push(a); }
       return map;
     },
+    // ---- Spawned objects ----
+    // Copies of a template control made while the game runs (ctx.ui.spawn). Each is an ordinary control: it is drawn,
+    // clicked and collided like any other and has the template's events, with its own ID as ctx.elementId. The engine
+    // also moves it (a velocity, or a control to seek at a speed) and removes it when its lifetime runs out.
+    spawnInstance(templateId, spec) {
+      const template = elementOf(this.ui, templateId);
+      if (!template && this.components[templateId]) { this.spawnComponent(templateId, spec); return; }
+      if (!template) { this.log('warn', 'spawn: there is no control or component ' + templateId); return; }
+      if (template._instanceOf) { this.log('warn', 'spawn: ' + templateId + ' is itself a spawned copy; spawn from ' + template._instanceOf); return; }
+      if (this.instances.size >= MAX_INSTANCES) { if (!this.instanceCapWarned) { this.instanceCapWarned = true; this.log('warn', 'spawn: at most ' + MAX_INSTANCES + ' spawned objects at once; the rest are skipped'); } return; }
+      const id = String(spec.id || '');
+      if (!id || elementOf(this.ui, id)) { this.log('warn', 'spawn: the ID "' + id + '" is already in use'); return; }
+      const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+      const e = clone(template);
+      e.id = id; e._instanceOf = template.id; e.visible = true;
+      e.bounds = { x: num(spec.x, template.bounds.x), y: num(spec.y, template.bounds.y), width: template.bounds.width, height: template.bounds.height };
+      if (spec.clip !== undefined && spec.clip !== null) e.value = String(spec.clip);
+      if (spec.texture) e.texture = String(spec.texture);
+      // Right after the template and its earlier copies, so copies draw where the template does in the draw order.
+      const list = this.ui.elements; let at = list.indexOf(template) + 1;
+      while (at < list.length && list[at]._instanceOf === template.id) at++;
+      list.splice(at, 0, e);
+      const spacing = num(spec.separate, this.separateDefaults ? this.separateDefaults.get(template.id) || 0 : 0);
+      this.instances.set(id, { template: template.id, life: num(spec.life, 0) > 0 ? spec.life : Infinity, seek: spec.seek ? String(spec.seek) : '', speed: num(spec.speed, 0), separate: Math.max(0, spacing), path: spec.path ? String(spec.path) : '' });
+      if (num(spec.vx, 0) || num(spec.vy, 0)) this.velocity.set(id, { x: num(spec.vx, 0), y: num(spec.vy, 0) });
+      const n = Number(id.slice(id.lastIndexOf('~') + 1)); if (Number.isFinite(n) && n >= this.instanceSeq) this.instanceSeq = n + 1;
+      this.elementsChanged();
+    },
+    // A component: its controls under a new transparent root the size of the component, placed at x, y. Each control
+    // keeps its own look, body and events, with the ID root + '_' + its ID in the component, and actions aimed at other
+    // controls of the component are aimed at this copy's ones (as the editor does when placing a component).
+    spawnComponent(componentId, spec) {
+      const source = this.components[componentId];
+      if (this.instances.size >= MAX_INSTANCES) { if (!this.instanceCapWarned) { this.instanceCapWarned = true; this.log('warn', 'spawn: at most ' + MAX_INSTANCES + ' spawned objects at once; the rest are skipped'); } return; }
+      if (source.elements.length > MAX_COMPONENT_CONTROLS) { this.log('warn', 'spawn: ' + componentId + ' has more than ' + MAX_COMPONENT_CONTROLS + ' controls'); return; }
+      const id = String(spec.id || '');
+      if (!id || elementOf(this.ui, id)) { this.log('warn', 'spawn: the ID "' + id + '" is already in use'); return; }
+      const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d), x = num(spec.x, 0), y = num(spec.y, 0);
+      const own = new Set(source.elements.map(e => e.id)), rename = old => id + '_' + old;
+      const root = normalizeElement({ id, type: 'panel', fillEnabled: false, borderWidth: 0, text: '', visible: true, enabled: true, events: {}, tags: [], bounds: { x, y, width: source.size.width, height: source.size.height } });
+      root._instanceOf = componentId; root._component = true;
+      const members = source.elements.map(src => {
+        const c = clone(src);
+        c.id = rename(src.id); c.parent = src.parent ? rename(src.parent) : id; c._memberOf = id;
+        c.bounds = { x: src.bounds.x + x, y: src.bounds.y + y, width: src.bounds.width, height: src.bounds.height };
+        for (const ev of Object.values(c.events || {})) for (const side of [ev.client, ev.server]) for (const a of (side && side.actions) || [])
+          if (['set_text', 'set_value', 'set_visible', 'set_enabled', 'change_texture', 'player_inventory'].includes(a.type) && own.has(a.target)) a.target = rename(a.target);
+        return c;
+      });
+      // Drawn after the control named by options.after (and anything spawned after it), or on top of everything.
+      const list = this.ui.elements, after = spec.after ? elementOf(this.ui, String(spec.after)) : null;
+      let at = after ? list.indexOf(after) + 1 : list.length;
+      if (after) while (at < list.length && (list[at]._instanceOf || list[at]._memberOf)) at++;
+      list.splice(at, 0, root, ...members);
+      for (const [k, v] of Object.entries(source.variables || {})) if (!(k in this.state)) this.state[k] = v;
+      this.instances.set(id, { template: componentId, members: members.map(m => m.id), life: num(spec.life, 0) > 0 ? spec.life : Infinity, seek: spec.seek ? String(spec.seek) : '', speed: num(spec.speed, 0), separate: Math.max(0, num(spec.separate, this.separateDefaults ? this.separateDefaults.get(componentId) || 0 : 0)), path: spec.path ? String(spec.path) : '' });
+      if (num(spec.vx, 0) || num(spec.vy, 0)) this.velocity.set(id, { x: num(spec.vx, 0), y: num(spec.vy, 0) });
+      const n = Number(id.slice(id.lastIndexOf('~') + 1)); if (Number.isFinite(n) && n >= this.instanceSeq) this.instanceSeq = n + 1;
+      this.elementsChanged();
+    },
+    despawnInstance(id) {
+      const e = elementOf(this.ui, id); if (!e || !e._instanceOf) return false;
+      // A spawned component goes with all its controls, in one pass over the list.
+      const inst = this.instances.get(id), gone = new Set([id]); if (inst && inst.members) for (const m of inst.members) gone.add(m);
+      const list = this.ui.elements; let w = 0; for (let i = 0; i < list.length; i++) if (!gone.has(list[i].id)) list[w++] = list[i]; list.length = w;
+      for (const g of gone) { this.velocity.delete(g); this.spriteClock.delete(g); }
+      // Contacts they were part of end quietly (a removed object gets no events).
+      for (const set of [this.contacts, this.overlaps]) for (const pair of [...set]) { const k = pair.indexOf('|'); if (gone.has(pair.slice(0, k)) || gone.has(pair.slice(k + 1))) set.delete(pair); }
+      for (const key of [...this.stayTimes.keys()]) { const parts = key.split('|'); if (gone.has(parts[1]) || gone.has(parts[2])) this.stayTimes.delete(key); }
+      for (const f of ['hovered', 'focused', 'dragging']) if (this[f] && gone.has(this[f].id)) this[f] = null;
+      this.instances.delete(id);
+      this.elementsChanged();
+      return true;
+    },
+    // A flow field over a tilemap toward one tile: every open tile's step count to it (-1: solid or cut off), by a
+    // breadth-first walk of eight directions that never cuts a solid corner. Kept per map and rebuilt only when the
+    // goal moves to another tile or a tile changes, so any number of seekers share one.
+    flowField(map, gc, gr) {
+      const cache = this.tileGrid(map); if (!this._fields) this._fields = new Map();
+      let f = this._fields.get(map.id);
+      if (f && f.version === cache.version && f.gc === gc && f.gr === gr) return f;
+      const cols = cache.columns, rows = cache.rows, n = cols * rows, grid = cache.grid, solid = cache.solid;
+      const dist = new Int32Array(n).fill(-1), queue = new Int32Array(n);
+      const open = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows && !solid.has(grid[r * cols + c]);
+      if (open(gc, gr)) {
+        let head = 0, tail = 0; const start = gr * cols + gc; dist[start] = 0; queue[tail++] = start;
+        while (head < tail) {
+          const at = queue[head++], c = at % cols, r = (at - c) / cols, d = dist[at] + 1;
+          for (const [dc, dr] of STEPS8) {
+            const nc = c + dc, nr = r + dr; if (!open(nc, nr)) continue;
+            if (dc && dr && (!open(c + dc, r) || !open(c, r + dr))) continue;
+            const k = nr * cols + nc; if (dist[k] < 0) { dist[k] = d; queue[tail++] = k; }
+          }
+        }
+      }
+      f = { version: cache.version, gc, gr, dist, cols, rows, solid, grid };
+      this._fields.set(map.id, f);
+      return f;
+    },
+    // Where a seeker following a map heads next: the centre of the neighbouring tile nearer the target, or null to go
+    // straight (same tile as the target, off the map, or no way through).
+    pathStep(map, e, t) {
+      const tw = Math.max(1, map.tileWidth | 0), th = Math.max(1, map.tileHeight | 0);
+      const ex = e.bounds.x + e.bounds.width / 2, ey = e.bounds.y + e.bounds.height / 2, tx = t.bounds.x + t.bounds.width / 2, ty = t.bounds.y + t.bounds.height / 2;
+      const ec = Math.floor((ex - map.bounds.x) / tw), er = Math.floor((ey - map.bounds.y) / th), tc = Math.floor((tx - map.bounds.x) / tw), tr = Math.floor((ty - map.bounds.y) / th);
+      const f = this.flowField(map, tc, tr);
+      if (ec < 0 || er < 0 || ec >= f.cols || er >= f.rows || (ec === tc && er === tr)) return null;
+      const here = f.dist[er * f.cols + ec]; if (here <= 0) return null;
+      const open = (c, r) => c >= 0 && r >= 0 && c < f.cols && r < f.rows && f.dist[r * f.cols + c] >= 0;
+      let best = null, bestD = here, bestLen = Infinity;
+      for (const [dc, dr] of STEPS8) {
+        const nc = ec + dc, nr = er + dr; if (!open(nc, nr)) continue;
+        if (dc && dr && (!open(ec + dc, er) || !open(ec, er + dr))) continue;
+        const d = f.dist[nr * f.cols + nc], len = Math.abs(dc) + Math.abs(dr);
+        // Fewer steps first; between equals, the straight step (so paths don't zigzag).
+        if (d < bestD || (d === bestD && best && len < bestLen)) { best = [nc, nr]; bestD = d; bestLen = len; }
+      }
+      return best ? { x: map.bounds.x + (best[0] + 0.5) * tw, y: map.bounds.y + (best[1] + 0.5) * th } : null;
+    },
+    // The control list changed: indexes and caches built from it start again.
+    elementsChanged() { this.ui._index = null; this.children = null; this._parentsOf = null; this.instancesVersion++; },
+    // Each frame: lifetimes count down, seekers turn toward their target, and copies that aren't dynamic bodies move by
+    // their velocity (dynamic ones are moved by the physics step, with gravity and collisions).
+    stepInstances(now) {
+      const dt = Math.min(0.1, Math.max(0, (now - this.instanceTime) / 1000)); this.instanceTime = now;
+      if (!this.instances.size || !dt) return;
+      let gone = null;
+      for (const [id, inst] of this.instances) {
+        const e = elementOf(this.ui, id); if (!e) { (gone = gone || []).push(id); continue; }
+        if (inst.life !== Infinity && (inst.life -= dt) <= 0) { (gone = gone || []).push(id); continue; }
+        if (inst.seek) {
+          const t = elementOf(this.ui, inst.seek);
+          if (t) {
+            // Following a map: head for the next tile on the way instead of straight at the target.
+            const map = inst.path ? elementOf(this.ui, inst.path) : null, via = map && map.type === 'tilemap' ? this.pathStep(map, e, t) : null;
+            const gx = via ? via.x : t.bounds.x + t.bounds.width / 2, gy = via ? via.y : t.bounds.y + t.bounds.height / 2;
+            const dx = gx - e.bounds.x - e.bounds.width / 2, dy = gy - e.bounds.y - e.bounds.height / 2, d = Math.hypot(dx, dy);
+            // Close enough counts as there, so a seeker settles on its target instead of shaking across it.
+            this.velocity.set(id, via || d > Math.max(1, inst.speed * dt) ? (d > 0 ? { x: dx / d * inst.speed, y: dy / d * inst.speed } : { x: 0, y: 0 }) : { x: 0, y: 0 });
+          }
+        }
+      }
+      if (gone) for (const id of gone) { if (!this.despawnInstance(id)) this.instances.delete(id); }
+      this.separateInstances();
+      for (const id of this.instances.keys()) {
+        const e = elementOf(this.ui, id); if (!e || e.body === 'dynamic') continue;
+        const v = this.velocity.get(id); if (v && (v.x || v.y)) this.moveElement(e, v.x * dt, v.y * dt);
+      }
+    },
+    // Copies with a spacing (spawn's separate, or ui.separate) keep that far apart, centre to centre: each frame,
+    // any two closer than the larger of their spacings are pushed apart by part of the overlap, so a crowd spreads
+    // out smoothly instead of stacking on one spot. Pairs come from a grid, so a crowd costs about the same per copy.
+    separateInstances() {
+      const list = [];
+      for (const [id, inst] of this.instances) if (inst.separate > 0) { const e = elementOf(this.ui, id); if (e) list.push({ e, r: inst.separate, x: e.bounds.x + e.bounds.width / 2, y: e.bounds.y + e.bounds.height / 2, seeks: !!inst.seek }); }
+      if (list.length < 2) return;
+      let cell = 0; for (const a of list) if (a.r > cell) cell = a.r;
+      const grid = new Map();
+      for (let i = 0; i < list.length; i++) { const a = list[i], key = (Math.floor(a.x / cell) + 32768) * 65536 + (Math.floor(a.y / cell) + 32768); let l = grid.get(key); if (!l) grid.set(key, l = []); l.push(i); }
+      const push = new Float64Array(list.length * 2);
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i], cx = Math.floor(a.x / cell), cy = Math.floor(a.y / cell);
+        for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+          const l = grid.get((gx + 32768) * 65536 + (gy + 32768)); if (!l) continue;
+          for (const j of l) {
+            if (j <= i) continue;
+            const b = list[j], want = Math.max(a.r, b.r); let dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+            if (d >= want) continue;
+            // Two on the very same spot part along a direction taken from their order, so they never stay stacked.
+            if (d < 1e-6) { const ang = (i * 2.399 + j * 0.618) % (Math.PI * 2); dx = Math.cos(ang); dy = Math.sin(ang); d = 1; }
+            const k = (want - Math.min(d, want)) * SEPARATION_SHARE / d;
+            push[i * 2] -= dx * k; push[i * 2 + 1] -= dy * k; push[j * 2] += dx * k; push[j * 2 + 1] += dy * k;
+            a.x -= dx * k; a.y -= dy * k; b.x += dx * k; b.y += dy * k; // later pairs this frame see where these two now are
+            // A seeker doesn't walk into a neighbour it's pressed against: that part of its speed is dropped this frame
+            // (seeking sets the speed again next frame), so a crowd around its target queues at its spacing.
+            const nx = dx / d, ny = dy / d;
+            if (a.seeks) { const v = this.velocity.get(a.e.id); if (v) { const into = v.x * nx + v.y * ny; if (into > 0) this.velocity.set(a.e.id, { x: v.x - nx * into, y: v.y - ny * into }); } }
+            if (b.seeks) { const v = this.velocity.get(b.e.id); if (v) { const into = -(v.x * nx + v.y * ny); if (into > 0) this.velocity.set(b.e.id, { x: v.x + nx * into, y: v.y + ny * into }); } }
+          }
+        }
+      }
+      for (let i = 0; i < list.length; i++) if (push[i * 2] || push[i * 2 + 1]) this.moveElement(list[i].e, push[i * 2], push[i * 2 + 1]);
+    },
     simulate(now) {
       if (!this.ui || this.closed) return;
-      this.pollInputs(); this.stepStateGraphs(); if (this.playing.size) this.stepAnimations(now); this.stepPhysics(now);
+      const p = this.prof;
+      if (!p) {
+        this.pollInputs(); this.stepStateGraphs(); if (this.playing.size) this.stepAnimations(now); this.stepInstances(now); this.stepPhysics(now);
+        if (this.particleCount || this.streams.size) this.stepParticles(now); else this.particleTime = now;
+        return;
+      }
+      let t = performance.now(); const mark = k => { const n = performance.now(); p.sum[k] += n - t; t = n; };
+      this.pollInputs(); this.stepStateGraphs(); if (this.playing.size) this.stepAnimations(now); mark('logic');
+      this.stepInstances(now); mark('objects');
+      this.stepPhysics(now); mark('physics');
       if (this.particleCount || this.streams.size) this.stepParticles(now); else this.particleTime = now;
+      mark('particles');
+    },
+
+    // ---- Profiler ----
+    // An overlay over the game (never part of what it draws) and the figures behind it, averaged over a quarter second.
+    setProfiler(on) {
+      if (!on) { if (this.prof) { this.prof.box.remove(); this.prof = null; } return; }
+      if (this.prof) return;
+      const box = document.createElement('div');
+      box.className = 'wysicraft-profiler';
+      box.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483647;pointer-events:none;background:rgba(21,24,29,0.88);color:#D9E6F1;border:1px solid #2C333C;border-radius:4px;padding:6px 8px;font:11px/1.45 Consolas,ui-monospace,monospace;white-space:pre;min-width:190px';
+      const text = document.createElement('div'), graph = document.createElement('canvas');
+      graph.width = 190; graph.height = 36; graph.style.cssText = 'display:block;margin-top:4px;width:190px;height:36px';
+      box.append(text, graph); document.body.appendChild(box);
+      this.prof = { box, text, graph, since: performance.now(), lastFrame: 0, frames: 0, history: new Float32Array(190), at: 0,
+        sum: { logic: 0, objects: 0, physics: 0, particles: 0, draw: 0, frame: 0 }, worst: 0, scripts: 0, scriptSum: 0, scriptWorst: 0, ops: 0, figures: null };
+    },
+    profiledFrame(t) {
+      const p = this.prof;
+      this.tick(); const b = performance.now();
+      this.render(); const c = performance.now();
+      p.sum.draw += c - b;
+      if (p.lastFrame) { const gap = t - p.lastFrame; p.sum.frame += gap; p.frames++; p.worst = Math.max(p.worst, gap); p.history[p.at] = gap; p.at = (p.at + 1) % p.history.length; }
+      p.lastFrame = t;
+      if (c - p.since >= 250 && p.frames) this.profilerUpdate(c);
+    },
+    // Called after each script run while the profiler is on: the whole round trip (sending, running, applying).
+    profileScript(ms, ops) { const p = this.prof; if (!p) return; p.scripts++; p.scriptSum += ms; p.scriptWorst = Math.max(p.scriptWorst, ms); p.ops += ops; },
+    profilerUpdate(now) {
+      const p = this.prof, n = p.frames, span = (now - p.since) / 1000, avg = k => p.sum[k] / n, f = x => x.toFixed(2).padStart(6);
+      const engine = avg('logic') + avg('objects') + avg('physics') + avg('particles');
+      p.figures = {
+        fps: Math.round(n / span), frameMs: +avg('frame').toFixed(2), worstFrameMs: +p.worst.toFixed(2),
+        engineMs: +engine.toFixed(2), logicMs: +avg('logic').toFixed(2), objectsMs: +avg('objects').toFixed(2), physicsMs: +avg('physics').toFixed(2), particlesMs: +avg('particles').toFixed(2), drawMs: +avg('draw').toFixed(2),
+        scriptsPerSecond: Math.round(p.scripts / span), scriptMs: p.scripts ? +(p.scriptSum / p.scripts).toFixed(2) : 0, worstScriptMs: +p.scriptWorst.toFixed(2), opsPerScript: p.scripts ? Math.round(p.ops / p.scripts) : 0,
+        controls: this.ui ? this.ui.elements.length : 0, spawned: this.instances.size, bodies: this.physicsCounts.bodies, pairs: this.physicsCounts.pairs,
+        particles: this.particleCount || 0, drawBatches: this.glLayer.ok ? this.glFlushes : 0, webgl: !!this.glLayer.ok
+      };
+      const g = p.figures;
+      p.text.textContent =
+        'FRAME  ' + f(g.frameMs) + ' ms  ' + String(g.fps).padStart(3) + ' fps\n' +
+        'worst  ' + f(g.worstFrameMs) + ' ms\n' +
+        'engine ' + f(g.engineMs) + ' ms\n' +
+        '  logic     ' + f(g.logicMs) + '\n' +
+        '  objects   ' + f(g.objectsMs) + '\n' +
+        '  physics   ' + f(g.physicsMs) + '\n' +
+        '  particles ' + f(g.particlesMs) + '\n' +
+        'draw   ' + f(g.drawMs) + ' ms' + (g.webgl ? '  ' + g.drawBatches + ' batches' : '  canvas') + '\n' +
+        'script ' + f(g.scriptMs) + ' ms  ' + g.scriptsPerSecond + '/s' + '\n' +
+        '  worst ' + f(g.worstScriptMs) + ' ms  ' + g.opsPerScript + ' ops\n' +
+        'controls ' + g.controls + '  spawned ' + g.spawned + '\n' +
+        'bodies ' + g.bodies + '  pairs ' + g.pairs + '\n' +
+        'particles ' + g.particles;
+      // Frame times, newest on the right; the line is a 60 fps frame (16.7 ms), the top 33 ms.
+      const c = p.graph.getContext('2d'), w = p.graph.width, h = p.graph.height, len = p.history.length;
+      c.clearRect(0, 0, w, h);
+      for (let i = 0; i < len; i++) {
+        const ms = p.history[(p.at + i) % len]; if (!ms) continue;
+        const bar = Math.min(h, ms / 33.3 * h);
+        c.fillStyle = ms > 33.4 ? '#FF8C7A' : ms > 17.5 ? '#E0B050' : '#7FD08A';
+        c.fillRect(i, h - bar, 1, bar);
+      }
+      c.fillStyle = 'rgba(217,230,241,0.35)'; c.fillRect(0, Math.round(h - 16.7 / 33.3 * h), w, 1);
+      p.since = now; p.frames = 0; p.worst = 0; p.scripts = 0; p.scriptSum = 0; p.scriptWorst = 0; p.ops = 0;
+      for (const k of Object.keys(p.sum)) p.sum[k] = 0;
     }
   });
 
@@ -1864,6 +2237,17 @@
   // Screen pixels of thumb travel for a full push on the touch stick.
   const STICK_REACH = 34;
   const MAX_PARTICLES = 2000, MAX_PARTICLES_GL = 50000;
+  // Spawned objects alive at once on a screen (ctx.ui.spawn); more are skipped with one warning.
+  const MAX_INSTANCES = 5000;
+  // Controls one spawned component may have.
+  const MAX_COMPONENT_CONTROLS = 256;
+  // Physics: above this many bodies, only bodies sharing a grid cell (this many pixels square) are tested together.
+  const BROADPHASE_MIN = 64, BROADPHASE_CELL = 64;
+  // Each frame, two crowding copies each move apart by this share of their overlap, so a pair is fully apart after one
+  // frame and a crowd pressing in (seekers) still holds its spacing.
+  const SEPARATION_SHARE = 0.5;
+  // The eight steps a path can take from a tile.
+  const STEPS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   // '#RRGGBB' to [r, g, b]; particle colours are validated on the way in, so a bad one just goes black.
   // A particle effect's colour ramp: sorted stops, or the older pair when it has none.
   function rampOf(fx) {
@@ -1902,9 +2286,22 @@
     for (const poly of shape.polys) for (const p of poly) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
     shape.box = [x0, y0, x1, y1]; return shape;
   }
+  // Two axis-aligned boxes [x0, y0, x1, y1]: the same result polyPoly gives for them. Its first axes are the first box's
+  // top edge (0, -1) then right edge (1, 0), and a later axis only wins on a strictly smaller overlap, so the y axis wins
+  // ties; the normal is then turned to point from the first box's centre toward the second's.
+  function rectRect(a, b) {
+    const ox = Math.min(a[2], b[2]) - Math.max(a[0], b[0]), oy = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+    if (ox <= 0 || oy <= 0) return null;
+    let normal, depth;
+    if (ox < oy) { normal = [1, 0]; depth = ox; } else { normal = [0, -1]; depth = oy; }
+    const dx = (b[0] + b[2] - a[0] - a[2]) / 2, dy = (b[1] + b[3] - a[1] - a[3]) / 2;
+    if (dx * normal[0] + dy * normal[1] < 0) normal = [-normal[0], -normal[1]];
+    return { normal, depth };
+  }
   // Separating-axis test between two shapes made of convex polygons and/or a circle. Returns the push that
   // separates them (normal from the first shape to the second, and depth), or null.
   function collide(sa, sb) {
+    if (sa.rect && sb.rect) return rectRect(sa.box, sb.box);
     let best = null;
     const pa = sa.circle ? [null] : sa.polys, pb = sb.circle ? [null] : sb.polys;
     for (const a of pa) for (const b of pb) {
@@ -1941,6 +2338,95 @@
     return { normal, depth };
   }
 
+  // ---- Raycasts (script side) ----
+  // The first thing a line from (x1, y1) to (x2, y2) meets: a visible solid control (any body or collider; triggers
+  // only with triggers: true) or a solid tile of a visible tilemap. Boxes are exact, circles are exact, polygon
+  // colliders count as their box. bodies and tilemaps are the script side's copy of the screen; grid(id) unpacks a
+  // tilemap. Returns { id, x, y, distance, normal: { x, y } } or null. options: ignore (an ID or a list), tag (only
+  // controls with it), triggers, tiles (false to leave tilemaps out).
+  function raycastWorld(bodies, tilemaps, grid, x1, y1, x2, y2, options) {
+    const o = options || {}, dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+    if (!(len > 0)) return null;
+    const ignore = new Set([].concat(o.ignore === undefined ? [] : o.ignore).map(String)), tag = o.tag === undefined ? '' : String(o.tag);
+    let best = null;
+    const found = (t, id, nx, ny) => { if (t >= 0 && t <= 1 && (!best || t < best.t)) best = { t, id, nx, ny }; };
+    for (const id in bodies) {
+      const b = bodies[id];
+      if (!b.visible || !b.kind || ignore.has(id)) continue;
+      if (b.kind.indexOf('/trigger') >= 0 && !o.triggers) continue;
+      if (tag && (b.tags || []).indexOf(tag) < 0) continue;
+      if (b.kind.indexOf('/circle') >= 0) {
+        const rr = Math.min(b.width, b.height) / 2, cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+        const fx = x1 - cx, fy = y1 - cy, A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - rr * rr, disc = B * B - 4 * A * C;
+        if (disc < 0) continue;
+        const t = C <= 0 ? 0 : (-B - Math.sqrt(disc)) / (2 * A);
+        const hx = x1 + dx * t - cx, hy = y1 + dy * t - cy, hl = Math.hypot(hx, hy) || 1;
+        found(t, id, C <= 0 ? 0 : hx / hl, C <= 0 ? 0 : hy / hl);
+        continue;
+      }
+      // A box: the slab method, entering on the side the normal names.
+      let t0 = 0, t1 = 1, nx = 0, ny = 0;
+      const slab = (start, dir, lo, hi, ax) => {
+        if (dir === 0) return start >= lo && start <= hi;
+        let ta = (lo - start) / dir, tb = (hi - start) / dir, side = -1;
+        if (ta > tb) { const t = ta; ta = tb; tb = t; side = 1; }
+        if (ta > t0) { t0 = ta; nx = ax === 0 ? side : 0; ny = ax === 1 ? side : 0; }
+        if (tb < t1) t1 = tb;
+        return t0 <= t1;
+      };
+      if (!slab(x1, dx, b.x, b.x + b.width, 0) || !slab(y1, dy, b.y, b.y + b.height, 1)) continue;
+      found(t0, id, nx, ny);
+    }
+    if (o.tiles !== false) for (const id in tilemaps) {
+      const m = tilemaps[id]; if (!m.solid || m.visible === false || ignore.has(id)) continue;
+      const solid = solidTiles(m.solid), g = grid(id); if (!solid.size || !g) continue;
+      // Walk the tiles the line crosses, in order (a DDA), and stop at the first solid one.
+      const tw = m.tileWidth, th = m.tileHeight, sx = (x1 - m.x) / tw, sy = (y1 - m.y) / th, ex = (x2 - m.x) / tw, ey = (y2 - m.y) / th;
+      let cx = Math.floor(sx), cy = Math.floor(sy); const stepX = ex > sx ? 1 : -1, stepY = ey > sy ? 1 : -1;
+      const ddx = ex - sx, ddy = ey - sy, tDx = ddx !== 0 ? Math.abs(1 / ddx) : Infinity, tDy = ddy !== 0 ? Math.abs(1 / ddy) : Infinity;
+      let tMx = ddx !== 0 ? (stepX > 0 ? cx + 1 - sx : sx - cx) * tDx : Infinity, tMy = ddy !== 0 ? (stepY > 0 ? cy + 1 - sy : sy - cy) * tDy : Infinity;
+      let t = 0, nx = 0, ny = 0;
+      for (let steps = 0; steps < 4096 && t <= 1; steps++) {
+        if (cx >= 0 && cy >= 0 && cx < m.columns && cy < m.rows && solid.has(g.g[cy * m.columns + cx])) { found(t, id, nx, ny); break; }
+        if (tMx < tMy) { t = tMx; tMx += tDx; cx += stepX; nx = -stepX; ny = 0; } else { t = tMy; tMy += tDy; cy += stepY; nx = 0; ny = -stepY; }
+      }
+    }
+    return best ? { id: best.id, x: x1 + dx * best.t, y: y1 + dy * best.t, distance: len * best.t, normal: { x: best.nx, y: best.ny } } : null;
+  }
+
+  // A route over a tilemap from one point to another: A* over its open tiles, eight directions, never cutting a solid
+  // corner. m is the script side's copy of the map, g its unpacked grid. Returns the tile centres to walk through, the
+  // last being the goal's tile, or null when there's no way (either end off the map or in a solid tile, or walled off).
+  function findTilePath(m, g, x1, y1, x2, y2) {
+    const solid = solidTiles(m.solid), cols = m.columns, rows = m.rows, tw = m.tileWidth, th = m.tileHeight;
+    const sc = Math.floor((x1 - m.x) / tw), sr = Math.floor((y1 - m.y) / th), gc = Math.floor((x2 - m.x) / tw), gr = Math.floor((y2 - m.y) / th);
+    const open = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows && !solid.has(g.g[r * cols + c]);
+    if (!open(sc, sr) || !open(gc, gr)) return null;
+    const centre = k => ({ x: m.x + (k % cols + 0.5) * tw, y: m.y + (Math.floor(k / cols) + 0.5) * th });
+    const start = sr * cols + sc, goal = gr * cols + gc;
+    if (start === goal) return [centre(goal)];
+    const n = cols * rows, cost = new Float64Array(n).fill(Infinity), from = new Int32Array(n).fill(-1), done = new Uint8Array(n);
+    const h = k => { const dx = Math.abs(k % cols - gc), dy = Math.abs(Math.floor(k / cols) - gr); return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy); };
+    // A binary heap of [priority, tile].
+    const heap = [], push = (pr, k) => { heap.push([pr, k]); let i = heap.length - 1; while (i > 0) { const pa = (i - 1) >> 1; if (heap[pa][0] <= heap[i][0]) break; [heap[pa], heap[i]] = [heap[i], heap[pa]]; i = pa; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m2 = i; if (l < heap.length && heap[l][0] < heap[m2][0]) m2 = l; if (r < heap.length && heap[r][0] < heap[m2][0]) m2 = r; if (m2 === i) break; [heap[m2], heap[i]] = [heap[i], heap[m2]]; i = m2; } } return top; };
+    cost[start] = 0; push(h(start), start);
+    while (heap.length) {
+      const k = pop()[1]; if (done[k]) continue; done[k] = 1;
+      if (k === goal) break;
+      const c = k % cols, r = (k - c) / cols;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const nc = c + dc, nr = r + dr; if (!open(nc, nr)) continue;
+        if (dc && dr && (!open(c + dc, r) || !open(c, r + dr))) continue;
+        const nk = nr * cols + nc, next = cost[k] + (dc && dr ? Math.SQRT2 : 1);
+        if (next < cost[nk]) { cost[nk] = next; from[nk] = k; push(next + h(nk), nk); }
+      }
+    }
+    if (from[goal] < 0) return null;
+    const route = []; for (let k = goal; k !== start; k = from[k]) route.push(centre(k));
+    return route.reverse();
+  }
+
   // ---- Script worker ----
   // The script API from api/ClientJavaScript.java. It runs in a Web Worker (no page, no network); if workers aren't
   // available the same function runs in the page instead.
@@ -1948,14 +2434,16 @@
   // runs; each request brings only what changed (App.scriptDelta). In a worker there is one mirror for the
   // worker's life; on the page (no workers) the runner keeps one.
   function executeScript(r, mirror) {
-    if (r.reset || !mirror.texts) { mirror.texts = {}; mirror.bodies = {}; mirror.tagged = {}; mirror.tilemaps = {}; mirror.vars = {}; }
+    if (r.reset || !mirror.texts) { mirror.texts = {}; mirror.bodies = {}; mirror.tagged = {}; mirror.tilemaps = {}; mirror.vars = {}; mirror.instances = {}; }
+    if (r.gone) for (const id of r.gone) { delete mirror.texts[id]; delete mirror.bodies[id]; delete mirror.tilemaps[id]; }
+    if (r.instances) mirror.instances = r.instances;
     if (r.texts) Object.assign(mirror.texts, r.texts);
     if (r.bodies) Object.assign(mirror.bodies, r.bodies);
     if (r.tilemaps) Object.assign(mirror.tilemaps, r.tilemaps);
     if (r.tagged) mirror.tagged = r.tagged;
     if (r.vars) Object.assign(mirror.vars, r.vars);
     if (r.varsGone) for (const k of r.varsGone) delete mirror.vars[k];
-    r = Object.assign({}, r, { texts: mirror.texts, bodies: mirror.bodies, tagged: mirror.tagged, tilemaps: mirror.tilemaps, vars: mirror.vars });
+    r = Object.assign({}, r, { texts: mirror.texts, bodies: mirror.bodies, tagged: mirror.tagged, tilemaps: mirror.tilemaps, vars: mirror.vars, instances: mirror.instances || {} });
     const ops = [], vars = {}, logs = [];
     // Tilemaps arrive run-length encoded and are unpacked only if a script asks about one, once per script run.
     const grids = {};
@@ -2018,19 +2506,49 @@
       setShaderValue: (name, value) => emit('set_shader_value', name, Number(value)),
       // Forces a state graph into a state, for the cases the conditions can't express.
       setState: (graph, state) => emit('set_state', graph, state),
-      setSize: (id, w, h) => emit('set_size', id, Number(w) + ',' + Number(h))
+      setSize: (id, w, h) => emit('set_size', id, Number(w) + ',' + Number(h)),
+      // A Sound control's volume, 0-1, applied at once if it is playing (web and desktop).
+      setVolume: (id, volume) => emit('set_volume', id, String(Math.min(1, Math.max(0, Number(volume) || 0)))),
+      // Spawned objects (web and desktop): a copy of the template control at x, y (its top-left, like setPosition),
+      // returning the copy's ID. options: vx, vy (a velocity), seek (a control's ID) and speed, life (seconds),
+      // clip (a sprite clip), texture. The copy exists once this script run ends: later calls in the same run can
+      // move it or despawn it, but getElement sees it from the next run.
+      spawn: (template, x, y, options) => {
+        const o = options || {}, id = String(template) + '~' + (r.spawnSeq++);
+        const n = v => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+        emit('spawn', template, JSON.stringify({ id, x: Number(x) || 0, y: Number(y) || 0, vx: n(o.vx), vy: n(o.vy), separate: n(o.separate), after: o.after === undefined ? undefined : String(o.after), seek: o.seek === undefined ? undefined : String(o.seek), path: o.path === undefined ? undefined : String(o.path), speed: n(o.speed), life: n(o.life), clip: o.clip === undefined ? undefined : String(o.clip), texture: o.texture === undefined ? undefined : String(o.texture) }));
+        return id;
+      },
+      despawn: id => emit('despawn', id, ''),
+      // Keep copies at least px apart (centre to centre): a copy's ID, or a template for all its copies, now and later.
+      separate: (id, px) => emit('separate', id, String(Math.max(0, Number(px) || 0))),
+      // Keep moving toward another control at speed (pixels a second); seek(id, '') stops.
+      seek: (id, target, speed, options) => emit('seek', id, String(target || '') + ',' + (Number(speed) || 0) + (options && options.path ? ',' + String(options.path) : '')),
+      // The IDs of a template's live copies, oldest first.
+      instancesOf: template => ((r.instances && r.instances[String(template)]) || []).slice()
     });
     const p = r.player;
     const ctx = Object.freeze({
       ui, elementId: r.element, value: r.value, repeat: r.repeat, other: r.other || '',
       state: Object.freeze({ get: getVariable, set: ui.setVariable }), getVariable, setVariable: ui.setVariable,
       message: v => emit('message', '', v),
-      client: Object.freeze({ sendMessage: v => emit('message', '', v), playSound: v => emit('play_sound', '', v) }),
+      // playSound(id, volume): volume 0-1 is optional (web and desktop; Minecraft plays at its own volume).
+      client: Object.freeze({ sendMessage: v => emit('message', '', v), playSound: (v, volume) => emit('play_sound', volume === undefined ? '' : String(Math.min(1, Math.max(0, Number(volume) || 0))), v) }),
       input: Object.freeze({ isDown: name => !!(r.inputs && r.inputs[name]), axis: name => (r.axes && r.axes[name]) || 0, isTouch: () => !!r.touch }),
       // What a control is touching when the event started: solid contacts and trigger overlaps.
       physics: Object.freeze({
         touching: id => ((r.touching && r.touching[id]) || []).slice(),
-        isTouching: (a, b) => !!(r.touching && r.touching[a] && r.touching[a].includes(String(b)))
+        isTouching: (a, b) => !!(r.touching && r.touching[a] && r.touching[a].includes(String(b))),
+        // The first solid thing a line meets (web and desktop): { id, x, y, distance, normal } or null.
+        raycast: (x1, y1, x2, y2, options) => raycastWorld(r.bodies, r.tilemaps, grid, Number(x1), Number(y1), Number(x2), Number(y2), options),
+        // A route over a tilemap's open tiles (web and desktop): the tile centres to walk through, or null.
+        findPath: (map, x1, y1, x2, y2) => { const m = r.tilemaps && r.tilemaps[String(map)], g = grid(String(map)); return m && g ? findTilePath(m, g, Number(x1), Number(y1), Number(x2), Number(y2)) : null; },
+        // Whether nothing solid stands between two controls' centres (neither of them counts).
+        canSee: (a, b, options) => {
+          const A = r.bodies[a], B = r.bodies[b]; if (!A || !B) return false;
+          const o = Object.assign({}, options || {}); o.ignore = [a, b].concat(o.ignore === undefined ? [] : o.ignore);
+          return !raycastWorld(r.bodies, r.tilemaps, grid, A.x + A.width / 2, A.y + A.height / 2, B.x + B.width / 2, B.y + B.height / 2, o);
+        }
       }),
       player: r.isServer ? Object.freeze({ getName: () => p.name, getUuid: () => p.uuid, getPosition: () => JSON.parse(JSON.stringify(p.position)), getInventory: () => JSON.parse(JSON.stringify(p.inventory)), hasPermission: level => (p.permission || 0) >= level }) : undefined,
       server: Object.freeze({ runCommand: r.isServer ? (c => emit('command', '', c)) : unsupported, sendMessage: r.isServer ? (t => emit('message', '', t)) : unsupported })
@@ -2077,7 +2595,7 @@
     start() {
       this.generation++; this.known = new Set();
       try {
-        const url = URL.createObjectURL(new Blob([executeScript.toString() + '\n(' + workerSetup.toString() + ')();'], { type: 'text/javascript' }));
+        const url = URL.createObjectURL(new Blob([[executeScript, raycastWorld, findTilePath, solidTiles].map(f => f.toString()).join('\n') + '\n(' + workerSetup.toString() + ')();'], { type: 'text/javascript' }));
         this.worker = new Worker(url);
         this.worker.onmessage = e => { const p = this.pending.get(e.data.id); if (!p) return; this.pending.delete(e.data.id); clearTimeout(p.timer); p.resolve(e.data); };
         // A worker that can't start (some file:// setups) falls back to running scripts in the page.

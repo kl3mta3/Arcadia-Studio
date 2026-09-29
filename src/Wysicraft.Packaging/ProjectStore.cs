@@ -36,25 +36,34 @@ public static class ProjectStore
         var files = Files(project, false); Directory.CreateDirectory(folder);
         foreach (var (name, bytes) in files) { var path = Resolve(folder, name); Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllBytes(path + ".tmp", bytes); File.Move(path + ".tmp", path, true); }
     }
+    /// <summary>A texture ID in the form a pack uses for it (textures/gui/... paths collapse to the short form).</summary>
+    public static string CanonicalResource(Project p, string resource) {
+        if (!resource.StartsWith(p.Manifest.Id + ":") || !TextureAssets.TryGet(p, resource, out _)) return resource;
+        string path = resource.Split(':', 2)[1];
+        if (!path.StartsWith("textures/")) return TextureAssets.Resource(p.Manifest.Id, path);
+        if (path.StartsWith("textures/gui/") && !path[13..].Contains('/')) return TextureAssets.Resource(p.Manifest.Id, path[13..]);
+        return resource;
+    }
+    /// <summary>One screen as a pack or web export writes it: a copy with canonical texture IDs and row templates
+    /// filled in. Component screens go through this too when a web export carries them for runtime spawning.</summary>
+    public static UiDefinition PackScreen(Project p, UiDefinition original, bool pack)
+    {
+        string CanonicalResource(string resource) => ProjectStore.CanonicalResource(p, resource);
+        var ui = Json.Clone(original); if(pack)ui.ComponentInstances.Clear();
+        if (!Validation.Id(ui.Id)) throw new InvalidDataException("Invalid UI ID");
+        foreach (var element in ui.Elements) { element.Texture = CanonicalResource(element.Texture); if(pack && element.RowTemplate.Length>0) {element.RowTemplateWidth=p.Screens.First(s=>s.Id==element.RowTemplate).Size.Width;element.RowElements=Json.Clone(RowTemplates.Resolve(p,element));foreach(var rowElement in element.RowElements)rowElement.Texture=CanonicalResource(rowElement.Texture);} }
+            foreach (var ev in ui.Events.Values.Concat(ui.Elements.SelectMany(e => e.Events.Values)))
+                foreach (var action in ev.Client.Actions.Concat(ev.Server.Actions))
+                    if (action.Type == "change_texture") action.Value = CanonicalResource(action.Value);
+        return ui;
+    }
     public static Dictionary<string, byte[]> Files(Project p, bool pack)
     {
         if(pack) { p=Json.Clone(p); p.Manifest.RuntimeVersion=Distribution.RuntimeVersion; }
         p.Manifest.Ui = p.Screens.Where(s=>!pack || !s.IsComponent).Select(s => s.Id).ToList();
         Dictionary<string, byte[]> files = new() { [pack ? "manifest.json" : "project.json"] = Encoding.UTF8.GetBytes(Json.Write(p.Manifest)) };
-        string CanonicalResource(string resource) {
-            if (!resource.StartsWith(p.Manifest.Id + ":") || !TextureAssets.TryGet(p, resource, out _)) return resource;
-            string path = resource.Split(':', 2)[1];
-            if (!path.StartsWith("textures/")) return TextureAssets.Resource(p.Manifest.Id, path);
-            if (path.StartsWith("textures/gui/") && !path[13..].Contains('/')) return TextureAssets.Resource(p.Manifest.Id, path[13..]);
-            return resource;
-        }
         foreach (var original in p.Screens.Where(s=>!pack || !s.IsComponent)) {
-            var ui = Json.Clone(original); if(pack)ui.ComponentInstances.Clear();
-            if (!Validation.Id(ui.Id)) throw new InvalidDataException("Invalid UI ID");
-            foreach (var element in ui.Elements) { element.Texture = CanonicalResource(element.Texture); if(pack && element.RowTemplate.Length>0) {element.RowTemplateWidth=p.Screens.First(s=>s.Id==element.RowTemplate).Size.Width;element.RowElements=Json.Clone(RowTemplates.Resolve(p,element));foreach(var rowElement in element.RowElements)rowElement.Texture=CanonicalResource(rowElement.Texture);} }
-            foreach (var ev in ui.Events.Values.Concat(ui.Elements.SelectMany(e => e.Events.Values)))
-                foreach (var action in ev.Client.Actions.Concat(ev.Server.Actions))
-                    if (action.Type == "change_texture") action.Value = CanonicalResource(action.Value);
+            var ui = PackScreen(p, original, pack);
             files.Add("ui/" + ui.Id + ".json", Encoding.UTF8.GetBytes(Json.Write(ui)));
         }
         var usedScripts = p.Screens.Where(s=>!s.IsComponent).SelectMany(s => s.Events.Values.Concat(s.Elements.SelectMany(e => e.Events.Values)))

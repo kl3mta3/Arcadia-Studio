@@ -80,6 +80,8 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 static void Start(const std::wstring& appFolder, const Config& config) {
     wchar_t* local = nullptr; SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local);
     std::wstring data = std::wstring(local ? local : L".") + L"\\" + config.id + L"\\WebView2"; CoTaskMemFree(local);
+    // A game plays its sound from the start (a title theme) instead of waiting for a click, as an app should.
+    SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", L"--autoplay-policy=no-user-gesture-required");
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, data.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([appFolder, config](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
             if (FAILED(result) || !env) { Fail(L"WebView2 could not start", result); return S_OK; }

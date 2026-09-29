@@ -51,3 +51,4 @@ Wysicraft notices local changes you made to an instance (text, colors, sizes, ev
 - Renaming controls inside an instance requires detaching it first.
 - Ordinary copy/duplicate makes independent controls; use **Place instance** for another linked copy.
 - Exports contain the placed controls only. Sources and link data stay in your project file, and players need nothing extra. **Update instances before exporting** to include the latest source changes.
+- Web and desktop exports also carry each component itself, so a script can [[spawn it while the game runs|Scripting]] (`ctx.ui.spawn('badge', x, y)`). A spawned copy comes from the component as it is, without any placed instance's overrides. Minecraft packs leave components out.

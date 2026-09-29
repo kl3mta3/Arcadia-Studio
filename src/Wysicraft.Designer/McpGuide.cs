@@ -248,6 +248,24 @@ public partial class MainWindow
             - `collider` = box, circle or polygon (with colliderPoints), and `trigger: true` makes it pass through
               while still reporting trigger_enter / trigger_stay / trigger_exit with the other element's ID.
             - Scripts: `ui.setVelocity(id, vx, vy)`, `ctx.physics.touching(id)`, `ctx.physics.isTouching(a, b)`.
+            - Crowds (web & desktop): make one template control (often hidden) and `ui.spawn(template, x, y, {vx, vy,
+              seek, speed, life, clip, texture})` copies of it; returns the copy's ID. The engine moves copies (velocity,
+              or seek a control at speed), collides them, removes them when `life` runs out, and runs the template's
+              events for each copy with its own ID as ctx.elementId. `ui.despawn(id)`, `ui.seek(id, target, speed,
+              {path})`, `ui.instancesOf(template)`. Up to 5000 copies a screen; with more than 64 bodies, physics
+              pairs them through a grid instead of all against all.
+            - Crowd spacing: spawn option `separate` (px, centre to centre) or `ui.separate(id or template, px)` so
+              seekers surround their target instead of piling onto one spot.
+            - Pathfinding: spawn/seek option `path` = a tilemap's ID; the seeker goes round solid tiles (one shared flow
+              field per map and target tile). `ctx.physics.findPath(map, x1, y1, x2, y2)` returns tile centres or null.
+            - Raycasts: `ctx.physics.raycast(x1, y1, x2, y2, {triggers, ignore, tag})` returns null or {id, x, y,
+              distance, normal}; bodies and solid tiles stop it. `ctx.physics.canSee(a, b)`.
+            - Spawning a component: `ui.spawn(componentId, x, y, {..., after})` copies all its controls under a new
+              see-through root (IDs root + '_' + their component ID, internal action targets remapped). Move, seek,
+              space and despawn the group through the root. At most 256 controls.
+            - Preview's Profiler box shows frame, engine (logic, objects, physics, particles), draw and script times
+              and counts; `preview_control` action `profile` (value on/off) ticks it, and while it's on, preview results
+              include the figures as `profile`. Measure with it rather than guessing.
 
             # Components
 
