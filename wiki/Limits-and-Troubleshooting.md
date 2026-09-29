@@ -69,21 +69,21 @@ Click **Validate** and fix the errors listed in Output. Common causes: an action
 They've used up the per-player script time budget; it refills within seconds, and the server log mentions throttling. Make scripts lighter, or raise the event's cooldown.
 
 **My AI assistant can't connect.**
-The assistant must run on this computer and support MCP over HTTP. After restarting Wysicraft or the MCP server, copy the new configuration: the port and token change every time. See [[AI assistants (MCP)|MCP-and-AI-Assistants]].
+The assistant must run on this computer and support MCP over HTTP. After restarting Arcadia Studio or the MCP server, copy the new configuration: the port and token change every time. See [[AI assistants (MCP)|MCP-and-AI-Assistants]].
 
 **The editor crashed.**
-Reopen it and use **File → Recover unsaved project…**. A crash log is saved in `%LOCALAPPDATA%\Wysicraft\Logs`.
+Reopen it and use **File → Recover unsaved project…**. A crash log is saved in `%LOCALAPPDATA%\Arcadia Studio\Logs`.
 
 **The panels are in a mess.**
 **View → Reset panel layout**. It doesn't touch your project.
 
-## Where Wysicraft keeps things
+## Where Arcadia Studio keeps things
 
 | What | Where |
 | --- | --- |
-| Recovery drafts | `%LOCALAPPDATA%\Wysicraft\Recovery` |
-| Crash logs | `%LOCALAPPDATA%\Wysicraft\Logs` |
-| Panel layout | `%LOCALAPPDATA%\Wysicraft\workspace-layout-2.xml` |
-| Keyboard shortcuts | `%LOCALAPPDATA%\Wysicraft\keybindings.json` |
-| Minecraft test instance | `%LOCALAPPDATA%\Wysicraft\MinecraftTest\1.21.1` |
-| MCP exports | `%LOCALAPPDATA%\Wysicraft\McpExports` |
+| Recovery drafts | `%LOCALAPPDATA%\Arcadia Studio\Recovery` |
+| Crash logs | `%LOCALAPPDATA%\Arcadia Studio\Logs` |
+| Panel layout | `%LOCALAPPDATA%\Arcadia Studio\workspace-layout-2.xml` |
+| Keyboard shortcuts | `%LOCALAPPDATA%\Arcadia Studio\keybindings.json` |
+| Minecraft test instance | `%LOCALAPPDATA%\Arcadia Studio\MinecraftTest\1.21.1` |
+| MCP exports | `%LOCALAPPDATA%\Arcadia Studio\McpExports` |

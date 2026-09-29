@@ -6,5 +6,6 @@
 .vs/
 .tools/
 artifacts/
+tests/
 *.user
 *.log

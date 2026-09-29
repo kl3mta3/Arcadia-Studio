@@ -1,6 +1,6 @@
 # Pixel art and sprite sheets
 
-Wysicraft has two built-in editors for pictures:
+Arcadia Studio has two built-in editors for pictures:
 
 - the **Pixel editor**, for drawing pixel art (one picture or an animation of several frames), saved into your project as a PNG with transparency, and
 - the **Sprite sheet editor**, for turning a sheet of frames into named clips (idle, run, jump…) for a **Sprite** control.

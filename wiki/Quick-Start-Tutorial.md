@@ -5,7 +5,7 @@ You'll build a small **Airship Controls** screen with a Start button that update
 ## 1. Create the project
 
 1. Choose **File → New project** (Ctrl+N) and type the name `Airship Controls`.
-2. **Project settings** opens next. Check that **Id** is `airship_controls` (Wysicraft derives it from the name), then click **Apply**.
+2. **Project settings** opens next. Check that **Id** is `airship_controls` (Arcadia Studio derives it from the name), then click **Apply**.
    The Id is lowercase letters, numbers and underscores. It becomes the in-game command: `/airship_controls.open`. You can change it later under **Project → Project settings…**.
 3. Click **Screen settings** above the canvas. In Properties, change **Screen ID** from `main` to `cockpit` and press Enter. Change **Title** to `Airship`.
 
@@ -37,13 +37,13 @@ Client actions run instantly on the player's screen. Server actions run on the M
 
 ## 5. Save
 
-Choose **File → Save** (Ctrl+S) and save as `airship_controls.wysicraftproj`. This single file holds your screens, scripts and images. If the editor ever closes unexpectedly, Wysicraft keeps a recovery draft every 30 seconds.
+Choose **File → Save** (Ctrl+S) and save as `airship_controls.arcadia`. This single file holds your screens, scripts and images. If the editor ever closes unexpectedly, Arcadia Studio keeps a recovery draft every 30 seconds.
 
 ## 6. Export and play
 
 1. Click **Validate** (F7). The Output panel should say **Validation passed**.
 2. Click **Export…** (Ctrl+E), keep **Project JAR** selected, and save `airship_controls.jar`.
-3. Copy the JAR into your Minecraft instance's `mods` folder (Minecraft 1.21.1 with NeoForge 21.1.250+). Nothing else needs to be installed: the Wysicraft runtime is bundled inside the JAR.
+3. Copy the JAR into your Minecraft instance's `mods` folder (Minecraft 1.21.1 with NeoForge 21.1.250+). Nothing else needs to be installed: the Arcadia Studio runtime is bundled inside the JAR.
 4. Start Minecraft, open a world with cheats enabled, and type `/airship_controls.open`.
 
 Your screen opens. Clicking START ENGINE updates the label, and `say` runs because you have cheats on. Players without permission for a command can't run it through your screen either.

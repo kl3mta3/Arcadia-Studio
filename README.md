@@ -1,14 +1,16 @@
-# Wysicraft
+# Arcadia Studio
+
+*Formerly Wysicraft. Projects saved before the rename (`.wysicraftproj`) still open; new projects are `.arcadia` files.*
 
 **Latest:** Properties sections fold and remember; controls take **components** Unity-style (a searchable **+ Add component**, cards with a ✕ for Collider, Rigidbody, Character controller, Top-down mover, Follower and Pickup, with the script's tunable numbers editable on the card); and the MCP panel gains **Ask Assistant (Requires CLI)** — the editor can ask your own command-line AI (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, opencode, Copilot CLI or a custom command, on your subscription, no API key) to do things from Ask Agent, Draw it… and the Input creator. The MCP port and token now stay the same across restarts. See [Advanced tools](wiki/Advanced-Tools.md) and [MCP and AI assistants](wiki/MCP-and-AI-Assistants.md).
 
-**1.2:** Project JARs now bundle the runtime and assigned Standard/KubeJS scripts. No separate Wysicraft installation is needed in-game; KubeJS projects still require KubeJS/Rhino. Script dropdowns include editable `[Template]` entries and global command examples. See [1.2 release notes](docs/RELEASE-1.2.md).
+**1.2:** Project JARs now bundle the runtime and assigned Standard/KubeJS scripts. No separate Arcadia Studio installation is needed in-game; KubeJS projects still require KubeJS/Rhino. Script dropdowns include editable `[Template]` entries and global command examples. See [1.2 release notes](docs/RELEASE-1.2.md).
 
 **Version 1.1:** single-file .wysicraftproj saving, project-scoped screens, Standard Server scripts, Item Lists, installation ZIP/JAR exports and expanded MCP tools. See [1.1 workflow notes](docs/RELEASE-1.1.md).
 
 A Windows visual GUI designer and portable NeoForge runtime for Minecraft Java Edition **1.21.1**. Create screens, connect client and server actions, export a `.wysicraft` ZIP, and load it without generating Java screen classes or restarting Minecraft.
 
-Wysicraft is intended for modpack authors and addon developers building menus, dashboards and control panels. Create and Create Aeronautics can be integrated through their documented commands or addon actions; neither mod is required.
+Arcadia Studio is intended for modpack authors and addon developers building menus, dashboards and control panels. Create and Create Aeronautics can be integrated through their documented commands or addon actions; neither mod is required.
 
 ![Actual WPF designer displaying the Airship sample](docs/designer.png)
 
@@ -34,7 +36,7 @@ cd wysicraft-runtime
 .\gradlew.bat build
 ```
 
-On Unix, use `./gradlew build`. The runtime JAR is `wysicraft-runtime/build/libs/wysicraft-1.1.0.jar`. The desktop executable is `src/Wysicraft.Designer/bin/Debug/net8.0-windows/Wysicraft.Designer.exe`; keep its adjacent files when distributing. For a publish directory:
+On Unix, use `./gradlew build`. The runtime JAR is `wysicraft-runtime/build/libs/wysicraft-1.1.0.jar`. The desktop executable is `src/Wysicraft.Designer/bin/Debug/net8.0-windows/ArcadiaStudio.exe`; keep its adjacent files when distributing. For a publish directory:
 
 ```powershell
 dotnet publish src/Wysicraft.Designer -c Release -r win-x64 --self-contained false -o artifacts/designer
@@ -102,7 +104,7 @@ The preview runs actual JavaScript using Jint in a separate constrained process.
 /wysicraft open cockpit
 ```
 
-Reload requires permission level 2. The sample `say` commands also require the player's normal command permissions: use a cheats-enabled single-player world or an authorized operator to verify them. **Wysicraft does not elevate the player.**
+Reload requires permission level 2. The sample `say` commands also require the player's normal command permissions: use a cheats-enabled single-player world or an authorized operator to verify them. **Arcadia Studio does not elevate the player.**
 
 For command blocks or operators: `/wysicraft open cockpit <player>`. `/wui` is an alias. Unpacked development projects can be placed in `wysicraft/dev/<project>/`. Reload closes active screens and rescans packs.
 

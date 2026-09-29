@@ -69,7 +69,7 @@ public partial class MainWindow
         bool applying=false;
         void Commit() {
             if(applying || box.Text==value)return;applying=true;
-            try {apply(box.Text.Trim());value=box.Text;} catch(Exception ex) {Log(ex.Message);MessageBox.Show(this,ex.Message,"Wysicraft",MessageBoxButton.OK,MessageBoxImage.Warning);box.Text=value;}
+            try {apply(box.Text.Trim());value=box.Text;} catch(Exception ex) {Log(ex.Message);MessageBox.Show(this,ex.Message,"Arcadia Studio",MessageBoxButton.OK,MessageBoxImage.Warning);box.Text=value;}
             finally {applying=false;}
         }
         box.KeyDown+=(_,e)=>{if(e.Key==System.Windows.Input.Key.Return){Commit();e.Handled=true;}};

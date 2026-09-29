@@ -5,12 +5,12 @@ The **Minecraft test** (toolbar, Ctrl+F5, or **Project → Test in Minecraft**) 
 ## First run
 
 1. Click **Minecraft test**.
-2. If Java 21 isn't found automatically, choose its folder. (Wysicraft checks the real Java version; other versions are ignored.)
+2. If Java 21 isn't found automatically, choose its folder. (Arcadia Studio checks the real Java version; other versions are ignored.)
 3. Click **Start editor test**.
 
 The first launch downloads Minecraft, NeoForge and dependencies and compiles the runtime. Allow **several minutes** and **several GB** of disk space. Later launches reuse everything and start much faster.
 
-Minecraft opens in its own window with a small creative superflat world called **Wysicraft Test** (no mobs, weather or day/night cycle). Your screen doesn't open by itself.
+Minecraft opens in its own window with a small creative superflat world called **Arcadia Studio Test** (no mobs, weather or day/night cycle). Your screen doesn't open by itself.
 
 If you're using the portable ZIP, keep the `TestEnvironment` folder beside `Designer`.
 
@@ -22,7 +22,7 @@ If you're using the portable ZIP, keep the `TestEnvironment` folder beside `Desi
 | **F7** | Runs `.close` |
 | **F8** | Opens a test-control screen with Open and Close buttons. On your project screen, F8 shows or hides **Reset** and **.close** in the corner. |
 
-Remap them under **Options → Controls → Key Binds → Wysicraft Test**. These controls belong to the test only and aren't exported.
+Remap them under **Options → Controls → Key Binds → Arcadia Studio Test**. These controls belong to the test only and aren't exported.
 
 ## The test window
 
@@ -50,7 +50,7 @@ Remap them under **Options → Controls → Key Binds → Wysicraft Test**. Thes
 A KubeJS server script can link an existing command to your project so it shows under **Globals**:
 
 ```js
-const Wysicraft = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
+const Arcadia Studio = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
 Wysicraft.registerProjectCommand('my_project', 'portal');
 ```
 
@@ -58,7 +58,7 @@ The mod that provides the command must be in the test instance's `run/mods` fold
 
 ## Where things are kept
 
-The test instance lives in `%LOCALAPPDATA%\Wysicraft\MinecraftTest\1.21.1`. The world is reused across projects; only your project's files are replaced when you switch. Stop the test before switching projects.
+The test instance lives in `%LOCALAPPDATA%\Arcadia Studio\MinecraftTest\1.21.1`. The world is reused across projects; only your project's files are replaced when you switch. Stop the test before switching projects.
 
 ## Script support in the test
 

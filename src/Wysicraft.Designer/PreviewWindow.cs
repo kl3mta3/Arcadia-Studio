@@ -22,7 +22,7 @@ public partial class MainWindow
     static Task<CoreWebView2Environment>? previewEnvironment;
     // Games play sound from the start (a title theme), as they would in the desktop app, rather than waiting for a click.
     static Task<CoreWebView2Environment> PreviewEnvironment() => previewEnvironment ??= CoreWebView2Environment.CreateAsync(null,
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "PreviewWebView2"),
+        Wysicraft.Core.AppFolders.Path("PreviewWebView2"),
         new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
 
     void Preview()
@@ -73,9 +73,9 @@ public partial class MainWindow
         public PreviewSession(MainWindow designer, Project project, string id)
         {
             this.designer = designer; this.project = project; initialUi = id;
-            folder = Path.Combine(Path.GetTempPath(), "Wysicraft", "Preview", Guid.NewGuid().ToString("N"));
+            folder = Path.Combine(Path.GetTempPath(), "Arcadia Studio", "Preview", Guid.NewGuid().ToString("N"));
             var screen = project.Screens.First(s => s.Id == id);
-            Window = new Window { Title = "Wysicraft • Interactive Preview", Owner = designer, Width = Math.Max(760, screen.Size.Width * 2 + 60), Height = Math.Max(650, screen.Size.Height * 2 + 330), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            Window = new Window { Title = "Arcadia Studio • Interactive Preview", Owner = designer, Width = Math.Max(760, screen.Size.Width * 2 + 60), Height = Math.Max(650, screen.Size.Height * 2 + 330), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var layout = new DockPanel(); Window.Content = layout;
             var tools = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(tools, Dock.Top); layout.Children.Add(tools);
             var reset = new Button { Content = "Reset preview" }; reset.Click += (_, _) => { if (view.CoreWebView2 != null) { output.Clear(); Print("RESET", "Starting again from " + initialUi); view.CoreWebView2.Reload(); } }; tools.Children.Add(reset);
@@ -245,6 +245,20 @@ public partial class MainWindow
             }
             catch (Exception ex) { Print("ERROR", ex.Message); }
         }
+        // The game screen as a PNG, as players see it: collider outlines (a Preview aid) are left out, and only the
+        // screen's own area is taken, without the space around it.
+        internal async Task<byte[]> CaptureScreenAsync()
+        {
+            await WaitReady();
+            string result = await Script("(() => { const app = Wysicraft._app, host = app.host, had = host.showColliders; host.showColliders = false; app.render();" +
+                "const k = app.scale * app.dpr, w = Math.max(1, Math.round(app.ui.size.width * k)), h = Math.max(1, Math.round(app.ui.size.height * k));" +
+                "const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(app.canvas, Math.round(app.originX * k), Math.round(app.originY * k), w, h, 0, 0, w, h);" +
+                "host.showColliders = had; app.render(); return c.toDataURL('image/png'); })()");
+            string url = JsonSerializer.Deserialize<string>(result) ?? "";
+            int comma = url.IndexOf(','); if (!url.StartsWith("data:image/png;base64,") || comma < 0) throw new InvalidOperationException("Preview couldn't capture the screen.");
+            return Convert.FromBase64String(url[(comma + 1)..]);
+        }
+        internal bool IsOpen => !closed && Window.IsVisible;
         internal async Task CaptureCanvas(string path)
         {
             await WaitReady(); await Task.Delay(100);

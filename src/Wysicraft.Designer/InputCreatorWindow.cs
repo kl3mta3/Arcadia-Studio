@@ -64,7 +64,7 @@ public partial class MainWindow
             reviewAll.IsEnabled = Mine().Any(r => r.Status == "answered");
             saveAll.IsEnabled = Mine().Any(r => r.Status == "answered");
             deleteAll.IsEnabled = Mine().Any();
-            if (waiting > 0) status.Text = $"{waiting} request(s) queued. The assistant does not get interrupted — say \"check Wysicraft\" in your chat with it. This list updates by itself when it answers.";
+            if (waiting > 0) status.Text = $"{waiting} request(s) queued. The assistant does not get interrupted — say \"check Arcadia Studio\" in your chat with it. This list updates by itself when it answers.";
         }
         Action watch = () => Dispatcher.Invoke(Redraw);
         agentRequestWatchers.Add(watch);
@@ -161,7 +161,7 @@ public partial class MainWindow
                 Redraw();
                 if (run.Ok) { status.Text = run.Text.Length > 0 ? run.Text : "The assistant finished; review what it wrote."; return; }
             }
-            status.Text = (CanAskDirectly ? "Queued." : WhyQueued) + " Say \"check Wysicraft\" in your chat with the assistant and it will pick this up and reply here.";
+            status.Text = (CanAskDirectly ? "Queued." : WhyQueued) + " Say \"check Arcadia Studio\" in your chat with the assistant and it will pick this up and reply here.";
         }
         void Review(AgentRequest request)
         {

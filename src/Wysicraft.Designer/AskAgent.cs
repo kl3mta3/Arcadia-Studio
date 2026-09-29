@@ -88,7 +88,7 @@ public partial class MainWindow
             if (sent == null) return;
             if (sent.Status == "waiting")
             {
-                status.Text = WhyQueued + " Queued either way: ask it in chat to check Wysicraft and the reply appears here.";
+                status.Text = WhyQueued + " Queued either way: ask it in chat to check Arcadia Studio and the reply appears here.";
                 status.Foreground = Brushes.Goldenrod;
             }
             else if (sent.Problem.Length > 0 && sent.Reply.Length == 0)

@@ -82,4 +82,4 @@ In text boxes and the script editor, keys behave normally: Ctrl+A, Ctrl+C and Ct
 
 ## In the Minecraft test
 
-F6 opens your project, F7 closes it, F8 shows the test controls. Change these inside Minecraft under **Options → Controls → Key Binds → Wysicraft Test**.
+F6 opens your project, F7 closes it, F8 shows the test controls. Change these inside Minecraft under **Options → Controls → Key Binds → Arcadia Studio Test**.

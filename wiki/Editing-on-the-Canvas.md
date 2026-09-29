@@ -44,7 +44,7 @@ New controls and copies get simple numbered IDs: `button1`, `button2`, `label1`,
 
 ## Undo and redo
 
-**Ctrl+Z** and **Ctrl+Y**. Wysicraft keeps the last 200 steps. A drag, a resize, a batch of nudges, or a whole command such as Attach or Arrange counts as one step. Text fields have their own undo while you're typing in them.
+**Ctrl+Z** and **Ctrl+Y**. Arcadia Studio keeps the last 200 steps. A drag, a resize, a batch of nudges, or a whole command such as Attach or Arrange counts as one step. Text fields have their own undo while you're typing in them.
 
 ## Zoom
 

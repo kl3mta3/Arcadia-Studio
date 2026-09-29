@@ -6,7 +6,7 @@ Open the **Components** tab (top left, or **View → Panels → Components**).
 
 ## Built-in starters
 
-Pick a starter and click **Add to screen**. Wysicraft saves an editable source copy and places an instance, in one Undo step.
+Pick a starter and click **Add to screen**. Arcadia Studio saves an editable source copy and places an instance, in one Undo step.
 
 | Starter | Contains |
 | --- | --- |
@@ -41,7 +41,7 @@ Select any control in an instance to see **Component** options in Properties:
 | **Detach** | Turns the instance into ordinary controls, no longer linked. |
 | **Edit source** | Jumps to the source. |
 
-Wysicraft notices local changes you made to an instance (text, colors, sizes, events) and keeps them when updating. Controls added to the source appear in instances; controls removed from the source are removed from instances.
+Arcadia Studio notices local changes you made to an instance (text, colors, sizes, events) and keeps them when updating. Controls added to the source appear in instances; controls removed from the source are removed from instances.
 
 ## Good to know
 

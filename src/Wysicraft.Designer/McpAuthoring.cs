@@ -19,7 +19,7 @@ public partial class MainWindow
             if(operation is not ("test_stop" or "preview_close" or "templates")) CheckRevision(expected);
             switch(operation) {
                 case "save_as":
-                    if(!Path.IsPathFullyQualified(path) || !path.EndsWith(".wysicraftproj",StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Provide an absolute .wysicraftproj path in an existing directory.");
+                    if(!Path.IsPathFullyQualified(path) || !ProjectStore.IsProjectFile(path)) throw new InvalidDataException("Provide an absolute .arcadia path in an existing directory.");
                     if(File.Exists(path) && !string.Equals(path,folder,StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Destination exists. Choose a new filename.");
                     ProjectStore.SaveProject(project,path);folder=path;dirty=false;ClearRecovery();Log("MCP saved "+path);return Json.Write(new{path,revision=Revision()});
                 case "import_asset":
@@ -50,7 +50,7 @@ public partial class MainWindow
                     if(platforms.Any(p=>!DesktopExport.ElectronPlatforms.Contains(p))) throw new InvalidDataException("Platforms are "+string.Join(", ",DesktopExport.ElectronPlatforms));
                     var electronErrors=Wysicraft.Core.Validation.Errors(project);if(electronErrors.Count>0)throw new InvalidDataException(string.Join("\n",electronErrors));
                     var snapshot=Json.CloneProject(project);
-                    string outputFolder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","McpExports",project.Manifest.Id+"-electron-"+Guid.NewGuid().ToString("N")[..8]);
+                    string outputFolder=Wysicraft.Core.AppFolders.Path("McpExports",project.Manifest.Id+"-electron-"+Guid.NewGuid().ToString("N")[..8]);
                     string version=await DesktopExport.LatestElectronAsync(ExportHttp,cancellationToken);var made=new List<string>();
                     foreach(var platform in platforms){var zip=await DesktopExport.ElectronZipAsync(ExportHttp,version,platform,null,cancellationToken);made.Add(await Task.Run(()=>DesktopExport.ElectronApp(snapshot,zip,platform,outputFolder),cancellationToken));}
                     Log("MCP exported Electron "+version+" apps to "+outputFolder);LogSizeWarning("electron");return Json.Write(new{electron=version,files=made,sizeWarning=DownloadSize.Warning(snapshot,"electron")});
@@ -73,7 +73,7 @@ public partial class MainWindow
                     if(operation=="preview_profile") { await activePreview.SetProfilerAsync(value.Trim().ToLowerInvariant() is not ("off" or "false" or "0"));return await activePreview.SnapshotAsync(); }
                     // Lets animations, physics and timers run for a while (value = milliseconds, up to 10000), then reports the state.
                     if(operation=="preview_wait") { await Task.Delay(int.TryParse(value,out int ms)?Math.Clamp(ms,0,10000):500);return await activePreview.SnapshotAsync(); }
-                    string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","McpCaptures");Directory.CreateDirectory(root);
+                    string root=Wysicraft.Core.AppFolders.Path("McpCaptures");Directory.CreateDirectory(root);
                     string capture=Path.Combine(root,Guid.NewGuid().ToString("N")+".png");await activePreview.CaptureCanvas(capture);return Json.Write(new{path=capture});
                 case "templates":
                     return Json.Write(new { templates=ScriptTemplate.All.Select(t=>new{ id=t.Title,title=t.Title,server=t.Server,engine=t.Engine,global=t.Global,source=t.Source("on_event",project.Manifest.Id).Replace("__PROJECT__",project.Manifest.Id) }),instructions="Use apply_template with an id, screen, eventName, and optional element. Constants in source are editable placeholders. Global registration uses KubeJS and exports because its script is assigned to an event." });
@@ -104,7 +104,7 @@ public partial class MainWindow
                     }
                     if(replacement.Screens.Count==0)throw new InvalidDataException("Project needs a screen.");
                     project=replacement;ui=project.Screens.FirstOrDefault(s=>s.Id==project.Manifest.DefaultUi)??project.Screens[0];
-                    folder=operation=="project_open" && path.EndsWith(".wysicraftproj",StringComparison.OrdinalIgnoreCase)?path:null;
+                    folder=operation=="project_open" && ProjectStore.IsProjectFile(path)?path:null;
                     editingScript=null;selected.Clear();history.Clear();dirty=operation=="project_new";RefreshAll();return await McpInvoke("get_project",cancellationToken:cancellationToken);
                 case "test_start": case "test_export": case "test_apply": case "test_stop": case "test_open": case "test_close": case "test_command":
                     if(operation=="test_stop" && minecraftTest==null)return Json.Write(new{running=false});
@@ -118,7 +118,7 @@ public partial class MainWindow
 
 public sealed partial class DesignerMcpTools
 {
-    [McpServerTool(Name="save_project_as"),Description("Save the live project as a single editable .wysicraftproj at an absolute path. Requires an existing parent directory; refuses to overwrite a different existing file.")]
+    [McpServerTool(Name="save_project_as"),Description("Save the live project as a single editable .arcadia project file at an absolute path (an older .wysicraftproj path also works). Requires an existing parent directory; refuses to overwrite a different existing file.")]
     public Task<string> SaveAs(string expectedRevision,string path,CancellationToken cancellationToken)=>editor.McpWork("save_as",expectedRevision,path,cancellationToken:cancellationToken);
     [McpServerTool(Name="import_asset"),Description("Import a local file (absolute path, at most 32 MiB): a PNG becomes a texture (returns its resource ID); a sound (.ogg, .mp3, .wav, .m4a, .aac) becomes a sound ID for play_sound actions and Sound controls (Minecraft only plays .ogg); a name.png.mcmeta animates the already-imported name.png (Minecraft animation format). One Undo step; refuses duplicate names.")]
     public Task<string> ImportAsset(string expectedRevision,string path,CancellationToken cancellationToken)=>editor.McpWork("import_asset",expectedRevision,path,cancellationToken:cancellationToken);

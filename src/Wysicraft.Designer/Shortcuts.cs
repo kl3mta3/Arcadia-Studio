@@ -13,7 +13,7 @@ public partial class MainWindow
     readonly List<Command> commands=new();
     Dictionary<string,string> shortcutOverrides=new();
     readonly Dictionary<string,List<MenuItem>> commandMenuItems=new();
-    static string ShortcutsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","keybindings.json");
+    static string ShortcutsPath => Wysicraft.Core.AppFolders.Path("keybindings.json");
 
     void RegisterCommands() {
         void Add(string id,string category,string name,string gesture,Action run,bool typing=false,Func<bool>? isChecked=null)=>commands.Add(new(id,category,name,gesture,run,typing,isChecked));
@@ -25,6 +25,7 @@ public partial class MainWindow
         Add("file.looseCopy","File","Save a copy as loose files…","",SaveLooseCopy);
         Add("file.export","File","Export…","Ctrl+E",Export);
         Add("file.exportKube","File","Export for KubeJS…","",ExportKube);
+        Add("file.publish","File","Publish to Arcadia…","",PublishToArcadia);
         Add("file.exit","File","Exit","",Close);
         Add("edit.undo","Edit","Undo","Ctrl+Z",history.Undo);
         Add("edit.redo","Edit","Redo","Ctrl+Y",history.Redo);
@@ -80,7 +81,7 @@ public partial class MainWindow
         Add("advanced.toolbox","Advanced","Show / hide the Advanced toolbox","",ToggleAdvancedToolbox);
         Add("help.manual","Help","User manual","F1",OpenManual,true);
         Add("help.scriptApi","Help","Script API and snippets","",ShowScriptApi);
-        Add("help.about","Help","About Wysicraft","",ShowAbout);
+        Add("help.about","Help","About Arcadia Studio","",ShowAbout);
         LoadShortcuts();
     }
     Command Cmd(string id)=>commands.First(c=>c.Id==id);

@@ -59,7 +59,7 @@ public static class AudioFiles
         channels = channels.Select(c => { var padded = new float[given + leadOut]; Array.Copy(c, padded, given); if (loop && given > 0) for (int i = 0; i < leadOut; i++) padded[given + i] = c[i % given]; return padded; }).ToArray();
         var info = VorbisInfo.InitVariableBitRate(channels.Length, sampleRate, quality);
         var stream = new OggStream(new Random().Next());
-        var comments = new Comments(); comments.AddTag("ENCODER", "Wysicraft");
+        var comments = new Comments(); comments.AddTag("ENCODER", "Arcadia Studio");
         stream.PacketIn(HeaderPacketBuilder.BuildInfoPacket(info));
         stream.PacketIn(HeaderPacketBuilder.BuildCommentsPacket(comments));
         stream.PacketIn(HeaderPacketBuilder.BuildBooksPacket(info));

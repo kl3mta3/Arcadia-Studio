@@ -2,7 +2,7 @@
 
 Select a control to edit it in **Properties**. Changes apply as you type valid values; an invalid value turns the field's border red and isn't applied. With several controls selected, Properties shows the first one.
 
-Every section (Identity, Layout, Appearance and so on) folds: click its heading to close or open it. Wysicraft remembers which ones you closed, so a long panel stays the way you left it. **Ask Agent** stays at the top whatever is folded.
+Every section (Identity, Layout, Appearance and so on) folds: click its heading to close or open it. Arcadia Studio remembers which ones you closed, so a long panel stays the way you left it. **Ask Agent** stays at the top whatever is folded.
 
 ## Identity
 

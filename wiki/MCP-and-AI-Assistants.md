@@ -1,8 +1,8 @@
 # AI assistants (MCP)
 
-Wysicraft can let an AI assistant such as **Claude**, **ChatGPT** or another app that supports **MCP** look at your open project and change it: add controls, write scripts, run Preview, export, and more. You can watch every change appear on the canvas, and **Undo** works on them like your own edits.
+Arcadia Studio can let an AI assistant such as **Claude**, **ChatGPT** or another app that supports **MCP** look at your open project and change it: add controls, write scripts, run Preview, export, and more. You can watch every change appear on the canvas, and **Undo** works on them like your own edits.
 
-MCP (Model Context Protocol) is a standard way for AI apps to use tools. Wysicraft includes an MCP server, so there's nothing else to install.
+MCP (Model Context Protocol) is a standard way for AI apps to use tools. Arcadia Studio includes an MCP server, so there's nothing else to install.
 
 ## Before you start
 
@@ -15,7 +15,7 @@ Examples include Claude Desktop, Claude Code and other MCP-capable desktop tools
 
 ## Step by step
 
-1. In Wysicraft, click the blue **Start MCP server** button in the toolbar.
+1. In Arcadia Studio, click the blue **Start MCP server** button in the toolbar.
 2. A window opens with the connection details. Click **Copy connection config**.
 3. Open your AI app's MCP or connector settings and paste the configuration as a new server. The exact place differs between apps; look for "MCP servers", "Connectors" or "Tools". The pasted text looks like this, with your own port and token:
 
@@ -31,9 +31,9 @@ Examples include Claude Desktop, Claude Code and other MCP-capable desktop tools
    }
    ```
 
-4. Back in Wysicraft, click **Check connection** to confirm the server responds. Once your AI app connects, its name appears in the window under recently connected clients.
+4. Back in Arcadia Studio, click **Check connection** to confirm the server responds. Once your AI app connects, its name appears in the window under recently connected clients.
 5. Ask your assistant for something, for example:
-   - "Look at my Wysicraft project and add a Close button in the top-right corner that closes the screen."
+   - "Look at my Arcadia Studio project and add a Close button in the top-right corner that closes the screen."
    - "Make a shop screen with an item list and a Buy button that runs a server script."
    - "Validate the project and fix any errors."
    - "Draw a 16×16 pixel-art coin with a 4-frame spin, and add it to the screen as an animated sprite."
@@ -43,17 +43,17 @@ When it's running, the toolbar button turns green and says **MCP running – con
 
 ## Things to know
 
-- **The assistant is told how to use Wysicraft.** On connecting it receives a short briefing, and a **guide** tool explains the rest in topics: making a first screen, editing, scripting, art, sound, games, components, preview, exporting and what the errors mean. You don't have to explain any of it. If an assistant seems to be guessing, ask it to call the guide first.
+- **The assistant is told how to use Arcadia Studio.** On connecting it receives a short briefing, and a **guide** tool explains the rest in topics: making a first screen, editing, scripting, art, sound, games, components, preview, exporting and what the errors mean. You don't have to explain any of it. If an assistant seems to be guessing, ask it to call the guide first.
 
 - **Same address every time.** The port (4730 unless you change it in Set up) and the access token stay the same across restarts, so you paste the configuration once. **Regenerate token** in Set up makes a new one if you ever need to.
-- **Closing the connection window keeps the server running.** Use **Stop MCP server** in that window to disconnect. Closing Wysicraft also stops it.
+- **Closing the connection window keeps the server running.** Use **Stop MCP server** in that window to disconnect. Closing Arcadia Studio also stops it.
 - **Keep the token private.** Anyone with it can read and edit your open project, including server scripts. It only works on your computer, and web pages can't use it.
-- **Your project, your call.** The assistant edits the project that's open in Wysicraft. It saves only when asked (or when you press Save). Every change can be undone.
+- **Your project, your call.** The assistant edits the project that's open in Arcadia Studio. It saves only when asked (or when you press Save). Every change can be undone.
 - **Finish what you're doing first.** If you're mid-drag or typing in a field when the assistant makes a change, it asks the assistant to wait.
 
 ## Ask Agent (requires a CLI)
 
-Under the connection details is an **Ask Agent  (Requires CLI)** row. With it set up, Wysicraft can ask an AI to do things for you from inside the editor, without you switching to a chat window:
+Under the connection details is an **Ask Agent  (Requires CLI)** row. With it set up, Arcadia Studio can ask an AI to do things for you from inside the editor, without you switching to a chat window:
 
 - **Ask Agent** at the top of Properties (with a control selected, or the screen) — describe what you want done to it.
 - **Advanced → Input creator** — pick a device and a free button, say what it should do, and the script and input are written for you.
@@ -66,7 +66,7 @@ It uses a command-line AI tool you already have — on your own account and subs
 3. Click **Sign in** if needed — the tool's own login opens, and your browser does the rest.
 4. Click **Test**. When it says *Works*, click **Done**.
 
-**Start** opens a terminal with the tool running interactively and Wysicraft attached, for when you want to talk to it directly; **Stop** closes it. Tick **Auto-connect with MCP** to start it whenever MCP starts.
+**Start** opens a terminal with the tool running interactively and Arcadia Studio attached, for when you want to talk to it directly; **Stop** closes it. Tick **Auto-connect with MCP** to start it whenever MCP starts.
 
 Without a CLI set up, the same buttons still work but queue the request: an assistant connected the ordinary way picks it up with the `pending_requests` tool on its next turn and answers with `answer_request`. The button tells you which is happening.
 
@@ -82,7 +82,8 @@ Without a CLI set up, the same buttons still work but queue the request: an assi
 | `undo`, `redo` | Undo or redo |
 | `validate_project` | List validation errors, which ones only block Minecraft exports, and everything Minecraft can't run with where it is |
 | `save_project`, `save_project_as` | Save the project file |
-| `export_project` | Export a JAR, installation ZIP, portable pack, KubeJS files, web page (folder or single file) or Windows app (to `%LOCALAPPDATA%\Wysicraft\McpExports`). Minecraft formats are refused while the project uses things Minecraft can't run. |
+| `export_project` | Export a JAR, installation ZIP, portable pack, KubeJS files, web page (folder or single file) or Windows app (to `%LOCALAPPDATA%\Arcadia Studio\McpExports`). Minecraft formats are refused while the project uses things Minecraft can't run. |
+| `arcadia_publish` | [[Publish to Arcadia|Publishing-to-Arcadia]]: read the link and account, fill in the game details, leaderboard and screenshot (captured from Preview), build the package and run the arcade's check. It never publishes: that's your click in File → Publish to Arcadia |
 | `export_electron_apps` | Export Electron apps for macOS and Linux (and Windows if asked); downloads Electron the first time |
 | `import_asset` | Import a PNG, a sound (`.ogg`, `.mp3`, `.wav`, `.m4a`) or a `.png.mcmeta` animation file from your computer |
 | `pixel_art` | Draw pixel art (layers, groups, frames, transparency) and save it as a project image, exactly like the pixel editor, as one Undo step. Returns the texture ID, a text grid and a preview picture |

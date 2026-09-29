@@ -200,7 +200,7 @@ public sealed class PixelDocument
     {
         if (bytes.Length > 32 * 1024 * 1024) throw new InvalidDataException("Layer file too large");
         var data = System.Text.Json.JsonSerializer.Deserialize<FileData>(bytes, Json.Options) ?? throw new InvalidDataException("Empty layer file");
-        if (data.Format != FileFormat || data.Version != 1) throw new InvalidDataException("Not a Wysicraft layer file");
+        if (data.Format != FileFormat || data.Version != 1) throw new InvalidDataException("Not an Arcadia Studio layer file");
         var doc = new PixelDocument(data.Width, data.Height, data.Frames); int count = 0;
         PixelLayer Read(LayerData d, int depth)
         {

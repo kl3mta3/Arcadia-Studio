@@ -26,7 +26,7 @@ static class StemSetup
         window.SetResourceReference(FrameworkElement.StyleProperty, typeof(Window));
         var panel = new StackPanel { Margin = new Thickness(16), Width = 420 }; window.Content = panel;
         panel.Children.Add(new TextBlock { Text = "Songs convert much better split into parts first", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
-        panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), Text = "Before converting, Wysicraft can split a song into vocals, bass, drums and the other instruments with Demucs (by Meta, MIT licence). The singing then becomes the melody, the bass guitar the bass line and the guitars the chords." });
+        panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), Text = "Before converting, Arcadia Studio can split a song into vocals, bass, drums and the other instruments with Demucs (by Meta, MIT licence). The singing then becomes the melody, the bass guitar the bass line and the guitars the chords." });
         panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.75, Margin = new Thickness(0, 0, 0, 10), Text = $"This needs a one-time download of {StemSplitter.ModelBytes / 1_000_000.0:0} MB from Hugging Face, kept in your app data folder so the installer stays small. Songs can still be converted without it." });
         var bar = new ProgressBar { Height = 14, Maximum = 1, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 4) }; panel.Children.Add(bar);
         var status = new TextBlock { Opacity = 0.75, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 6) }; panel.Children.Add(status);

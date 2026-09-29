@@ -1,16 +1,16 @@
 # Security and permissions
 
-This page is for **server owners** installing Wysicraft projects and for authors who want to build safe screens.
+This page is for **server owners** installing Arcadia Studio projects and for authors who want to build safe screens.
 
 ## The short version
 
-- Wysicraft **never grants extra permissions**. Commands run as the clicking player by default.
+- Arcadia Studio **never grants extra permissions**. Commands run as the clicking player by default.
 - Players' game clients can only say "I clicked this control". What happens next is decided by the server, from the project installed **on the server**.
 - Treat installed projects like server configuration: they can run commands and scripts. Only install projects you trust.
 
 ## What the server checks on every click
 
-1. The player has a Wysicraft screen open, and the message carries that screen's session token.
+1. The player has an Arcadia Studio screen open, and the message carries that screen's session token.
 2. The control exists, supports that event, and is visible and enabled (including its panels and any conditions), according to the **server's** state.
 3. The input is the right type and size (text up to 1024 characters, numbers in range, valid row index…).
 4. The player meets the handler's **permission level**, and its **cooldown** has passed.
@@ -35,7 +35,7 @@ Only then are the server actions run. Commands are fixed text from the installed
 
 ## Scripts
 
-- Standard scripts run in Wysicraft's bundled JavaScript engine, with no access to Java classes, files, the network or processes, and with statement, time and output limits.
+- Standard scripts run in Arcadia Studio's bundled JavaScript engine, with no access to Java classes, files, the network or processes, and with statement, time and output limits.
 - Server scripts also have a **per-player time budget**: a player who triggers scripts too quickly has their scripts paused, and the server log says so.
 - The engine runs inside Minecraft without its own memory cap. These limits stop accidents and casual abuse, but they aren't a hostile-code sandbox. Install trusted projects.
 - The editor's Preview runs scripts in a separate, restricted process.

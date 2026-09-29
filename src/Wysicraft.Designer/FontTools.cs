@@ -63,7 +63,7 @@ public partial class MainWindow
                 if (Fonts.FileOf(project, font) is string asset)
                 {
                     // WPF loads a font from a folder URI plus "#Family Name", so the bytes go to a cache file first.
-                    var folder = Path.Combine(Path.GetTempPath(), "Wysicraft", "fonts");
+                    var folder = Path.Combine(Path.GetTempPath(), "Arcadia Studio", "fonts");
                     Directory.CreateDirectory(folder);
                     var file = Path.Combine(folder, Fonts.FamilyName(font) + Path.GetExtension(asset));
                     var bytes = project.Assets[asset];

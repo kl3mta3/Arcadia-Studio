@@ -1,4 +1,4 @@
-param([string]$JavaHome=$env:JAVA_HOME,[switch]$Installer)
+﻿param([string]$JavaHome=$env:JAVA_HOME,[switch]$Installer)
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent
 Push-Location $repo
@@ -9,7 +9,7 @@ try {
     $runtimeVersion=[regex]::Match((Get-Content wysicraft-runtime/build.gradle -Raw),"version = '([^']+)'").Groups[1].Value
     $version=[regex]::Match((Get-Content src/Wysicraft.Designer/Wysicraft.Designer.csproj -Raw),'<Version>([^<]+)</Version>').Groups[1].Value
     if(!$version){$version=$runtimeVersion}
-    $release=Join-Path $repo "artifacts/Wysicraft-$version"
+    $release=Join-Path $repo "artifacts/ArcadiaStudio-$version"
     & dotnet publish src/Wysicraft.Designer -c Release -r win-x64 --self-contained true -o "$release/Designer"
     if($LASTEXITCODE){throw 'Designer build failed'}
     # Docs is rebuilt from scratch each time: the user manual plus third-party notices, nothing else.
@@ -25,12 +25,17 @@ try {
     & "$PSScriptRoot/Build-AppHost.ps1" -Output "$release/Runtime/WysicraftAppHost.exe"
     if($LASTEXITCODE){throw 'App host build failed'}
     # The user manual: one offline HTML page generated from the wiki pages (developer notes in docs/ are not shipped).
-    & dotnet run --project tools/Wysicraft.ManualBuilder -c Release -- wiki "$release/Docs/Wysicraft-Manual.html" $version
+    & dotnet run --project tools/Wysicraft.ManualBuilder -c Release -- wiki "$release/Docs/Arcadia-Studio-Manual.html" $version
     if($LASTEXITCODE){throw 'Manual build failed'}
     if(Test-Path "$release/README.md"){ Remove-Item "$release/README.md" -Force }
     Copy-Item LICENSE $release -Force
     & "$PSScriptRoot/Collect-Notices.ps1" -ReleaseDir $release
-    Compress-Archive "$release/*" "artifacts/Wysicraft-$version-win-x64.zip" -Force
+    Compress-Archive "$release/*" "artifacts/ArcadiaStudio-$version-win-x64.zip" -Force
+    # Arcadia trusts official web runtime builds by their SHA-256. Exports write the runtime byte-for-byte from this file
+    # (PublishChecks checks that), so this is the hash to add under Setup → Publishing → Trusted Wysicraft runtime builds.
+    $runtimeHash=(Get-FileHash src/Wysicraft.Web/wysicraft-web.js -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content "artifacts/ArcadiaStudio-$version-runtime-SHA256.txt" "$runtimeHash  wysicraft/wysicraft-web.js (Arcadia Studio $version web runtime)" -Encoding ascii
+    Write-Output "Web runtime SHA-256: $runtimeHash"
     if($Installer){ & "$PSScriptRoot/Build-Installer.ps1" -ReleaseDir $release -Version $version }
     Write-Output "Release: $release (editor tests and exports use Runtime/wysicraft-$runtimeVersion.jar)"
 } finally {Pop-Location}

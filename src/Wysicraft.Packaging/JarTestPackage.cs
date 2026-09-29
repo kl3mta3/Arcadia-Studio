@@ -36,7 +36,7 @@ public sealed record JarTestPackage(string ProjectId, Dictionary<string, byte[]>
         using var jar = new ZipArchive(new MemoryStream(bytes));
         if (jar.GetEntry("META-INF/neoforge.mods.toml") == null) throw new InvalidDataException("Select an exported NeoForge project JAR, not the runtime JAR or a project file.");
         var packs = jar.Entries.Where(e => e.FullName.StartsWith("wysicraft/") && e.FullName.EndsWith(".wysicraft")).ToList();
-        if (packs.Count != 1 || packs[0].Length > ProjectStore.MaxPack) throw new InvalidDataException("Select a Wysicraft project JAR containing exactly one project.");
+        if (packs.Count != 1 || packs[0].Length > ProjectStore.MaxPack) throw new InvalidDataException("Select an Arcadia Studio project JAR containing exactly one project.");
         using var packBytes = new MemoryStream();
         using (var source = packs[0].Open()) source.CopyTo(packBytes);
         packBytes.Position = 0;
@@ -46,7 +46,7 @@ public sealed record JarTestPackage(string ProjectId, Dictionary<string, byte[]>
         using var reader = new StreamReader(entry.Open());
         var manifest = Json.Read<Manifest>(reader.ReadToEnd());
         if (!Validation.Id(manifest.Id) || packs[0].FullName != "wysicraft/" + manifest.Id + ".wysicraft") throw new InvalidDataException("Invalid project ID in the JAR.");
-        if (!Version.TryParse(manifest.RuntimeVersion, out var version) || version > Version.Parse(Distribution.RuntimeVersion)) throw new InvalidDataException("Update Wysicraft to test this project's required runtime: " + manifest.RuntimeVersion);
+        if (!Version.TryParse(manifest.RuntimeVersion, out var version) || version > Version.Parse(Distribution.RuntimeVersion)) throw new InvalidDataException("Update Arcadia Studio to test this project's required runtime: " + manifest.RuntimeVersion);
         var files = new Dictionary<string, byte[]> { ["mods/wysicraft-test-project.jar"] = bytes };
         if (manifest.Dependencies.Contains("kubejs")) {
             foreach (string kind in new[] { "server_scripts", "startup_scripts" }) {

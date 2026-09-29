@@ -11,7 +11,7 @@ namespace Wysicraft.Designer;
 // Children can still be locked or unlocked on their own afterwards.
 public partial class MainWindow
 {
-    static string PreferencesPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "preferences.json");
+    static string PreferencesPath => Wysicraft.Core.AppFolders.Path("preferences.json");
     sealed class Preferences
     {
         public string LockChildren { get; set; } = "ask"; // ask, always, never
@@ -30,6 +30,12 @@ public partial class MainWindow
         public bool AssistantAutoConnect { get; set; }
         // Properties sections that were collapsed, by heading text. Anything not listed is open.
         public List<string> CollapsedSections { get; set; } = [];
+        // Publishing to Arcadia: the arcade's address (empty: the default one), the key for each arcade host
+        // (DPAPI-protected, like the MCP token), and each project's game there ("host|projectId" → game ID) as a backup
+        // for a project that wasn't saved after its first publish.
+        public string ArcadeUrl { get; set; } = "";
+        public Dictionary<string, string> ArcadiaKeys { get; set; } = [];
+        public Dictionary<string, string> ArcadiaGames { get; set; } = [];
     }
     Preferences? preferences;
     internal string? lockChildrenAnswer; // tests set "always"/"never" so no dialog appears
@@ -44,7 +50,7 @@ public partial class MainWindow
         try { Directory.CreateDirectory(Path.GetDirectoryName(PreferencesPath)!); File.WriteAllText(PreferencesPath + ".tmp", JsonSerializer.Serialize(Prefs())); File.Move(PreferencesPath + ".tmp", PreferencesPath, true); }
         catch (Exception ex) { Log("Preferences could not be saved: " + ex.Message); }
     }
-    void ResetDontAskAgain() { Prefs().LockChildren = "ask"; SavePrefs(); Log("Wysicraft will ask again before locking or unlocking items inside panels."); }
+    void ResetDontAskAgain() { Prefs().LockChildren = "ask"; SavePrefs(); Log("Arcadia Studio will ask again before locking or unlocking items inside panels."); }
 
     /// <summary>Locks or unlocks the targets, and (after asking) everything attached inside them that doesn't match yet.</summary>
     void SetLocked(IReadOnlyCollection<Element> targets, bool locking)

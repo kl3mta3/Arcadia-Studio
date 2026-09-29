@@ -53,7 +53,7 @@ The Windows app is a small program (under 1 MB) plus your web page. It shows the
 
 Electron apps run on Windows, macOS and Linux, and are about 100 MB each.
 
-- **Download:** the first time you export for a platform, Wysicraft downloads Electron's official build from its GitHub releases, checks it against Electron's published checksums, and keeps it in `%LOCALAPPDATA%\Wysicraft\Electron` for next time.
+- **Download:** the first time you export for a platform, Arcadia Studio downloads Electron's official build from its GitHub releases, checks it against Electron's published checksums, and keeps it in `%LOCALAPPDATA%\Arcadia Studio\Electron` for next time.
 - **You can build all three from Windows:** Electron isn't compiled, so no Mac or Linux PC is needed.
 - **Windows** is unticked by default: the **Windows app** format does the same job in under 1 MB instead of about 100 MB. Tick it only if you want your Windows build to match your Mac and Linux ones.
 - **macOS:** the app isn't signed by Apple, so macOS says it's damaged when it's downloaded. Run `xattr -cr "Your App.app"` once in Terminal, or sign it on a Mac with your Apple developer account.
@@ -62,7 +62,7 @@ Electron apps run on Windows, macOS and Linux, and are about 100 MB each.
 
 ## How big should a game be?
 
-Every player downloads a web game over their own connection, so Wysicraft warns when one gets heavy. Nothing is refused; the warning just says what the wait will be.
+Every player downloads a web game over their own connection, so Arcadia Studio warns when one gets heavy. Nothing is refused; the warning just says what the wait will be.
 
 | Export | Warns past | Why |
 | --- | --- | --- |

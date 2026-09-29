@@ -63,7 +63,7 @@ public partial class MainWindow
         int scale = Math.Clamp(512 / Math.Max(image.Width, image.Height), 1, 32);
         var big = new PixelImage(Math.Min(PixelArt.MaxSheetSize, image.Width * scale), Math.Min(PixelArt.MaxSheetSize, image.Height * scale));
         for (int y = 0; y < big.Height; y++) for (int x = 0; x < big.Width; x++) big.Pixels[y * big.Width + x] = image.Get(x / scale, y / scale);
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "McpCaptures"); Directory.CreateDirectory(root);
+        string root = Wysicraft.Core.AppFolders.Path("McpCaptures"); Directory.CreateDirectory(root);
         string file = Path.Combine(root, "pixels-" + Guid.NewGuid().ToString("N") + ".png"); File.WriteAllBytes(file, EncodePixels(big)); return file;
     }
     static object PixelArtInfo(PixelDocument doc) => new

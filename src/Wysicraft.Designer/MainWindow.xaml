@@ -1,4 +1,4 @@
-<Window x:Class="Wysicraft.Designer.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Wysicraft — Visual UI Designer" Background="#1D2025" Foreground="#E2E6ED" FontFamily="Segoe UI" Width="1440" Height="920" MinWidth="1050" MinHeight="650">
+<Window x:Class="Wysicraft.Designer.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Arcadia Studio — Visual UI Designer" Background="#1D2025" Foreground="#E2E6ED" FontFamily="Segoe UI" Width="1440" Height="920" MinWidth="1050" MinHeight="650">
   <DockPanel>
     <Menu x:Name="Menus" DockPanel.Dock="Top" Background="#30343C" Foreground="#EEEEEE" />
     <WrapPanel x:Name="Toolbar" DockPanel.Dock="Top" Background="#25282E" />

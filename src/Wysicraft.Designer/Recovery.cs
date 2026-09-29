@@ -8,7 +8,7 @@ using Wysicraft.Packaging;
 namespace Wysicraft.Designer;
 public partial class MainWindow
 {
-    static string RecoveryRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","Recovery");
+    static string RecoveryRoot => Wysicraft.Core.AppFolders.Path("Recovery");
     RecoveryStore? recovery;
     string? recoveredFrom;
     bool crashRecovery, recoveryErrorReported;
@@ -62,7 +62,7 @@ public partial class MainWindow
     }
     internal void OpenProjectPath(string path) {
         var loaded=ProjectStore.Load(Path.GetFileName(path)=="project.json"?Path.GetDirectoryName(path)!:path);
-        ClearRecovery();project=loaded;folder=path.EndsWith(".wysicraftproj",StringComparison.OrdinalIgnoreCase)?path:null;
+        ClearRecovery();project=loaded;folder=ProjectStore.IsProjectFile(path)?path:null;keepLegacyFile=false;
         ui=project.Screens.FirstOrDefault(s=>s.Id==project.Manifest.DefaultUi && !s.IsComponent) ?? project.Screens.FirstOrDefault(s=>!s.IsComponent) ?? project.Screens.First();
         selected.Clear();history.Clear();dirty=false;editingScript=null;RefreshAll();Log("Loaded "+project.Manifest.Name);
     }

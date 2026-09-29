@@ -1,12 +1,12 @@
-# Wysicraft manual
+# Arcadia Studio manual
 
-Wysicraft is a Windows app for designing Minecraft screens (menus, dashboards, control panels and shops) by dragging controls onto a canvas. You connect buttons to actions or JavaScript, preview everything on your desktop, and export a mod JAR that works in Minecraft Java Edition **1.21.1** with **NeoForge**. There's no Java code to write and no Minecraft restart needed while designing.
+Arcadia Studio is a Windows app for designing Minecraft screens (menus, dashboards, control panels and shops) by dragging controls onto a canvas. You connect buttons to actions or JavaScript, preview everything on your desktop, and export a mod JAR that works in Minecraft Java Edition **1.21.1** with **NeoForge**. There's no Java code to write and no Minecraft restart needed while designing.
 
-![The Wysicraft editor](images/editor-overview.png)
+![The Arcadia Studio editor](images/editor-overview.png)
 
 ## Start here
 
-1. [[Installing Wysicraft|Installing-Wysicraft]]: download, install and first launch.
+1. [[Installing Arcadia Studio|Installing-Arcadia-Studio]]: download, install and first launch.
 2. [[Quick start tutorial|Quick-Start-Tutorial]]: build a working screen in about ten minutes.
 3. [[The workspace|The-Workspace]]: find your way around the window.
 
@@ -54,4 +54,4 @@ Wysicraft is a Windows app for designing Minecraft screens (menus, dashboards, c
 | Use your screens in Minecraft | Minecraft Java **1.21.1** with NeoForge **21.1.250** or newer |
 | Use KubeJS server scripts | KubeJS and Rhino installed in the modpack |
 
-*This manual describes Wysicraft 1.2 (Minecraft runtime 1.6.0).*
+*This manual describes Arcadia Studio 1.3 (Minecraft runtime 1.7.0). Arcadia Studio was called Wysicraft before 1.3: projects from then (`.wysicraftproj`) still open, and your settings come across by themselves.*

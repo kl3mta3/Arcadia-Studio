@@ -21,7 +21,7 @@ You can also **drag an image** onto the canvas to create an Image control there.
 
 Scripts that build image paths from pieces can't be detected by **Find uses**. Check your scripts before deleting an image that looks unused.
 
-**Where images live:** `assets/<project_id>/textures/gui/<control_type>/<name>.png`, referenced as `<project_id>:textures/gui/<control_type>/<name>.png`. Wysicraft manages these paths for you, and they update automatically if you change the project Id. Minecraft resource packs can override them.
+**Where images live:** `assets/<project_id>/textures/gui/<control_type>/<name>.png`, referenced as `<project_id>:textures/gui/<control_type>/<name>.png`. Arcadia Studio manages these paths for you, and they update automatically if you change the project Id. Minecraft resource packs can override them.
 
 **Limits:** PNG only, up to 8192 × 8192 pixels and 32 MiB each, 256 MiB per project. The editor may show a smaller preview of large images; exports keep the originals.
 
@@ -33,7 +33,7 @@ An animation file (`name.png.mcmeta`) dropped on Assets by itself joins the proj
 
 ### Animated textures
 
-Wysicraft plays animated textures the way Minecraft does: the frames are stacked in one PNG, and a `.png.mcmeta` file beside it sets the timing (for example `{"animation":{"frametime":2}}`; frame times are game ticks of 50 ms, and `frames` can list an order and per-frame `time`).
+Arcadia Studio plays animated textures the way Minecraft does: the frames are stacked in one PNG, and a `.png.mcmeta` file beside it sets the timing (for example `{"animation":{"frametime":2}}`; frame times are game ticks of 50 ms, and `frames` can list an order and per-frame `time`).
 
 - **Minecraft's own** animated textures work straight away: set an Image (or a skin) to `minecraft:textures/block/prismarine.png`, `minecraft:textures/block/sea_lantern.png`, `minecraft:textures/block/magma.png` and so on.
 - **Made in the pixel editor:** tick **Plays on its own** before saving. See [[Pixel art and sprites|Pixel-Art-and-Sprites]].
@@ -52,7 +52,7 @@ Images and skins show one frame at a time, animated on the canvas, in Preview an
 
 ### Where the list comes from
 
-- Wysicraft reads your installed **Minecraft 1.21.1 client** automatically when it can find it (the standard launcher, or Wysicraft's own test instance).
+- Arcadia Studio reads your installed **Minecraft 1.21.1 client** automatically when it can find it (the standard launcher, or Arcadia Studio's own test instance).
 - **Load Minecraft / mod JAR** adds items from another client or mod JAR.
 - For the exact list of registered items, **including modded items**, start a [[Minecraft test|Testing-in-Minecraft]] once, then click **Read test items**. It also reads textures from the test instance's mods folder.
 

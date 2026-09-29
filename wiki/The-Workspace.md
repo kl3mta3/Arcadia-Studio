@@ -1,6 +1,6 @@
 # The workspace
 
-![The Wysicraft editor](images/editor-overview.png)
+![The Arcadia Studio editor](images/editor-overview.png)
 
 ## Layout
 
@@ -25,7 +25,7 @@ Every panel can be rearranged:
 - **Close button:** hides the panel. Bring it back from **View → Panels**.
 - **View → Reset panel layout** restores the default arrangement. It never changes your project or script text.
 
-Your arrangement is saved when you close Wysicraft and restored next time. It's a per-user preference, separate from projects. (Version 1.2 starts once with a fresh default layout, with a shorter Output panel and wider left panels.)
+Your arrangement is saved when you close Arcadia Studio and restored next time. It's a per-user preference, separate from projects. (Version 1.2 starts once with a fresh default layout, with a shorter Output panel and wider left panels.)
 
 ## Toolbar
 
@@ -46,7 +46,7 @@ The text on the right shows the zoom, for example `Zoom 100% • 1 GUI pixel = 2
 - **Edit:** Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select all, Group, Ungroup, Isolate group, Attach to panel, Detach from panel, Lock / unlock selection, Rename…, Bring to front, Bring forward, Send backward, Send to back, and the **Arrange** submenu.
 - **View:** Panels, Reset panel layout, zoom commands, Show grid, Snap to grid, Keyboard shortcuts….
 - **Project:** Preview, Test in Minecraft, Validate, Screen settings, Project settings…, Import texture…, MCP server (AI assistants)….
-- **Help:** User manual (F1, opens the offline manual installed with Wysicraft), Script API and snippets, Keyboard shortcuts…, About Wysicraft.
+- **Help:** User manual (F1, opens the offline manual installed with Arcadia Studio), Script API and snippets, Keyboard shortcuts…, About Arcadia Studio.
 
 All of these can be given your own shortcuts. See [[Keyboard shortcuts|Keyboard-Shortcuts]].
 
@@ -58,4 +58,4 @@ Text fields update the canvas as you type valid values. An invalid value turns t
 
 ## Output panel
 
-Output lists what Wysicraft did: saves, exports, validation errors, attach and detach reports, and errors. Validation opens this panel automatically. The last message also appears in the status bar.
+Output lists what Arcadia Studio did: saves, exports, validation errors, attach and detach reports, and errors. Validation opens this panel automatically. The last message also appears in the status bar.

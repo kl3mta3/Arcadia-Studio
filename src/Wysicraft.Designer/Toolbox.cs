@@ -58,7 +58,7 @@ public partial class MainWindow
             var window = new Window { Owner = this, Title = "Advanced tools", SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
             var panel = new StackPanel { Margin = new Thickness(16), MaxWidth = 440 }; window.Content = panel;
             panel.Children.Add(new TextBlock { Text = "These tools work in web page, Windows app and Electron exports only — not inside Minecraft.", TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
-            panel.Children.Add(new TextBlock { Text = "Physics, colliders, animations and gamepad inputs run on the player's own screen. A project that uses them can't be exported to Minecraft; Wysicraft lists what's in the way (and where) if you try.", TextWrapping = TextWrapping.Wrap, Opacity = 0.8, Margin = new Thickness(0, 0, 0, 10) });
+            panel.Children.Add(new TextBlock { Text = "Physics, colliders, animations and gamepad inputs run on the player's own screen. A project that uses them can't be exported to Minecraft; Arcadia Studio lists what's in the way (and where) if you try.", TextWrapping = TextWrapping.Wrap, Opacity = 0.8, Margin = new Thickness(0, 0, 0, 10) });
             var dontShow = new CheckBox { Content = "Don't show this again", Margin = new Thickness(0, 0, 0, 12) }; panel.Children.Add(dontShow);
             var ok = new Button { Content = "Show advanced tools", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 3, 10, 3) };
             ok.Click += (_, _) => window.Close(); panel.Children.Add(ok);

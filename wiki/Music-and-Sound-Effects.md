@@ -2,7 +2,7 @@
 
 When a new screen opens with a looping Sound control that autoplays the same song as one still playing (a title theme carried into the next screen), the song carries on from where it is instead of starting again. Give that control no delay. In web and desktop apps, songs a Sound control plays stream while they play; short sound effects are decoded when the game opens so they play instantly. See [[How big should a game be?|Web-and-Desktop-Apps#how-big-should-a-game-be]].
 
-Wysicraft makes its own 8-bit sounds: songs in the **Music maker** and game sounds in the **Sound effect maker**. Both save into **Assets** as ordinary sounds, so you can use them anywhere a sound goes: a Sound control, the *Play sound* action, or `ctx.client.playSound('myproject:theme')` in a script. Each sound also keeps what made it, beside the file, so you can open it again and change it. That file is saved with the project but never exported.
+Arcadia Studio makes its own 8-bit sounds: songs in the **Music maker** and game sounds in the **Sound effect maker**. Both save into **Assets** as ordinary sounds, so you can use them anywhere a sound goes: a Sound control, the *Play sound* action, or `ctx.client.playSound('myproject:theme')` in a script. Each sound also keeps what made it, beside the file, so you can open it again and change it. That file is saved with the project but never exported.
 
 Open them from **Project → Music maker…** and **Project → Sound effect maker…**, the **Music maker** and **Sound effects** buttons in Assets, or by right-clicking a sound in Assets.
 
@@ -76,7 +76,7 @@ For a **Drum kit** layer, the rows are named after the drums: kick C2, snare D2,
 
 The **Sounds** dropdown in the Music maker plays the song with the built-in **Chip** sounds, or with a **SoundFont**: a bank of recorded instruments (pianos, guitars, strings, brass, drum kits…). With a SoundFont, each layer's instrument list shows the font's instruments by their General MIDI number and name, then its drum kits. Layers remember their instrument by that number, so a song keeps its piano, guitar and drums when you switch to another font, and imported MIDI files keep the instruments they were written for.
 
-**GeneralUser GS** comes with Wysicraft. **Get more soundfonts…** at the bottom of the dropdown opens the SoundFont library, where each font has a description, its size and its licence:
+**GeneralUser GS** comes with Arcadia Studio. **Get more soundfonts…** at the bottom of the dropdown opens the SoundFont library, where each font has a description, its size and its licence:
 
 | Font | Size | Sound | Licence |
 |---|---|---|---|
@@ -105,7 +105,7 @@ A note whose length isn't a standard value is drawn as the nearest one, with a t
 
 **Import MIDI…** reads a standard MIDI file (.mid). Each track and channel becomes a layer, and each General MIDI instrument becomes the closest 8-bit preset (channel 10 becomes the Drum kit). The file's tempo, time signature and key come with it. Replace the song, or add its layers to yours. **Export MIDI…** writes your song out for other music programs.
 
-**Bard MIDIs.** The MIDI files FFXIV bards play (from libraries such as XIVMIDI or the Bard Music Player collection) are hand-made arrangements, so they're the most faithful way to get a song. Their tracks are named after the in-game instrument (Harp, Lute, Fiddle, Flute, Trumpet, Timpani, SnareDrum, ElectricGuitarClean…), sometimes with an octave shift such as `Lute+1`. Wysicraft reads those names: each track gets the matching instrument and octave, and the percussion tracks play the matching drum.
+**Bard MIDIs.** The MIDI files FFXIV bards play (from libraries such as XIVMIDI or the Bard Music Player collection) are hand-made arrangements, so they're the most faithful way to get a song. Their tracks are named after the in-game instrument (Harp, Lute, Fiddle, Flute, Trumpet, Timpani, SnareDrum, ElectricGuitarClean…), sometimes with an octave shift such as `Lute+1`. Arcadia Studio reads those names: each track gets the matching instrument and octave, and the percussion tracks play the matching drum.
 
 When importing, choose **Matching instruments** to keep those sounds, or **8-bit chip voices** for a chiptune: the highest part becomes the square-wave lead, low parts the triangle bass, the rest pulse waves, and drums stay on the kit. With **Split solo parts into melody, chords and bass**, a part that plays melody and chords at once (a solo harp arrangement, say) is split into a lead (the notes above the chords), a chord layer and a bass layer.
 
@@ -113,7 +113,7 @@ When importing, choose **Matching instruments** to keep those sounds, or **8-bit
 
 **Song from audio…** in the Music maker makes a **chiptune cover** of a recording (MP3, WAV, Ogg, M4A, AAC, WMA or FLAC), the way people arrange songs for chip or bard instruments:
 
-**Split instruments first (best).** The first time you use Song from audio, Wysicraft offers a one-time download of **Demucs** (by Meta, MIT licence, 166 MB from Hugging Face, kept in your app data folder so the installer stays small). With it, the song is first split into **vocals, bass, drums and other instruments**, and each part is turned into notes on its own: the singing becomes the melody with a note for every sung syllable, the bass guitar's own line becomes the bass, the drum part gives the beat and drums, and the guitars and keys give the chords. This takes a minute or two on a typical computer, and converting the same song again with other options reuses the split. You can say **Not now** and download it later from the **Download…** button in the Song from audio window. Without it, the song is converted from the full mix as described below.
+**Split instruments first (best).** The first time you use Song from audio, Arcadia Studio offers a one-time download of **Demucs** (by Meta, MIT licence, 166 MB from Hugging Face, kept in your app data folder so the installer stays small). With it, the song is first split into **vocals, bass, drums and other instruments**, and each part is turned into notes on its own: the singing becomes the melody with a note for every sung syllable, the bass guitar's own line becomes the bass, the drum part gives the beat and drums, and the guitars and keys give the chords. This takes a minute or two on a typical computer, and converting the same song again with other options reuses the split. You can say **Not now** and download it later from the **Download…** button in the Song from audio window. Without it, the song is converted from the full mix as described below.
 
 1. **The beat.** The beat is followed through the whole song, so a band that speeds up or slows down stays in time, and the bar lines are found from where the chords change. Press **Detect** to see the tempo first. If it's counted differently from how you hear it (80 instead of 160, say), halve or double it.
 2. **The chords.** The chord on every beat is named (major, minor or power chord) from the guitars and keys. In most band mixes these are panned to the sides, away from the singer.
@@ -132,7 +132,7 @@ Clear pop, rock and game music comes out closest. Busy mixes, heavy reverb and s
 
 - **Project → Import audio as 8-bit…** offers both ways: **Turn into an 8-bit song** (above), or **Crunch the recording**. Crunching keeps the sound itself, voices included, but lo-fi. Use the **NES**, **Game Boy**, **Atari** or **Arcade** presets, or choose 4–22 kHz and 2–8 bits (go low for the real old-console sound). There's an optional centre-vocal remover, and you can **Hear it** before saving to Assets.
 - Right-click a sound in Assets for **Play**, **Add to screen** (a Sound control), **Open in music maker** or **Open in sound effect maker** (for sounds made there), **Turn into an 8-bit song…**, **Crunch to lo-fi…**, **Show in Explorer** and **Save a copy as…**.
-- **Export audio…** (in the Music maker and the Sound effect maker) saves the sound anywhere as **MP3**, WAV or Ogg, for sharing outside Wysicraft.
+- **Export audio…** (in the Music maker and the Sound effect maker) saves the sound anywhere as **MP3**, WAV or Ogg, for sharing outside Arcadia Studio.
 
 ## The Sound effect maker
 

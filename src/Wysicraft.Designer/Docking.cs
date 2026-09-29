@@ -11,7 +11,7 @@ public partial class MainWindow
     string defaultDockLayout = "";
     bool DockSmoke => Environment.GetCommandLineArgs().Any(a=>a.StartsWith("--smoke"));
     // Versioned so the 1.2 default arrangement (shorter Output, wider left panels) applies once.
-    static string DockLayoutPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","workspace-layout-2.xml");
+    static string DockLayoutPath => Wysicraft.Core.AppFolders.Path("workspace-layout-2.xml");
 
     void InitializeDocking()
     {

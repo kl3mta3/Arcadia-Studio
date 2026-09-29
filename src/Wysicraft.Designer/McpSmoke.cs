@@ -50,13 +50,13 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
                 using var denied=await client.SendAsync(hostile);
                 if(denied.StatusCode!=HttpStatusCode.Forbidden) throw new Exception("Cross-origin access was not rejected.");
             }
-            var handshake=await Rpc("initialize",new { protocolVersion="2025-11-25",capabilities=new {},clientInfo=new { name="Wysicraft smoke",version="1" } });
+            var handshake=await Rpc("initialize",new { protocolVersion="2025-11-25",capabilities=new {},clientInfo=new { name="Arcadia Studio smoke",version="1" } });
             // An assistant meeting this server is told how to use it before it calls anything.
             string greeting=handshake["instructions"]?.GetValue<string>() ?? "";
             if(!greeting.Contains("get_project") || !greeting.Contains("guide")) throw new Exception("Server instructions missing.");
             var listing=await Rpc("tools/list",new {});
-            if(listing["tools"]!.AsArray().Count!=28) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
-            if(connectionOnly) { if(!mcpClients.ContainsKey("Wysicraft smoke") || mcpRequests<2) throw new Exception("Client visibility missing"); File.WriteAllText(output,"PASS: authentication, origin checks, MCP discovery and client visibility."); return; }
+            if(listing["tools"]!.AsArray().Count!=29) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
+            if(connectionOnly) { if(!mcpClients.ContainsKey("Arcadia Studio smoke") || mcpRequests<2) throw new Exception("Client visibility missing"); File.WriteAllText(output,"PASS: authentication, origin checks, MCP discovery and client visibility."); return; }
             string index=await CallText("guide",new {});
             if(!index.Contains("apply_edits") || !McpGuideTopicNames.All(index.Contains)) throw new Exception("Guide index missing topics.");
             foreach(string topic in McpGuideTopicNames) { string page=await CallText("guide",new { topic }); if(page.Length<400) throw new Exception("Guide topic "+topic+" is empty."); }
@@ -123,7 +123,9 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             await Call("save_project",new{expectedRevision=revision});
             var fresh=await Call("project_control",new{expectedRevision=revision,action="new",projectId="mcp_new"});
             string freshRevision=fresh["revision"]!.GetValue<string>();
-            await Call("save_project_as",new{expectedRevision=freshRevision,path=savePath+".new.wysicraftproj"});
+            // New projects save as .arcadia; the older .wysicraftproj (savePath) still opens below.
+            await Call("save_project_as",new{expectedRevision=freshRevision,path=savePath+".new.arcadia"});
+            if(!File.Exists(savePath+".new.arcadia"))throw new Exception("save_project_as did not write the .arcadia file");
             var opened=await Call("project_control",new{expectedRevision=freshRevision,action="open",path=savePath});
             if(opened["revision"]!.GetValue<string>()!=revision)throw new Exception("Open project did not restore saved project");
             // New features through MCP: Made for, sounds, sprites/shapes/Sound controls, inputs, animations, physics,
@@ -161,6 +163,18 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             if(BallY(settled)<150 || BallY(settled)>185 || Math.Abs(StarX(settled)-60)>0.5)throw new Exception($"Physics/animation did not run in preview: ball y {BallY(settled)}, star x {StarX(settled)}");
             var kicked=await Call("preview_control",new{expectedRevision=rev,action="script",value="ui.setPosition('mcp_ball', 40, 20); ui.setVelocity('mcp_ball', 0, 0);"});
             if(BallY(kicked)>60)throw new Exception("Preview script did not move the body: y "+BallY(kicked));
+            // Arcadia over MCP: status and a prepared package (with a screenshot captured from Preview), never an upload.
+            var arcadia=await Call("arcadia_publish",new{action="status"});
+            if(arcadia["runtimeSha256"]!.GetValue<string>()!=ArcadiaPackage.RuntimeSha256 || arcadia["scoreSources"]==null)throw new Exception("Arcadia status incomplete: "+arcadia.ToJsonString());
+            await Call("arcadia_publish",new{action="publish"},fail:true);
+            var prepared=await Call("arcadia_publish",new{action="prepare",expectedRevision=rev,settings="{\"title\":\"MCP smoke\",\"genre\":[\"Arcade\"],\"version\":\"1.0.0\",\"controls\":\"Click\"}",screenshot="capture"});
+            rev=prepared["revision"]!.GetValue<string>();
+            string packagePath=prepared["package"]!.GetValue<string>();
+            using(var package=System.IO.Compression.ZipFile.OpenRead(packagePath))
+                if(prepared["blocked"]!.GetValue<bool>() || package.Entries[0].FullName!="game.json" || package.GetEntry("screenshot.png")==null || package.GetEntry("wysicraft/wysicraft-web.js")==null)
+                    throw new Exception("Arcadia package wrong: "+prepared.ToJsonString());
+            if(project.Publishing.Title!="MCP smoke" || ArcadiaPackage.ImageSize(project.Publishing.Screenshot)!=(1280,800))throw new Exception("Arcadia settings or screenshot not kept in the project");
+            try { Directory.Delete(Path.GetDirectoryName(packagePath)!,true); } catch { }
             await Call("preview_control",new{expectedRevision=rev,action="close"});
             await Edit(new{kind="delete_input",key="jump"},new{kind="delete_animation",screen,key="mcp_slide"});
             // Components through MCP: a pickup on the star writes and wires its script, and removing it cleans up.
@@ -207,7 +221,7 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             await StopMcp();
             try { using var stopped=await client.GetAsync(mcpUrl); throw new Exception("Server still accepts connections after stopping."); }
             catch(HttpRequestException) { }
-            File.WriteAllText(output,"PASS: 26 MCP tools, connect instructions, guide topics, pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
+            File.WriteAllText(output,"PASS: 29 MCP tools, connect instructions, guide topics, pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
         }
         finally { await StopMcp(); dirty=false; }
     }

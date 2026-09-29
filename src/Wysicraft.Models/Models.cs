@@ -16,6 +16,7 @@ public static class Json
         Project copy;
         try { copy = Clone(project); } finally { project.Assets = assets; }
         copy.Assets = new Dictionary<string, byte[]>(assets);
+        copy.Publishing.Screenshot = project.Publishing.Screenshot;
         return copy;
     }
 }
@@ -144,6 +145,71 @@ public sealed class Project
     public List<UiDefinition> Screens { get; set; } = [new()];
     public Dictionary<string, string> Scripts { get; set; } = [];
     public Dictionary<string, byte[]> Assets { get; set; } = [];
+    // Publishing to Arcadia: kept in the project file (publishing.json) so the next publish is one click, and never
+    // written into packs or exports.
+    public PublishSettings Publishing { get; set; } = new();
+}
+/// <summary>What the Publish to Arcadia dialog remembers for a project: the game's details, its leaderboard, its
+/// screenshot, and the permanent game ID on each arcade it went to.</summary>
+public sealed class PublishSettings
+{
+    public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
+    public List<string> Genre { get; set; } = [];
+    public string Version { get; set; } = "";
+    public string Controls { get; set; } = "";
+    // "16:9", "4:3" or a number (width / height). Empty: from the main screen's size.
+    public string AspectRatio { get; set; } = "";
+    public bool Leaderboard { get; set; }
+    public PublishScores Scores { get; set; } = new();
+    // By arcade host ("arcadia.lastweeksproject.com"): the game this project became there.
+    public Dictionary<string, ArcadeGame> Arcades { get; set; } = [];
+    // "png", "jpg" or "webp"; the bytes live beside publishing.json in the project file.
+    public string ScreenshotType { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public byte[] Screenshot { get; set; } = [];
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsEmpty => Title.Length == 0 && Description.Length == 0 && Genre.Count == 0 && Version.Length == 0 && Controls.Length == 0 && AspectRatio.Length == 0 && !Leaderboard && Arcades.Count == 0 && Screenshot.Length == 0;
+}
+public sealed class ArcadeGame
+{
+    public string GameId { get; set; } = "";
+    // The last version sent there, so the next one can be offered as last + 1.
+    public string LastVersion { get; set; } = "";
+}
+/// <summary>An Arcadia leaderboard (game.json "scores"), read from the running game by watching variables.</summary>
+public sealed class PublishScores
+{
+    public string Label { get; set; } = "Score";
+    public string Format { get; set; } = "points";      // points, number, time (milliseconds)
+    public string Order { get; set; } = "desc";         // desc: higher is better; asc: lower is better
+    public string Aggregate { get; set; } = "best";     // best, sum
+    public double Min { get; set; }
+    public double? Max { get; set; }
+    public double MinSeconds { get; set; } = 3;
+    public PublishWatch Score { get; set; } = new();
+    public List<PublishTrigger> Triggers { get; set; } = [];
+    public List<PublishStat> Stats { get; set; } = [];
+    public string Round { get; set; } = "floor";        // floor, none
+}
+public sealed class PublishWatch
+{
+    public string Variable { get; set; } = "";
+    public string Path { get; set; } = "";
+}
+/// <summary>"Run ends when": the variable (and field) is true, or equals EqualsValue when that is set.</summary>
+public sealed class PublishTrigger
+{
+    public string Variable { get; set; } = "";
+    public string Path { get; set; } = "";
+    [System.Text.Json.Serialization.JsonPropertyName("equals")] public string? EqualsValue { get; set; }
+}
+public sealed class PublishStat
+{
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Format { get; set; } = "number";
+    public string Aggregate { get; set; } = "max";      // max, min, sum
+    public string Variable { get; set; } = "";
+    public string Path { get; set; } = "";
 }
 public sealed class UiDefinition
 {

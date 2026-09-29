@@ -1,6 +1,6 @@
 # Addon API
 
-For mod developers and KubeJS authors who want to open Wysicraft screens from their own code or add new server actions. You compile against the Wysicraft runtime (1.6.0) for Minecraft 1.21.1 / NeoForge. All calls must happen on the Minecraft **server thread**.
+For mod developers and KubeJS authors who want to open Arcadia Studio screens from their own code or add new server actions. You compile against the Arcadia Studio runtime (1.6.0) for Minecraft 1.21.1 / NeoForge. All calls must happen on the Minecraft **server thread**.
 
 ## Opening and updating screens
 
@@ -11,7 +11,7 @@ Class: `com.wysicraft.runtime.api.WysicraftApi`
 | `openProject(player, projectId)` | Opens the project's Main screen |
 | `closeProject(player, projectId)` | Closes that project's screen if it's open |
 | `openUi(player, screenId)` | Opens a screen. Use `project:screen`; a bare ID resolves in the player's current project, or must be unique. |
-| `closeUi(player)` | Closes the player's Wysicraft screen |
+| `closeUi(player)` | Closes the player's Arcadia Studio screen |
 | `setText(player, id, text)` | Updates a control on the player's open screen |
 | `setValue`, `setVisible`, `setEnabled` | Same, for value, visibility, enabled state |
 | `setItem(player, id, itemId)` | Changes an Item Icon |
@@ -33,7 +33,7 @@ WysicraftApi.setText(serverPlayer, "status", "Docked");
 From KubeJS:
 
 ```js
-const Wysicraft = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
+const Arcadia Studio = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
 Wysicraft.openProject(event.player, 'airship_controls');
 ```
 

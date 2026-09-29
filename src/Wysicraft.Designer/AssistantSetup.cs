@@ -18,7 +18,7 @@ public partial class MainWindow
         root.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap, Opacity = 0.85, Margin = new Thickness(0, 0, 0, 10),
-            Text = "An assistant is a command-line AI tool that can be pointed at this project's MCP server. It runs on your own account with that tool — Wysicraft never holds a key. Once set up, Start opens it in a terminal with the project attached, and Ask Agent can hand it work directly."
+            Text = "An assistant is a command-line AI tool that can be pointed at this project's MCP server. It runs on your own account with that tool — Arcadia Studio never holds a key. Once set up, Start opens it in a terminal with the project attached, and Ask Agent can hand it work directly."
         });
 
         // ---- Which tool ----
@@ -51,7 +51,7 @@ public partial class MainWindow
         var actions = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
         var check = new Button { Content = "Check again", Margin = new Thickness(0, 0, 8, 0) };
         var signIn = new Button { Content = "Sign in", Margin = new Thickness(0, 0, 8, 0), ToolTip = "Opens a terminal running the tool's own sign-in. Your browser does the rest, on your account." };
-        var copyCommand = new Button { Content = "Copy start command", Margin = new Thickness(0, 0, 8, 0), ToolTip = "The PowerShell line that starts the tool with Wysicraft attached, for running it yourself." };
+        var copyCommand = new Button { Content = "Copy start command", Margin = new Thickness(0, 0, 8, 0), ToolTip = "The PowerShell line that starts the tool with Arcadia Studio attached, for running it yourself." };
         var test = new Button { Content = "Test", Margin = new Thickness(0, 0, 8, 0), ToolTip = "Sends a real prompt through the whole path — the tool, your sign-in, this server — and shows what came back." };
         actions.Children.Add(check); actions.Children.Add(signIn); actions.Children.Add(copyCommand); actions.Children.Add(test);
         root.Children.Add(actions);
@@ -161,7 +161,7 @@ public partial class MainWindow
     /// posture as the config files assistants keep for themselves, and only useful while the server is running.</summary>
     internal string SaveMcpConfigFile()
     {
-        string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "mcp.json");
+        string file = Wysicraft.Core.AppFolders.Path("mcp.json");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, McpConfigJson());
         return file;

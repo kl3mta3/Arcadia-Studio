@@ -165,7 +165,7 @@ public partial class MainWindow
     /// (refreshed each time) and Explorer opens with it selected.</summary>
     void ShowAssetInExplorer(string path)
     {
-        string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "Asset files", project.Manifest.Id);
+        string folder = Wysicraft.Core.AppFolders.Path("Asset files", project.Manifest.Id);
         string file = Path.Combine(folder, Path.GetFileName(path));
         Directory.CreateDirectory(folder); File.WriteAllBytes(file, project.Assets[path]);
         System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + file + "\"");

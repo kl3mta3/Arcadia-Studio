@@ -15,7 +15,7 @@ public static class StemSplitter
     /// <summary>The four parts of a song, each mono at <see cref="SongAnalysis.Rate"/>.</summary>
     public sealed record Stems(float[] Drums, float[] Bass, float[] Other, float[] Vocals);
 
-    public static string ModelPath { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "Models", "htdemucs_fp16weights.onnx");
+    public static string ModelPath { get; set; } = Wysicraft.Core.AppFolders.Existing("Models", "htdemucs_fp16weights.onnx");
     public static bool Available => File.Exists(ModelPath) && new FileInfo(ModelPath).Length == ModelBytes;
 
     /// <summary>Downloads the model (reporting 0 to 1). A partial download is thrown away, so nothing half-written is

@@ -409,7 +409,7 @@ public partial class MainWindow
     internal string AssistantChatCommand()
     {
         var exe = AgentCommand() ?? "<assistant>";
-        string config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "mcp.json");
+        string config = Wysicraft.Core.AppFolders.Path("mcp.json");
         return "& " + Quote(exe) + " " + string.Join(" ", AssistantArguments(false, "", config).Select(Quote));
     }
     static string Quote(string s) => s.Contains(' ') || s.Contains('"') ? "'" + s.Replace("'", "''") + "'" : s;

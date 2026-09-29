@@ -6,5 +6,5 @@ if(!$compiler){throw 'Install Inno Setup 6, or add ISCC.exe to PATH, to build th
 $numeric=(($Version -split '-')[0].Split('.') + @('0','0','0'))[0..3] -join '.'
 $arguments=@('/Qp',"/DReleaseDir=$([IO.Path]::GetFullPath($ReleaseDir))","/DAppVersion=$Version","/DNumericVersion=$numeric")
 if($TestInstall){$arguments+='/DTestInstall'}
-& $compiler @arguments "$PSScriptRoot/../installer/Wysicraft.iss"
+& $compiler @arguments "$PSScriptRoot/../installer/ArcadiaStudio.iss"
 if($LASTEXITCODE){throw 'Installer compilation failed'}

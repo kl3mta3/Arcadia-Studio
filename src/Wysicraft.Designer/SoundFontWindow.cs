@@ -56,7 +56,7 @@ static class SoundFontWindow
             var head = new DockPanel();
             var buttons = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Right); head.Children.Add(buttons);
             string size = entry != null ? $"{entry.Bytes / 1_000_000.0:0} MB" : SoundFonts.PathOf(name) is { } p ? $"{new FileInfo(p).Length / 1_000_000.0:0} MB" : "";
-            string state = SoundFonts.IsBundled(name) ? "included with Wysicraft" : ready ? (entry != null ? "downloaded" : "imported") : "not downloaded";
+            string state = SoundFonts.IsBundled(name) ? "included with Arcadia Studio" : ready ? (entry != null ? "downloaded" : "imported") : "not downloaded";
             var title = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
             title.Inlines.Add(new System.Windows.Documents.Run(name) { FontWeight = FontWeights.SemiBold, FontSize = 14 });
             title.Inlines.Add(new System.Windows.Documents.Run($"   {size} · {state}{(string.Equals(name, current, StringComparison.OrdinalIgnoreCase) ? " · this song uses it" : "")}") { Foreground = Brushes.Gray });

@@ -16,7 +16,7 @@ public partial class MainWindow
     [
         new("installation", "Minecraft: Installation ZIP — bundled client/server JARs", "For Minecraft 1.21.1 / NeoForge. Separate client and server project JARs with the runtime and assigned scripts bundled, plus instructions."),
         new("jar", "Minecraft: Project JAR — runtime + assigned scripts bundled", "For Minecraft 1.21.1 / NeoForge. One JAR for the mods folder. JAR changes require a game restart."),
-        new("standard", "Minecraft: Portable .wysicraft pack", "The project's screens, scripts and images in one file, for servers that already have the Wysicraft runtime."),
+        new("standard", "Minecraft: Portable .wysicraft pack", "The project's screens, scripts and images in one file, for servers that already have the Arcadia Studio runtime."),
         new("kubejs_files", "Minecraft: KubeJS loose files (advanced)", "Loose files for a KubeJS setup. KubeJS projects still require KubeJS/Rhino."),
         new("web_folder", "Web page — folder (index.html, host.js, images)", "Runs in any browser: open index.html, or put the folder on a website. Edit host.js to connect server actions to your own code; re-exporting keeps your host.js."),
         new("web_file", "Web page — one self-contained HTML file", "Everything in a single .html file (images included), easy to send or attach. Open it in any browser."),

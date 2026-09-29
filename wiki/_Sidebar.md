@@ -1,7 +1,7 @@
 **[[Home|Home]]**
 
 **Getting started**
-- [[Installing|Installing-Wysicraft]]
+- [[Installing|Installing-Arcadia-Studio]]
 - [[Quick start|Quick-Start-Tutorial]]
 - [[The workspace|The-Workspace]]
 
@@ -29,6 +29,7 @@
 **Shipping**
 - [[Exporting and installing|Exporting-and-Installing]]
 - [[Web and desktop apps|Web-and-Desktop-Apps]]
+- [[Publishing to Arcadia|Publishing-to-Arcadia]]
 - [[Advanced tools|Advanced-Tools]]
 - [[KubeJS|KubeJS-Integration]]
 - [[Security|Security-and-Permissions]]

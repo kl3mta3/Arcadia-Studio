@@ -4,8 +4,8 @@ license="MIT"
 [[mods]]
 modId="wysicraft"
 version="${version}"
-displayName="Wysicraft Runtime"
-description='''Portable, visual Minecraft user interfaces with server-authoritative actions.'''
+displayName="Arcadia Studio Runtime"
+description='''Runs Arcadia Studio screens in Minecraft: portable, visual user interfaces with server-authoritative actions.'''
 [[dependencies.wysicraft]]
 modId="neoforge"
 type="required"

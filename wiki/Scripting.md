@@ -1,6 +1,6 @@
 # Scripting with JavaScript
 
-When built-in actions aren't enough, attach a JavaScript function to an event. No scripting mod is needed: Wysicraft includes its own JavaScript engine in Minecraft and in the editor.
+When built-in actions aren't enough, attach a JavaScript function to an event. No scripting mod is needed: Arcadia Studio includes its own JavaScript engine in Minecraft and in the editor.
 
 | Kind | Runs where | Use for |
 | --- | --- | --- |

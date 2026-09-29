@@ -7,7 +7,8 @@ public partial class MainWindow
 {
     /// <summary>Sent to clients during the MCP handshake: enough to work safely without reading anything else.</summary>
     internal const string McpInstructions = """
-        Wysicraft is a visual UI and 2D game editor. This server edits the project that is open in the editor right now,
+        Arcadia Studio (formerly Wysicraft, which is why this server is named wysicraft) is a visual UI and 2D game
+        editor. This server edits the project that is open in the editor right now,
         and the user watches every change appear on their screen.
 
         The loop for any change:
@@ -369,7 +370,7 @@ public partial class MainWindow
         ("export", "Turning the project into something that runs.", """
             # export_project
 
-            `format` picks what you get, written into Wysicraft/McpExports under LocalAppData, and the path is returned.
+            `format` picks what you get, written into Arcadia Studio/McpExports under LocalAppData, and the path is returned.
 
             | Format | What it is |
             |---|---|
@@ -382,8 +383,28 @@ public partial class MainWindow
             | windows_app | a Windows WebView2 app ZIP |
 
             Minecraft formats are refused while `validate_project` still lists minecraftOnly issues. `export_electron_apps`
-            builds desktop apps for the platforms you list. `save_project` saves the .wysicraftproj itself; `save_project_as`
+            builds desktop apps for the platforms you list. `save_project` saves the .arcadia project file itself; `save_project_as`
             writes it somewhere new.
+
+            # arcadia_publish
+
+            Arcadia is a web arcade. You can prepare a game for it, never publish it: the person does that in
+            File → Publish to Arcadia.
+
+            - `action: "status"` (read-only): whether this computer is linked, the creator, auto-publish or review, the
+              upload limits, the saved settings, and `scoreSources` (screen variables and ctx.state names).
+            - `action: "prepare"`: saves `settings` (JSON: title, description, genre (up to 3), version, controls,
+              aspectRatio, leaderboard, scores) and a `screenshot` ("capture" from the open Preview, or an absolute
+              image path), builds the package zip, and runs the arcade's upload rules locally. Anything at level
+              `block` must be fixed.
+            - `action: "check"`: prepare, then the arcade's own dry run (needs the link). `wouldHold` means a moderator
+              would look first.
+
+            A leaderboard reads variables while the game runs: `scores.score` = {variable, path}, where `path` reads a
+            field of a JSON variable (ctx.state.set('g', JSON.stringify(g)) → path "kills"). `scores.triggers` = up to
+            6 {variable, path, equals?}; the run has ended when any holds (no `equals` means "is true"). A score is sent
+            each time that turns from false to true, so it must be false while playing and again on restart. Always set
+            `scores.max` to the highest score that's really possible.
             """),
 
         ("errors", "What the refusals mean and what to do about them.", """
@@ -415,9 +436,9 @@ public partial class MainWindow
     {
         topic = (topic ?? "").Trim().ToLowerInvariant();
         if (topic.Length > 0 && McpGuideTopics.FirstOrDefault(t => t.Topic == topic) is { Text: not null } found)
-            return $"# Wysicraft MCP — {found.Topic}\n\n{found.Text.Trim()}\n\nOther topics: " + string.Join(", ", McpGuideTopics.Where(t => t.Topic != topic).Select(t => t.Topic)) + ".";
+            return $"# Arcadia Studio MCP — {found.Topic}\n\n{found.Text.Trim()}\n\nOther topics: " + string.Join(", ", McpGuideTopics.Where(t => t.Topic != topic).Select(t => t.Topic)) + ".";
         var index = new System.Text.StringBuilder();
-        index.AppendLine("# Wysicraft MCP\n");
+        index.AppendLine("# Arcadia Studio MCP\n");
         index.AppendLine(McpInstructions.Trim());
         if (topic.Length > 0) index.AppendLine($"\n(There is no topic \"{topic}\".)");
         index.AppendLine("\n# Topics — call guide(topic:\"…\") for any of these\n");

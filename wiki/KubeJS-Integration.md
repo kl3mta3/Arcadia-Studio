@@ -37,13 +37,13 @@ UI calls update controls on the player's open screen. They can't create new cont
 
 ## Exporting
 
-**Export for KubeJS** produces a project JAR that bundles your KubeJS handlers; Wysicraft hands them to KubeJS as it loads scripts, so no files are copied into `kubejs/`. The modpack still needs KubeJS and Rhino installed.
+**Export for KubeJS** produces a project JAR that bundles your KubeJS handlers; Arcadia Studio hands them to KubeJS as it loads scripts, so no files are copied into `kubejs/`. The modpack still needs KubeJS and Rhino installed.
 
-If you're moving from the old loose-file export, delete the old generated Wysicraft scripts from the `kubejs` folders first to avoid duplicate registrations.
+If you're moving from the old loose-file export, delete the old generated Arcadia Studio scripts from the `kubejs` folders first to avoid duplicate registrations.
 
 ## Opening screens from your own KubeJS scripts
 
-Wysicraft creates a helper for each project (new or changed helpers need a restart):
+Arcadia Studio creates a helper for each project (new or changed helpers need a restart):
 
 ```js
 global.my_project.open(event.player);
@@ -53,7 +53,7 @@ global.my_project.close(event.player);
 Or use the API directly, inside a server event:
 
 ```js
-const Wysicraft = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
+const Arcadia Studio = Java.loadClass('com.wysicraft.runtime.api.WysicraftApi');
 Wysicraft.openProject(event.player, 'my_project');   // opens the Main screen
 Wysicraft.openUi(event.player, 'shop');               // a specific screen
 Wysicraft.setText(event.player, 'status', 'Hello');

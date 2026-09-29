@@ -48,9 +48,9 @@ public partial class MainWindow
         {
             protocolVersion = "2025-11-25",
             capabilities = new { sampling = new { }, elicitation = new { }, roots = new { } },
-            clientInfo = new { name = "Wysicraft input smoke", version = "1" }
+            clientInfo = new { name = "Arcadia Studio input smoke", version = "1" }
         });
-        if (!mcpCapabilities.TryGetValue("Wysicraft input smoke", out var offered) || !offered.Contains("sampling") || !offered.Contains("elicitation"))
+        if (!mcpCapabilities.TryGetValue("Arcadia Studio input smoke", out var offered) || !offered.Contains("sampling") || !offered.Contains("elicitation"))
             throw new Exception("Client capabilities were not recorded: " + (offered ?? "(nothing)"));
 
         // A project with something worth talking about, so pending_requests has real context to hand over.

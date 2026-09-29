@@ -1,6 +1,6 @@
 # Advanced tools (web and desktop)
 
-Wysicraft can make more than Minecraft screens. The advanced tools add **physics and components**, **tilemaps**, **keyframe animation**, **state graphs**, **shaders**, **particles** and **gamepad inputs** for [[web page, Windows and Electron apps|Web-and-Desktop-Apps]]. They don't work inside Minecraft.
+Arcadia Studio can make more than Minecraft screens. The advanced tools add **physics and components**, **tilemaps**, **keyframe animation**, **state graphs**, **shaders**, **particles** and **gamepad inputs** for [[web page, Windows and Electron apps|Web-and-Desktop-Apps]]. They don't work inside Minecraft.
 
 ## Made for
 
@@ -24,7 +24,7 @@ Web and desktop projects can go bigger than Minecraft allows:
 
 ## The Minecraft check
 
-Wysicraft always works out, from the project itself, what Minecraft can't run:
+Arcadia Studio always works out, from the project itself, what Minecraft can't run:
 - advanced tools
 - sounds that aren't `.ogg`
 - anything past Minecraft's limits
@@ -214,7 +214,7 @@ A **state graph** decides which clip a sprite plays, so idle → run → jump �
 4. On each state, **+ Way out of** adds a transition: the state it goes **→** to, **when** (a condition), and a **priority**.
 5. **Starts in** picks the state the screen opens in. **Apply**, then **Preview** (F5) to watch it run.
 
-Conditions are the same ones used everywhere else in Wysicraft, over the screen's variables, plus three extras:
+Conditions are the same ones used everywhere else in Arcadia Studio, over the screen's variables, plus three extras:
 
 | Condition | True when |
 | --- | --- |

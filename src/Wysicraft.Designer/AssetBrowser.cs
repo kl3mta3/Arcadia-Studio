@@ -77,7 +77,7 @@ public partial class MainWindow
                 Item("Rename…",()=>BeginAssetRename(entry)).ToolTip="Change its name (the extension stays). Controls, actions and particle effects that use it follow; scripts that mention it are listed in Output. Also F2, or click the name again.";
                 Item("Replace…",ReplaceBrowserAsset).ToolTip=SoundAssets.IsSound(entry.Id)?"Swap in another sound file. Its name stays, so everything that plays it plays the new one.":"Swap in another PNG. Its name stays, so everything that shows it shows the new one.";
             }
-            Item("Show in Explorer",()=>ShowAssetInExplorer(entry.Id)).ToolTip="Projects keep their files inside the .wysicraftproj, so this saves a copy in a Wysicraft folder and shows it. To change the project's file, edit the copy and use Replace.";
+            Item("Show in Explorer",()=>ShowAssetInExplorer(entry.Id)).ToolTip="Projects keep their files inside the .arcadia file, so this saves a copy in an Arcadia Studio folder and shows it. To change the project's file, edit the copy and use Replace.";
             Item("Save a copy as…",()=>SaveAssetCopy(entry.Id));
             assetMenu.Items.Add(new Separator());
             Item("Delete",DeleteBrowserAsset).ToolTip="Removes it from the project. Anything still using it will report a missing asset on Validate.";
@@ -185,7 +185,7 @@ public partial class MainWindow
     // Imports PNG files into the project (Import PNGs, or files dropped on Assets or the canvas) and returns their asset paths.
     List<string> ImportImageFiles(IEnumerable<string> paths) {
         var files=paths.Select(p=>(Path:p,Bytes:File.ReadAllBytes(p))).ToArray();
-        foreach(var file in files){try{ProjectStore.TextureSize(file.Bytes);DecodeTexture(file.Bytes);}catch(Exception ex){throw new InvalidOperationException(Path.GetFileName(file.Path)+" is not a PNG image Wysicraft can use: "+ex.Message);}}
+        foreach(var file in files){try{ProjectStore.TextureSize(file.Bytes);DecodeTexture(file.Bytes);}catch(Exception ex){throw new InvalidOperationException(Path.GetFileName(file.Path)+" is not a PNG image Arcadia Studio can use: "+ex.Message);}}
         var added=new List<string>();if(files.Length==0)return added;
         Change();foreach(var file in files){string stem=System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file.Path).ToLowerInvariant(),"[^a-z0-9_-]","_");string path=TextureAssets.Path(project.Manifest.Id,stem+".png");int n=1;while(project.Assets.TryGetValue(path,out var existing)&&!existing.SequenceEqual(file.Bytes))path=TextureAssets.Path(project.Manifest.Id,stem+"_"+(n++)+".png");project.Assets[path]=file.Bytes;added.Add(path);
             // An animation file saved next to the PNG (name.png.mcmeta, as in resource packs) comes along automatically.
@@ -272,7 +272,7 @@ public partial class MainWindow
     static byte[] AudioSmokeOgg()=>SmokeWav(); // content is not decoded until played or replaced
     void LoadItemJar(){var dialog=new OpenFileDialog{Filter="Minecraft client or mod JAR|*.jar",Multiselect=true};if(dialog.ShowDialog()!=true)return;foreach(var path in dialog.FileNames)minecraftAssets.LoadJar(path);itemImages.Clear();minecraftTextures.Clear();RefreshItemBrowser();Draw();}
     void LoadTestItems(){
-        string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","MinecraftTest","1.21.1");var settings=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Wysicraft","minecraft-test.json");
+        string root=Wysicraft.Core.AppFolders.Existing("MinecraftTest","1.21.1");var settings=Wysicraft.Core.AppFolders.Path("minecraft-test.json");
         if(File.Exists(settings)){using var doc=System.Text.Json.JsonDocument.Parse(File.ReadAllText(settings));if(doc.RootElement.TryGetProperty("instance",out var path))root=path.GetString()??root;}
         string catalog=Path.Combine(root,".wysicraft-test","items.json");if(!File.Exists(catalog))throw new InvalidOperationException("Start an editor Minecraft test with this version first, then choose Read test items.");
         if(new FileInfo(catalog).Length>16*1024*1024)throw new InvalidDataException("Item catalog exceeds 16 MB.");

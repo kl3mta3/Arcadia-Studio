@@ -99,7 +99,7 @@ static class Template
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wysicraft {{VERSION}} manual</title>
+<title>Arcadia Studio {{VERSION}} manual</title>
 <style>
   :root{--bg:#1d2025;--panel:#25282e;--line:#3a3f48;--text:#e2e6ed;--muted:#9aa4b2;--accent:#3794ff;--code:#181b20}
   *{box-sizing:border-box}
@@ -136,7 +136,7 @@ static class Template
 </style>
 </head>
 <body>
-<header><strong>Wysicraft manual</strong><span>Version {{VERSION}} · Minecraft 1.21.1 / NeoForge · works offline</span></header>
+<header><strong>Arcadia Studio manual</strong><span>Version {{VERSION}} · Minecraft 1.21.1 / NeoForge · works offline</span></header>
 <div class="layout">
 <nav aria-label="Manual pages"><input id="filter" type="search" placeholder="Filter pages…" aria-label="Filter pages" />{{NAV}}</nav>
 <main>

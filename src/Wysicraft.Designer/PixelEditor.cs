@@ -21,7 +21,7 @@ sealed class PixelEditor : Window
     enum SelectMode { Replace, Add, Subtract }
     sealed record Snapshot(PixelDocument Doc, int Frame, int[] LayerPath, PixelMask? Selection);
 
-    static readonly string PaletteFile = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "pixel-palette.json");
+    static readonly string PaletteFile = Wysicraft.Core.AppFolders.Path("pixel-palette.json");
     static readonly string[] DefaultPalette = [
         "#000000", "#222222", "#444444", "#666666", "#888888", "#AAAAAA", "#CCCCCC", "#FFFFFF",
         "#5A1E1E", "#A83232", "#E04848", "#F08C3C", "#F8C850", "#FFF0A0", "#6A4A2E", "#A8784A",

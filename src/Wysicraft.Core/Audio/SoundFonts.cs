@@ -14,7 +14,7 @@ public static class SoundFonts
     [
         new("GeneralUser GS", "https://github.com/mrbumpy409/GeneralUser-GS/raw/main/GeneralUser-GS.sf2", 32_319_396, "",
             "Free to use in anything, commercial included (S. Christian Collins).",
-            "Comes with Wysicraft. A balanced, clean General MIDI and GS bank: 261 instruments and 13 drum kits, small and quick to load. A good all-rounder for game music."),
+            "Comes with Arcadia Studio. A balanced, clean General MIDI and GS bank: 261 instruments and 13 drum kits, small and quick to load. A good all-rounder for game music."),
         new("FluidR3 GM", "https://archive.org/download/fluidr3-gm-gs/FluidR3_GM_GS.sf2", 151_001_312, "dc92de8c177bdcbdf1c45746e0f15370",
             "MIT licence (Frank Wen).",
             "The classic free General MIDI bank used by many Linux music programs and MuseScore. Full, realistic orchestral and band instruments with rich pianos and strings."),
@@ -28,7 +28,7 @@ public static class SoundFonts
 
     /// <summary>Where the bundled font is (next to the program) and where downloaded and imported fonts are kept.</summary>
     public static string BundledFolder { get; set; } = Path.Combine(AppContext.BaseDirectory, "SoundFonts");
-    public static string UserFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "SoundFonts");
+    public static string UserFolder { get; set; } = Wysicraft.Core.AppFolders.Existing("SoundFonts");
 
     /// <summary>The fonts ready to use: catalog ones first, then imported ones, by name.</summary>
     public static List<string> Installed()

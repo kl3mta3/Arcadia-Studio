@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$ReleaseDir)
+﻿param([Parameter(Mandatory)][string]$ReleaseDir)
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent
 $destination=Join-Path $ReleaseDir 'Docs/third-party'
@@ -7,7 +7,7 @@ Copy-Item "$repo/docs/third-party/*" $destination -Force
 $assets=Get-Content "$repo/src/Wysicraft.Designer/obj/project.assets.json" -Raw | ConvertFrom-Json
 $packageRoot=$assets.packageFolders.psobject.Properties.Name | Select-Object -First 1
 $inventory=[Collections.Generic.List[string]]::new()
-$inventory.Add('Third-party components distributed with Wysicraft. License files retain their upstream terms. No Minecraft game files are included.')
+$inventory.Add('Third-party components distributed with Arcadia Studio. License files retain their upstream terms. No Minecraft game files are included.')
 foreach($entry in $assets.libraries.psobject.Properties | Where-Object {$_.Value.type -eq 'package'}) {
     $base=Join-Path $packageRoot $entry.Value.path
     [xml]$spec=Get-Content (Get-ChildItem $base -Filter '*.nuspec' | Select-Object -First 1).FullName

@@ -6,9 +6,13 @@ namespace Wysicraft.Packaging;
 
 public static class ProjectStore
 {
+    /// <summary>Arcadia Studio projects are .arcadia files. Projects saved before the rename (.wysicraftproj) still open
+    /// and save; the editor offers to save them as .arcadia.</summary>
+    public const string Extension = ".arcadia", LegacyExtension = ".wysicraftproj";
+    public static bool IsProjectFile(string path) => path.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) || path.EndsWith(LegacyExtension, StringComparison.OrdinalIgnoreCase);
     public static void SaveProject(Project project, string path)
     {
-        if (!path.EndsWith(".wysicraftproj", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Use a .wysicraftproj project file.");
+        if (!IsProjectFile(path)) throw new InvalidDataException("Use a .arcadia project file.");
         // Saving preserves unassigned scripts and unfinished work; export validates separately.
         var files = Files(Json.CloneProject(project), false);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -71,6 +75,12 @@ public static class ProjectStore
         int scriptBytes = Limits.For(p).ScriptBytes;
         foreach (var (path, code) in p.Scripts) { if (pack && !usedScripts.Contains(path)) continue; if (!path.StartsWith("scripts/") || !path.EndsWith(".js") || Limits.SizeOf(code) > scriptBytes) throw new InvalidDataException("Invalid script"); files.Add(Validation.SafePath(path), Encoding.UTF8.GetBytes(code)); }
         foreach (var (path, data) in TextureAssets.CanonicalAssets(p)) { if (pack && TextureAssets.IsEditorOnly(path)) continue; if (data.Length > MaxEntry) throw new InvalidDataException("Invalid asset"); files.Add(path, data); }
+        // Publishing settings stay with the project file only: never in a pack or an export.
+        if (!pack && !p.Publishing.IsEmpty)
+        {
+            files["publishing.json"] = Encoding.UTF8.GetBytes(Json.Write(p.Publishing));
+            if (p.Publishing.Screenshot.Length > 0 && p.Publishing.ScreenshotType is "png" or "jpg" or "webp") files["publishing/screenshot." + p.Publishing.ScreenshotType] = p.Publishing.Screenshot;
+        }
         if (files.Sum(f => (long)f.Value.Length) > MaxPack) throw new InvalidDataException("Pack exceeds 256 MiB");
         return files;
     }
@@ -114,6 +124,11 @@ public static class ProjectStore
         foreach (var flat in project.Assets.Keys.Where(p => p.StartsWith(flatPrefix) && !p[flatPrefix.Length..].Contains('/')).ToArray())
             if (project.Assets.ContainsKey(TextureAssets.Path(manifest.Id, flat[flatPrefix.Length..]))) project.Assets.Remove(flat);
         project.Assets = TextureAssets.CanonicalAssets(project);
+        if (files.TryGetValue("publishing.json", out var publishing))
+        {
+            project.Publishing = Json.Read<PublishSettings>(Encoding.UTF8.GetString(publishing));
+            if (files.TryGetValue("publishing/screenshot." + project.Publishing.ScreenshotType, out var shot)) project.Publishing.Screenshot = shot;
+        }
         if (files.ContainsKey("manifest.json")) { var errors = Validation.Check(project); if (errors.Count != 0) throw new InvalidDataException(string.Join("\n", errors)); }
         return project;
     }

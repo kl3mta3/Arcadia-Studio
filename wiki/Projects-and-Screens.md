@@ -2,12 +2,12 @@
 
 ## Project files
 
-A project is one file with the extension **`.wysicraftproj`**. It holds all your screens, scripts (including ones you haven't assigned yet) and images.
+A project is one file with the extension **`.arcadia`**. It holds all your screens, scripts (including ones you haven't assigned yet) and images.
 
 - **File → New project** (Ctrl+N) starts a blank project. You're asked to save unsaved changes first.
-- **File → Open project or pack…** (Ctrl+O) opens a `.wysicraftproj`. It can also open older formats: a `project.json` folder or an exported `.wysicraft` pack. When you save one of those, Wysicraft asks for a new `.wysicraftproj` rather than overwriting the old files.
+- **File → Open project or pack…** (Ctrl+O) opens a `.arcadia` project. It also opens projects from before Arcadia Studio was renamed (`.wysicraftproj`), a `project.json` folder, or an exported `.wysicraft` pack. The first time you save a `.wysicraftproj`, Arcadia Studio offers to save it as `.arcadia` beside it (the old file is kept); a `project.json` folder or a pack is always saved as a new `.arcadia` rather than overwriting the old files.
 - **File → Save** (Ctrl+S) and **Save as…** (Ctrl+Shift+S). Saving is atomic: if something goes wrong while writing, your previous file stays intact.
-- Double-clicking a `.wysicraftproj` opens it if you ticked file registration in the installer.
+- Double-clicking a `.arcadia` (or older `.wysicraftproj`) opens it if you ticked file registration in the installer.
 
 Project files contain your **server script source**. Only share them with people who should see that code. The files you give players are exports; see [[Exporting and installing|Exporting-and-Installing]].
 
@@ -20,15 +20,15 @@ Project files contain your **server script source**. Only share them with people
 | **Name** | Display name. |
 | **Id** | Lowercase ID used for commands (`/<id>.open`, `/<id>.close`), the JAR name and image paths. Changing it moves your images to the new name automatically. |
 | **Author**, **Version** | Metadata. Version is `major.minor.patch`. |
-| **RuntimeVersion** | Oldest Wysicraft runtime your project needs. Exports set this for you. |
+| **RuntimeVersion** | Oldest Arcadia Studio runtime your project needs. Exports set this for you. |
 | **GridSize**, **Snap** | Canvas grid spacing and whether moves snap to it. |
 | **Dependencies** | Mod IDs that must be installed (for example `kubejs`). Minecraft refuses to load the project without them. |
 
 ## Recovering unsaved work
 
-Every 30 seconds, changed work is saved to a separate recovery draft in `%LOCALAPPDATA%\Wysicraft\Recovery`, including unsaved text in the script editor. Autosave never overwrites your real project file, and it runs in the background so the editor doesn't pause.
+Every 30 seconds, changed work is saved to a separate recovery draft in `%LOCALAPPDATA%\Arcadia Studio\Recovery`, including unsaved text in the script editor. Autosave never overwrites your real project file, and it runs in the background so the editor doesn't pause.
 
-After a crash or power loss, choose **File → Recover unsaved project…**, pick the draft, then **Save as** to keep it. Drafts from other Wysicraft windows that are still open aren't listed. Saving normally, or choosing not to save, removes the draft.
+After a crash or power loss, choose **File → Recover unsaved project…**, pick the draft, then **Save as** to keep it. Drafts from other Arcadia Studio windows that are still open aren't listed. Saving normally, or choosing not to save, removes the draft.
 
 ## Screens
 

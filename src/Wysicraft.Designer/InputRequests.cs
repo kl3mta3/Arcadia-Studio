@@ -152,7 +152,7 @@ public partial class MainWindow
     internal string AgentPrompt(AgentRequest request)
     {
         var prompt = new System.Text.StringBuilder();
-        prompt.AppendLine("You are the assistant for Wysicraft, a UI and game editor. Someone asked this from inside the editor.");
+        prompt.AppendLine("You are the assistant for Arcadia Studio, a UI and game editor. Someone asked this from inside the editor.");
         prompt.AppendLine();
         prompt.AppendLine("Ask: " + request.Want);
         if (request.Element.Length > 0) prompt.AppendLine("About the control: " + request.Element);

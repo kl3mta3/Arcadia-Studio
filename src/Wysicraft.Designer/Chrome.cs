@@ -21,7 +21,7 @@ public partial class MainWindow
             foreach(var entry in entries)menu.Items.Add(entry switch {string id when id=="-"=>new Separator(),string id=>CommandItem(id),_=>entry});
             TrackChecks(menu);Menus.Items.Add(menu);return menu;
         }
-        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","file.looseCopy","-","file.export","file.exportKube","-","file.exit");
+        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","file.looseCopy","-","file.export","file.exportKube","file.publish","-","file.exit");
         Top("_Edit","edit.undo","edit.redo","-","edit.cut","edit.copy","edit.paste","edit.duplicate","edit.delete","edit.selectAll","-",
             "edit.group","edit.ungroup","edit.newGroup","edit.isolate","-","edit.attach","edit.detach","edit.toggleLock","-","edit.rename","-",OrderMenu(),ArrangeMenu());
         MenuItem OrderMenu(){var order=new MenuItem {Header="Arrange"};foreach(var id in new[]{"edit.bringToFront","edit.bringForward","edit.sendBackward","edit.sendToBack"})order.Items.Add(CommandItem(id));return order;}
@@ -78,10 +78,10 @@ public partial class MainWindow
     }
     void ShowAbout() {
         string version=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
-        MessageBox.Show(this,$"Wysicraft {version}\nVisual GUI designer for Minecraft 1.21.1 / NeoForge\nBundled Minecraft runtime {RuntimeInfo.Version}\nClient and server JavaScript use the bundled engine.","About Wysicraft");
+        MessageBox.Show(this,$"Arcadia Studio {version}\nVisual UI and 2D game editor for the web, desktop and Minecraft 1.21.1 / NeoForge\nBundled Minecraft runtime {RuntimeInfo.Version}\nClient and server JavaScript use the bundled engine.","About Arcadia Studio");
     }
     // The release ships the manual as Docs\Wysicraft-Manual.html beside the Designer folder; development builds fall back to the online wiki.
-    internal static string ManualPath => System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "Docs", "Wysicraft-Manual.html"));
+    internal static string ManualPath => System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "Docs", "Arcadia-Studio-Manual.html"));
     const string OnlineManual = "https://github.com/kl3mta3/WYSICRAFT/wiki";
     void OpenManual() {
         string target = System.IO.File.Exists(ManualPath) ? ManualPath : OnlineManual;

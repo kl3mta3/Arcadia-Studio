@@ -72,6 +72,9 @@ public partial class MainWindow : Window {
 
 	private bool dirty;
 
+	// An older .wysicraftproj the person chose to keep saving as it is (they were asked once).
+	private bool keepLegacyFile;
+
 
 	private bool grid = true;
 
@@ -190,7 +193,7 @@ public partial class MainWindow : Window {
 						throw new Exception("Script already exists");
 					}
 					Change();
-					project.Scripts[text] = "function onClick(ctx) {\n  // Use only the approved Wysicraft API.\n}\n";
+					project.Scripts[text] = "function onClick(ctx) {\n  // Use only the approved Arcadia Studio API.\n}\n";
 					RefreshScripts(text);
 				}
 			});
@@ -260,7 +263,7 @@ public partial class MainWindow : Window {
 				SaveScriptText();
 				if (dirty)
 				{
-					MessageBoxResult num = MessageBox.Show(this, "Save changes before closing?", "Wysicraft", MessageBoxButton.YesNoCancel);
+					MessageBoxResult num = MessageBox.Show(this, "Save changes before closing?", "Arcadia Studio", MessageBoxButton.YesNoCancel);
 					if (num == MessageBoxResult.Cancel)
 					{
 						e.Cancel = true;
@@ -286,7 +289,7 @@ public partial class MainWindow : Window {
 		catch (Exception ex)
 		{
 			Log(ex.Message);
-			MessageBox.Show(this, ex.Message, "Wysicraft", MessageBoxButton.OK, MessageBoxImage.Hand);
+			MessageBox.Show(this, ex.Message, "Arcadia Studio", MessageBoxButton.OK, MessageBoxImage.Hand);
 		}
 	}
 
@@ -300,7 +303,7 @@ public partial class MainWindow : Window {
 	}
 
 
-	private void Log(string text)
+	internal void Log(string text)
 	{
 		Output.Items.Add(text);
 		ListBox output = Output;
@@ -372,7 +375,7 @@ public partial class MainWindow : Window {
 		{
 			return true;
 		}
-		switch (MessageBox.Show(this, "Save current project first?", "Wysicraft", MessageBoxButton.YesNoCancel))
+		switch (MessageBox.Show(this, "Save current project first?", "Arcadia Studio", MessageBoxButton.YesNoCancel))
 		{
 		case MessageBoxResult.Cancel:
 			return false;
@@ -420,7 +423,7 @@ public partial class MainWindow : Window {
 		{
 			OpenFileDialog openFileDialog = new OpenFileDialog
 			{
-				Filter = "Wysicraft files|*.wysicraftproj;*.wysicraft;project.json|Editable project|*.wysicraftproj|Legacy project|project.json|Runtime pack|*.wysicraft"
+				Filter = "Arcadia Studio files|*.arcadia;*.wysicraftproj;*.wysicraft;project.json|Arcadia Studio project|*.arcadia|Older project (Wysicraft)|*.wysicraftproj|Legacy project|project.json|Minecraft pack|*.wysicraft"
 			};
 			if (openFileDialog.ShowDialog() == true)
 			{
@@ -437,15 +440,25 @@ public partial class MainWindow : Window {
 		{
 			SaveScriptText();
 			string? fileName = folder;
+			// A project from before the rename: offer, once, to save it as .arcadia beside the old file.
+			if (fileName != null && !saveAs && !keepLegacyFile && fileName.EndsWith(ProjectStore.LegacyExtension, StringComparison.OrdinalIgnoreCase))
+			{
+				string renamed = Path.ChangeExtension(fileName, ProjectStore.Extension);
+				var answer = MessageBox.Show(this, "Save as " + Path.GetFileName(renamed) + "?\n\nArcadia Studio projects are .arcadia files now. The old " + Path.GetFileName(fileName) + " is kept as it is.", "Arcadia Studio", MessageBoxButton.YesNoCancel);
+				if (answer == MessageBoxResult.Cancel) return;
+				if (answer == MessageBoxResult.No) keepLegacyFile = true;
+				else if (File.Exists(renamed)) saveAs = true; // let the save box ask before replacing it
+				else fileName = renamed;
+			}
 			if ((fileName == null) | saveAs)
 			{
 				SaveFileDialog saveFileDialog = new SaveFileDialog
 				{
-					Title = "Save Wysicraft project",
-					Filter = "Wysicraft Project|*.wysicraftproj",
-					DefaultExt = ".wysicraftproj",
+					Title = "Save Arcadia Studio project",
+					Filter = "Arcadia Studio project|*.arcadia",
+					DefaultExt = ProjectStore.Extension,
 					AddExtension = true,
-					FileName = ((folder == null) ? (project.Manifest.Id + ".wysicraftproj") : Path.GetFileName(folder))
+					FileName = ((folder == null) ? (project.Manifest.Id + ProjectStore.Extension) : Path.ChangeExtension(Path.GetFileName(folder), ProjectStore.Extension))
 				};
 				if (saveFileDialog.ShowDialog() != true)
 				{
@@ -471,7 +484,7 @@ public partial class MainWindow : Window {
 		{
 			SaveFileDialog saveFileDialog = new SaveFileDialog
 			{
-				Filter = "Wysicraft Pack|*.wysicraft",
+				Filter = "Minecraft pack|*.wysicraft",
 				FileName = project.Manifest.Id + ".wysicraft"
 			};
 			if (saveFileDialog.ShowDialog() == true)
@@ -541,7 +554,7 @@ public partial class MainWindow : Window {
         RefreshAssetBrowser(); RefreshComponents();
 		Draw();
 		RefreshInspector();
-		base.Title = project.Manifest.Name + " — Wysicraft";
+		base.Title = project.Manifest.Name + " — Arcadia Studio";
 	}
 
 

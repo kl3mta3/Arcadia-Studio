@@ -21,7 +21,7 @@ public static class DesktopExport
     /// Runs on Windows 10/11 with nothing else to install.</summary>
     public static void WindowsApp(Project project, string zipPath, string appHostExe)
     {
-        if (!File.Exists(appHostExe)) throw new FileNotFoundException("The Windows app host is missing from this Wysicraft install.", appHostExe);
+        if (!File.Exists(appHostExe)) throw new FileNotFoundException("The Windows app host is missing from this Arcadia Studio install.", appHostExe);
         var web = WebExport.Files(project, new(Desktop: true)); string name = AppName(project); var (w, h) = WebExport.WindowSize(project);
         var ini = $"title={name.Replace("\n", " ")}\nid={Slug(project)}\nwidth={w}\nheight={h}\nbackground=#15181D\n";
         WriteZip(zipPath, zip => {
@@ -37,7 +37,7 @@ public static class DesktopExport
     // ---- Electron ----
     public static readonly string[] ElectronPlatforms = ["win32-x64", "darwin-arm64", "darwin-x64", "linux-x64"];
     public const string FallbackElectronVersion = "v37.2.0";
-    public static string ElectronCache => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Wysicraft", "Electron");
+    public static string ElectronCache => Wysicraft.Core.AppFolders.Existing("Electron");
 
     /// <summary>Latest stable Electron release tag (e.g. "v38.1.0"), or the cached/fallback one when offline.</summary>
     public static async Task<string> LatestElectronAsync(HttpClient http, CancellationToken cancel = default)
