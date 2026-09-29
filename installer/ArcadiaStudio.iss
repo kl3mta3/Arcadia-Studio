@@ -73,8 +73,15 @@ Root: HKCU; Subkey: "Software\Classes\{#ProjectType}\shell\open\command"; ValueT
 
 [Run]
 Filename: "{#AppExe}"; Description: "Open Arcadia Studio"; Flags: nowait postinstall skipifsilent
+; An update from inside the app runs this installer quietly with /UPDATE=1; Arcadia Studio opens again when it finishes.
+Filename: "{#AppExe}"; Flags: nowait; Check: IsAppUpdate
 
 [Code]
+function IsAppUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
 procedure ForgetExtension(Extension: String);
 var Current: String;
 begin

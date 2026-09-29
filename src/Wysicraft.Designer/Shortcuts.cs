@@ -81,6 +81,8 @@ public partial class MainWindow
         Add("advanced.toolbox","Advanced","Show / hide the Advanced toolbox","",ToggleAdvancedToolbox);
         Add("help.manual","Help","User manual","F1",OpenManual,true);
         Add("help.scriptApi","Help","Script API and snippets","",ShowScriptApi);
+        Add("help.updates","Help","Check for updates…","",CheckForUpdatesNow);
+        Add("help.autoUpdates","Help","Check for updates automatically","",ToggleAutoUpdates,isChecked:()=>Prefs().AutoCheckUpdates);
         Add("help.about","Help","About Arcadia Studio","",ShowAbout);
         LoadShortcuts();
     }

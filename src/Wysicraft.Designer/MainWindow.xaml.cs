@@ -258,7 +258,7 @@ public partial class MainWindow : Window {
 		base.Closing += delegate(object? _, CancelEventArgs e)
 		{
 			if (!CloseSideEditors()) { e.Cancel = true; return; }
-			if (!crashRecovery)
+			if (!crashRecovery && !closingForUpdate)
 			{
 				SaveScriptText();
 				if (dirty)

@@ -32,7 +32,7 @@ public partial class MainWindow
         Top("_View",panels,"view.resetLayout","-","view.zoomIn","view.zoomOut","view.zoomActual","view.zoomFit","-","view.grid","view.snap","-","view.shortcuts","view.askLockChildren");
         advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.toolbox");
         Top("_Project","project.preview","project.test","project.validate","-","project.screen","project.settings","-","project.importTexture","project.pixelEditor","project.spriteSheet","-","project.musicMaker","project.soundEffects","project.importAudio","-","project.mcp");
-        Top("_Help","help.manual","help.scriptApi","view.shortcuts","-","help.about");
+        Top("_Help","help.manual","help.scriptApi","view.shortcuts","-","help.updates","help.autoUpdates","-","help.about");
 
         // Toolbar: every action stays visible; the AI (MCP) button is highlighted so it's easy to find.
         void Tool(string icon,string text,string command,string tip) {
@@ -82,7 +82,7 @@ public partial class MainWindow
     }
     // The release ships the manual as Docs\Wysicraft-Manual.html beside the Designer folder; development builds fall back to the online wiki.
     internal static string ManualPath => System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "Docs", "Arcadia-Studio-Manual.html"));
-    const string OnlineManual = "https://github.com/kl3mta3/WYSICRAFT/wiki";
+    const string OnlineManual = "https://github.com/kl3mta3/arcadia-studio/wiki";
     void OpenManual() {
         string target = System.IO.File.Exists(ManualPath) ? ManualPath : OnlineManual;
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });

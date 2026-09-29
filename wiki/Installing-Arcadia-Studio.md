@@ -33,4 +33,17 @@ The editor itself doesn't need Java. The [[Minecraft test|Testing-in-Minecraft]]
 - Panels are arranged in the default layout. You can move them; see [[The workspace|The-Workspace]].
 - If Arcadia Studio closed unexpectedly last time, the Output panel tells you a recovery draft is available. See [[Projects and screens|Projects-and-Screens#recovering-unsaved-work]].
 
+## Updates
+
+Arcadia Studio checks for a newer version when it starts (at most once a day) and asks before doing anything:
+
+- **Update now** downloads the new version from the [Arcadia Studio releases on GitHub](https://github.com/kl3mta3/arcadia-studio/releases) and checks it against its published checksum; a file that doesn't match is deleted and nothing is installed. Arcadia Studio then asks you to save any unsaved work, closes, updates, and opens again.
+  - An **installed** copy updates with the release's installer (quietly, into the same place).
+  - A **portable** copy updates from the release's ZIP: the new version replaces the app's own folders (`Designer`, `Runtime`, `Docs`) and leaves anything else you keep in that folder alone.
+- **Later** asks again next time. **Skip this version** doesn't mention that version again, only newer ones.
+
+Your projects and settings aren't touched by an update: projects are wherever you saved them, and settings are in `%LOCALAPPDATA%\Arcadia Studio`.
+
+**Help → Check for updates…** checks straight away. **Help → Check for updates automatically** turns the startup check off. The check only asks GitHub for the latest release, sending nothing but Arcadia Studio's version; offline, nothing is shown.
+
 Next: [[Quick start tutorial|Quick-Start-Tutorial]].

@@ -36,6 +36,11 @@ public partial class MainWindow
         public string ArcadeUrl { get; set; } = "";
         public Dictionary<string, string> ArcadiaKeys { get; set; } = [];
         public Dictionary<string, string> ArcadiaGames { get; set; } = [];
+        // Updates from GitHub Releases: check on startup (at most once a day), when it last checked, and a version the
+        // person chose to skip (not mentioned again until a newer one comes out).
+        public bool AutoCheckUpdates { get; set; } = true;
+        public string LastUpdateCheck { get; set; } = "";
+        public string SkippedUpdate { get; set; } = "";
     }
     Preferences? preferences;
     internal string? lockChildrenAnswer; // tests set "always"/"never" so no dialog appears

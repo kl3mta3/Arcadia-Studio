@@ -31,12 +31,16 @@ try {
     Copy-Item LICENSE $release -Force
     & "$PSScriptRoot/Collect-Notices.ps1" -ReleaseDir $release
     Compress-Archive "$release/*" "artifacts/ArcadiaStudio-$version-win-x64.zip" -Force
+    # Checksums for the in-app updater (upload each .sha256 with its file to the GitHub release; GitHub's own digest is
+    # used when present, these otherwise).
+    function Write-Checksum($file) { $h=(Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant(); Set-Content "$file.sha256" "$h  $(Split-Path $file -Leaf)" -Encoding ascii }
+    Write-Checksum "artifacts/ArcadiaStudio-$version-win-x64.zip"
     # Arcadia trusts official web runtime builds by their SHA-256. Exports write the runtime byte-for-byte from this file
     # (PublishChecks checks that), so this is the hash to add under Setup → Publishing → Trusted Wysicraft runtime builds.
     $runtimeHash=(Get-FileHash src/Wysicraft.Web/wysicraft-web.js -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content "artifacts/ArcadiaStudio-$version-runtime-SHA256.txt" "$runtimeHash  wysicraft/wysicraft-web.js (Arcadia Studio $version web runtime)" -Encoding ascii
     Write-Output "Web runtime SHA-256: $runtimeHash"
-    if($Installer){ & "$PSScriptRoot/Build-Installer.ps1" -ReleaseDir $release -Version $version }
+    if($Installer){ & "$PSScriptRoot/Build-Installer.ps1" -ReleaseDir $release -Version $version; Write-Checksum "artifacts/ArcadiaStudio-$version-Setup.exe" }
     Write-Output "Release: $release (editor tests and exports use Runtime/wysicraft-$runtimeVersion.jar)"
 } finally {Pop-Location}
 
