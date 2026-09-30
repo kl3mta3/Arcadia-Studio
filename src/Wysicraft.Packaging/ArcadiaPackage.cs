@@ -59,8 +59,24 @@ public static class ArcadiaPackage
         var first = project.Leaderboards.FirstOrDefault();
         return (first, null, first != null);
     }
-    // Anything a page would load from another website: the arcade runs pages with no network.
-    static readonly Regex Outside = new(@"(?:\b(?:src|href|action)\s*=\s*[""']?\s*|url\(\s*[""']?\s*|@import\s+[""']?)(?:https?:)?//", RegexOptions.IgnoreCase);
+    // What a page loads from another website: scripts, stylesheets, pictures, frames and media, and url()/@import in
+    // its styles. Plain links (<a href>) load nothing and don't count. The arcade decides what it allows (it accepts
+    // Only font sites on SafeHosts (and the arcade itself) are allowed; anything else, script CDNs included, is refused.
+    static readonly Regex OutsideTag = new(@"<(?:script|link|img|iframe|frame|source|audio|video|embed|object|track|image|use)\b[^>]*?\b(?:src|href|data|srcset|poster)\s*=\s*[""']?\s*(?:https?:)?//([^/""'\s>]+)", RegexOptions.IgnoreCase);
+    static readonly Regex OutsideStyle = new(@"(?:url\(\s*[""']?\s*|@import\s+(?:url\(\s*)?[""']?)(?:https?:)?//([^/""'\s)]+)", RegexOptions.IgnoreCase);
+    /// <summary>The only sites a leaderboard page may load from: font services (static stylesheets and font files, no
+    /// code) and the arcade itself. Script CDNs (cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com) and Font Awesome
+    /// kits (kit.fontawesome.com, a script) are left off on purpose: they serve any code, so they're refused.</summary>
+    public static readonly string[] SafeHosts = [
+        "fonts.googleapis.com", "fonts.gstatic.com",          // Google Fonts: stylesheet, font files
+        "fonts.bunny.net",                                    // Bunny Fonts (a Google Fonts mirror)
+        "use.typekit.net", "p.typekit.net",                   // Adobe Fonts: stylesheet, font files
+        "use.fontawesome.com", "ka-f.fontawesome.com",        // Font Awesome (free CDN CSS and its font files)
+        new Uri(DefaultArcade).Host];
+    /// <summary>The other websites a page loads files from, by host, leaving out the safe ones.</summary>
+    public static List<string> OutsideHosts(string html) =>
+        OutsideTag.Matches(html).Concat(OutsideStyle.Matches(html)).Select(m => m.Groups[1].Value.ToLowerInvariant().Split(':')[0]).Where(h => !SafeHosts.Contains(h))
+            .Distinct().OrderBy(h => h, StringComparer.Ordinal).ToList();
     /// <summary>The screenshots' names in the package, in gallery order: screenshots/1.png, screenshots/2.jpg …</summary>
     public static List<string> ScreenshotNames(PublishSettings s) => s.Screenshots.Select((x, i) => "screenshots/" + (i + 1) + "." + (x.Type.Length > 0 ? x.Type : "png")).ToList();
     // Already-compressed formats are stored rather than deflated again.
@@ -305,8 +321,8 @@ public static class ArcadiaPackage
             Add("block", "leaderboard-page", s.LeaderboardPage == "file" ? "The imported leaderboard page is missing: import it again or choose another." : $"The leaderboard page \"{s.LeaderboardPage[6..]}\" isn't in the project anymore: choose another.");
         if ((board.Board != null || board.Html != null) && !s.Leaderboard) Add("warn", "leaderboard-page", "There's a leaderboard page but Keep a leaderboard is off, so the page would have nothing to show.");
         if (board.Board != null) foreach (var problem in Leaderboards.Problems(project, board.Board)) Add("warn", "leaderboard-page", "Leaderboard page: " + problem);
-        if (files.TryGetValue(Leaderboards.PageName, out var pageBytes) && Outside.IsMatch(Encoding.UTF8.GetString(pageBytes)))
-            Add("block", "leaderboard-page", "The leaderboard page loads something from another website. Pages on the arcade can only use files in the game.", Leaderboards.PageName);
+        if (files.TryGetValue(Leaderboards.PageName, out var pageBytes) && OutsideHosts(Encoding.UTF8.GetString(pageBytes)) is { Count: > 0 } hosts)
+            Add("block", "leaderboard-page", $"The leaderboard page loads files from {string.Join(", ", hosts)}. A leaderboard page may only load from the game itself, the arcade, and font services (Google Fonts, Bunny Fonts, Adobe Fonts, Font Awesome's CSS): put anything else in the page.", Leaderboards.PageName);
 
         // The files.
         if (!files.ContainsKey("game.json")) Add("block", "game-json", "game.json is missing.");
