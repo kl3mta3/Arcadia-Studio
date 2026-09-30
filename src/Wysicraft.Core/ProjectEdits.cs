@@ -45,7 +45,9 @@ public static class ProjectEdits
     public static Project Apply(Project original, IReadOnlyList<ProjectEdit> edits)
     {
         if (edits.Count is < 1 or > 128) throw new InvalidDataException("Use 1–128 edits per batch.");
-        var project = Json.Clone(original);
+        // CloneProject, not a plain JSON copy: that leaves out the publishing cover, screenshots and imported leaderboard
+        // page (kept as bytes, not JSON), so every MCP edit used to drop them.
+        var project = Json.CloneProject(original);
         foreach (var edit in edits)
         {
             // Element edits reach leaderboard pages too, by their ID (a screen of the same ID comes first).
