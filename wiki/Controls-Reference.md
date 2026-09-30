@@ -21,6 +21,7 @@ Drag a control from the **Toolbox** onto the canvas, or double-click it to add i
 | **Tilemap** (web & desktop) | A grid of tiles from one tile sheet — a floor, walls, a level. Double-click it for the Tile painter. See [[Advanced tools|Advanced-Tools]]. | Texture (the sheet), TileWidth/TileHeight, Columns/Rows, Solid | `collide` (on the body that hits it) |
 | **Collider** (web & desktop) | An invisible physics wall or area. See [[Advanced tools|Advanced-Tools]]. | Collider, points, trigger | `collide`, `collide_stay`, `collide_end`, `trigger_enter`, `trigger_stay`, `trigger_exit` |
 | **Item List** | A scrollable list of items with optional row buttons. | Value (JSON rows), RowHeight, PrimaryLabel, SecondaryLabel, ShowItemId, Reusable row template | `item_click`, `item_primary`, `item_secondary` |
+| **Item Slots** (Minecraft) | Real inventory slots: players drag, shift-click and split stacks as in any Minecraft inventory, and the server moves the items. Stamps are in the Toolbox under **Item slots · Minecraft**. | Holds (player inventory, storage, crafting grid, crafting result), Columns, Rows, First slot | – |
 | **Texture Region** | Part of a larger image (sprite-sheet style). | Texture, TextureX/Y (where the region starts), TextureWidth/Height (full image size) | – |
 
 Every control also has three hover events: `hover`, `mouse_enter` and `mouse_leave`. They run client actions only, at most four times a second.
@@ -36,6 +37,15 @@ Every control also has three hover events: `hover`, `mouse_enter` and `mouse_lea
 **Scroll Panel:** set other controls' **Parent panel** to the scroll panel (see [[Panels and parenting|Panels-and-Parenting]]). Contents below the bottom edge scroll into view with the mouse wheel. Scroll panels can be nested; the wheel scrolls the innermost one first.
 
 **Item Icon** shows an item exactly as it looks in an inventory: flat items as their sprite, and blocks as a small 3D cube (the editor draws full blocks like bricks or logs as that cube too; other blocks show their texture as a preview). The icon is scaled to fit the control. Use it for inventories, shops, rewards and recipes, **not as a background or wall texture**: for a brick wall, add an **Image** (or a Panel skin) with a Minecraft texture such as `minecraft:textures/block/bricks.png`. See [[Assets and items|Assets-and-Items]] for the item picker.
+
+**Item Slots** (Minecraft only) turn the screen into a real inventory screen, so items can be dragged, shift-clicked, split and crafted exactly as in the game. The server moves every item, so nothing can be duplicated from the client.
+
+- **Crafting table** (Toolbox stamp): a 3 × 3 crafting grid, its result, and the player's inventory and hotbar below, laid out like Minecraft's crafting table. Recipes are the game's own, including modded ones.
+- **Holds** decides what the slots are. **Player inventory** shows part of the player's own inventory from **First slot** (0–8 is the hotbar, 9–35 the rest; the usual layout is 9 × 3 from 9 and a 9 × 1 hotbar from 0). **Storage** is temporary. **Crafting grid** is up to 3 × 3, and **Crafting result** is its output slot.
+- When the screen closes, anything left in storage or the crafting grid goes back to the player (or drops at their feet if their inventory is full).
+- Each slot is 18 GUI pixels; the control sizes itself from Columns × Rows. A screen has at most one crafting grid and one result. Slot screens use a fixed layout, not Responsive layout, and slots can't go inside a scroll panel.
+- Hiding or disabling a slots control (visibility rules) hides or locks its slots too.
+- Web and desktop apps leave item slots out.
 
 **Item List** has its own page: [[Item lists and row templates|Item-Lists-and-Row-Templates]].
 

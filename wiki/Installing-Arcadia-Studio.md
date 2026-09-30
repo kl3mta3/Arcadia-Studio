@@ -4,14 +4,14 @@
 
 | Download | Use it when |
 | --- | --- |
-| `ArcadiaStudio-1.3.0-Setup.exe` | You want a normal Windows install with a Start-menu shortcut and `.arcadia` project files that open on double-click. |
-| `ArcadiaStudio-1.3.0-win-x64.zip` | You want a portable copy you can run from any folder, with no installation. |
+| `ArcadiaStudio-<version>-Setup.exe` | You want a normal Windows install with a Start-menu shortcut and `.arcadia` project files that open on double-click. |
+| `ArcadiaStudio-<version>-win-x64.zip` | You want a portable copy you can run from any folder, with no installation. |
 
 Both contain the same editor. The editor bundles its own .NET runtime, so you don't need to install .NET.
 
 ## Installer
 
-1. Run `ArcadiaStudio-1.3.0-Setup.exe`. It installs for your Windows user only and doesn't need administrator rights.
+1. Run `ArcadiaStudio-<version>-Setup.exe`. It installs for your Windows user only and doesn't need administrator rights.
 2. Choose your options: **Create a desktop shortcut** (off by default) and **Open Arcadia Studio projects (.arcadia, and older .wysicraftproj) with this app** (on by default, so project files open in Arcadia Studio on double-click).
 3. Launch **Arcadia Studio** from the Start menu.
 

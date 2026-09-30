@@ -54,6 +54,10 @@ public final class Models {
         public int delay, repeat = 1;
         public double volume = 1;
         public List<String> options = new ArrayList<>();
+        // Item slots (real Minecraft slots): what they hold (player inventory, storage, a crafting grid or its result),
+        // their grid, and for player slots the first inventory slot shown (0-8 hotbar, 9-35 the rest).
+        public String slotKind = "player";
+        public int columns = 9, rows = 1, slotStart = 0;
         public Map<String,Event> events = new LinkedHashMap<>();
     }
     public static class Event { public Handler client = new Handler(), server = new Handler(); }

@@ -55,7 +55,7 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             string greeting=handshake["instructions"]?.GetValue<string>() ?? "";
             if(!greeting.Contains("get_project") || !greeting.Contains("guide")) throw new Exception("Server instructions missing.");
             var listing=await Rpc("tools/list",new {});
-            if(listing["tools"]!.AsArray().Count!=29) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
+            if(listing["tools"]!.AsArray().Count!=30) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
             if(connectionOnly) { if(!mcpClients.ContainsKey("Arcadia Studio smoke") || mcpRequests<2) throw new Exception("Client visibility missing"); File.WriteAllText(output,"PASS: authentication, origin checks, MCP discovery and client visibility."); return; }
             string index=await CallText("guide",new {});
             if(!index.Contains("apply_edits") || !McpGuideTopicNames.All(index.Contains)) throw new Exception("Guide index missing topics.");
@@ -94,6 +94,23 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             if(clicked["elements"]!.AsArray().Single(e=>e!["id"]!.GetValue<string>()=="mcp_checkbox")!["value"]!.GetValue<string>()!="true")throw new Exception("Preview event did not update value");
             await Call("preview_control",new{expectedRevision="stale",action="close"});
             await Call("undo",new{expectedRevision=checkboxRevision});
+            // Test events keep working after an open_ui switches screens, even onto a screen whose tick keeps the game busy.
+            var rooms=await Call("apply_edits",new{expectedRevision=revision,edits=new object[]{
+                new{kind="upsert_screen",screen="mcp_room",data=new{size=new{width=256,height=224},tickInterval=16,variables=new{hit="no",ticks="0"},events=new{tick=new{client=new{script="scripts/client/mcp_tick.js",function="tick"}}}}},
+                new{kind="put_script",key="scripts/client/mcp_tick.js",source="function tick(ctx) { var end = Date.now() + 12; while (Date.now() < end) Math.sqrt(1); ctx.state.set('ticks', String(Number(ctx.state.get('ticks')) + 1)); }"},
+                new{kind="upsert_element",screen="mcp_room",element="mcp_hit",data=new{type="button",text="Hit",events=new{click=new{client=new{actions=new[]{new{type="set_variable",target="hit",value="yes"}}}}}}},
+                new{kind="upsert_element",screen,element="mcp_door",data=new{type="button",text="Door",events=new{click=new{client=new{actions=new[]{new{type="open_ui",value="mcp_room"}}}}}}}
+            }});
+            string roomsRevision=rooms["revision"]!.GetValue<string>();
+            await Call("preview_control",new{expectedRevision=roomsRevision,action="open",screen});
+            var inRoom=await Call("preview_control",new{expectedRevision=roomsRevision,action="event",element="mcp_door",eventName="click"});
+            if(inRoom["screen"]!.GetValue<string>()!="mcp_room")throw new Exception("open_ui from a test click did not switch screens: "+inRoom["screen"]);
+            var clickTime=System.Diagnostics.Stopwatch.StartNew();
+            var hit=await Call("preview_control",new{expectedRevision=roomsRevision,action="event",element="mcp_hit",eventName="click"});
+            if(clickTime.ElapsedMilliseconds>3000)throw new Exception("A test click on a busy screen took "+clickTime.ElapsedMilliseconds+" ms");
+            if(hit["variables"]!["hit"]!.GetValue<string>()!="yes")throw new Exception("A test click after open_ui did not reach the new screen: "+hit["variables"]);
+            await Call("preview_control",new{expectedRevision=roomsRevision,action="close"});
+            await Call("undo",new{expectedRevision=roomsRevision});
             await Call("get_test_status",new {});
             await Call("get_schema",new {});
             await Call("validate_project",new {});
@@ -167,14 +184,26 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             var arcadia=await Call("arcadia_publish",new{action="status"});
             if(arcadia["runtimeSha256"]!.GetValue<string>()!=ArcadiaPackage.RuntimeSha256 || arcadia["scoreSources"]==null)throw new Exception("Arcadia status incomplete: "+arcadia.ToJsonString());
             await Call("arcadia_publish",new{action="publish"},fail:true);
-            var prepared=await Call("arcadia_publish",new{action="prepare",expectedRevision=rev,settings="{\"title\":\"MCP smoke\",\"genre\":[\"Arcade\"],\"version\":\"1.0.0\",\"controls\":\"Click\"}",screenshot="capture"});
+            var prepared=await Call("arcadia_publish",new{action="prepare",expectedRevision=rev,settings="{\"title\":\"MCP smoke\",\"genre\":[\"Arcade\"],\"version\":\"1.0.0\",\"controls\":\"Click\",\"mobile\":true,\"videos\":[\"https://youtu.be/aBcDeFgHiJk\"]}",cover="capture",screenshots="[\"capture\",\"capture\"]"});
             rev=prepared["revision"]!.GetValue<string>();
             string packagePath=prepared["package"]!.GetValue<string>();
             using(var package=System.IO.Compression.ZipFile.OpenRead(packagePath))
-                if(prepared["blocked"]!.GetValue<bool>() || package.Entries[0].FullName!="game.json" || package.GetEntry("screenshot.png")==null || package.GetEntry("wysicraft/wysicraft-web.js")==null)
+                if(prepared["blocked"]!.GetValue<bool>() || package.Entries[0].FullName!="game.json" || package.GetEntry("cover.png")==null || package.GetEntry("screenshots/2.png")==null || package.GetEntry("wysicraft/wysicraft-web.js")==null)
                     throw new Exception("Arcadia package wrong: "+prepared.ToJsonString());
-            if(project.Publishing.Title!="MCP smoke" || ArcadiaPackage.ImageSize(project.Publishing.Screenshot)!=(1280,800))throw new Exception("Arcadia settings or screenshot not kept in the project");
+            if(project.Publishing.Title!="MCP smoke" || ArcadiaPackage.ImageSize(project.Publishing.Cover)!=(1280,800) || project.Publishing.Screenshots.Count!=2 || !project.Publishing.Mobile || project.Publishing.Videos.Count!=1)throw new Exception("Arcadia settings, cover or screenshots not kept in the project");
             try { Directory.Delete(Path.GetDirectoryName(packagePath)!,true); } catch { }
+            // itch.io over MCP: status, and a prepared web upload for a game given by its page address; never an upload.
+            var itch=await Call("itch_publish",new{action="status"});
+            if(itch["settings"]==null || itch["note"]==null)throw new Exception("itch.io status incomplete: "+itch.ToJsonString());
+            await Call("itch_publish",new{action="publish"},fail:true);
+            await Call("itch_publish",new{action="prepare",expectedRevision=rev,settings="{\"target\":\"not a game\"}"},fail:true);
+            var itchPrepared=await Call("itch_publish",new{action="prepare",expectedRevision=rev,settings="{\"target\":\"https://smoke.itch.io/mcp-game\",\"web\":true,\"windows\":false,\"webChannel\":\"html5\"}"});
+            rev=itchPrepared["revision"]!.GetValue<string>();
+            var itchBuild=itchPrepared["builds"]!.AsArray().Single()!;
+            string itchFolder=itchBuild["folder"]!.GetValue<string>();
+            if(itchPrepared["blocked"]!.GetValue<bool>() || project.Publishing.Itch.Target!="smoke/mcp-game" || itchBuild["channel"]!.GetValue<string>()!="html5" || !File.Exists(Path.Combine(itchFolder,"index.html")))
+                throw new Exception("itch.io prepare wrong: "+itchPrepared.ToJsonString());
+            try { Directory.Delete(Path.GetDirectoryName(itchFolder)!,true); } catch { }
             await Call("preview_control",new{expectedRevision=rev,action="close"});
             await Edit(new{kind="delete_input",key="jump"},new{kind="delete_animation",screen,key="mcp_slide"});
             // Components through MCP: a pickup on the star writes and wires its script, and removing it cleans up.
@@ -221,7 +250,7 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             await StopMcp();
             try { using var stopped=await client.GetAsync(mcpUrl); throw new Exception("Server still accepts connections after stopping."); }
             catch(HttpRequestException) { }
-            File.WriteAllText(output,"PASS: 29 MCP tools, connect instructions, guide topics, pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
+            File.WriteAllText(output,"PASS: 30 MCP tools, connect instructions, guide topics, itch_publish (status, prepare), pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
         }
         finally { await StopMcp(); dirty=false; }
     }

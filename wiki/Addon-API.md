@@ -1,6 +1,6 @@
 # Addon API
 
-For mod developers and KubeJS authors who want to open Arcadia Studio screens from their own code or add new server actions. You compile against the Arcadia Studio runtime (1.6.0) for Minecraft 1.21.1 / NeoForge. All calls must happen on the Minecraft **server thread**.
+For mod developers and KubeJS authors who want to open Arcadia Studio screens from their own code or add new server actions. You compile against the Arcadia Studio runtime (the JAR in the release) for Minecraft 1.21.1 / NeoForge. All calls must happen on the Minecraft **server thread**.
 
 ## Opening and updating screens
 

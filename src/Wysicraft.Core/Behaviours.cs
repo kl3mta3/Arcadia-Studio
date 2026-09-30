@@ -22,9 +22,11 @@ public static class Behaviours
     public sealed record ScriptWiring(string Suffix, string Function, string Event, bool OnScreen);
     public static ScriptWiring? ScriptOf(string id) => id switch
     {
-        "character_controller" => new("controller", "tick", "tick", true),
-        "topdown_mover" => new("mover", "tick", "tick", true),
-        "follower" => new("follower", "tick", "tick", true),
+        // Movement scripts run from the tick event of the control they move, so several can tick side by side.
+        // (They used to take the screen's one tick event, and a second one replaced the first: see MoveOldTicks.)
+        "character_controller" => new("controller", "tick", "tick", false),
+        "topdown_mover" => new("mover", "tick", "tick", false),
+        "follower" => new("follower", "tick", "tick", false),
         "pickup" => new("pickup", "taken", "trigger_enter", false),
         _ => null
     };
@@ -117,7 +119,7 @@ public static class Behaviours
                 Input("left", ["a", "left"], ["dpad_left"], "drag_left");
                 Input("right", ["d", "right"], ["dpad_right"], "drag_right");
                 Input("jump", ["space", "w", "up"], ["a"], "drag_up");
-                Script("controller", CharacterController(e.Id), "tick", "tick", onScreen: true);
+                Script("controller", CharacterController(e.Id), "tick", "tick", onScreen: false);
                 break;
 
             case "topdown_mover":
@@ -126,12 +128,12 @@ public static class Behaviours
                 Input("right", ["d", "right"], ["dpad_right"], "drag_right");
                 Input("up", ["w", "up"], ["dpad_up"], "drag_up");
                 Input("down", ["s", "down"], ["dpad_down"], "drag_down");
-                Script("mover", TopDownMover(e.Id), "tick", "tick", onScreen: true);
+                Script("mover", TopDownMover(e.Id), "tick", "tick", onScreen: false);
                 break;
 
             case "follower":
                 Body("kinematic"); Box(); Ticking();
-                Script("follower", Follower(e.Id), "tick", "tick", onScreen: true);
+                Script("follower", Follower(e.Id), "tick", "tick", onScreen: false);
                 break;
 
             case "pickup":
@@ -157,20 +159,50 @@ public static class Behaviours
         if (wiring != null)
         {
             string path = ScriptPath(e, id);
-            var events = wiring.OnScreen ? ui.Events : e.Events;
-            if (events.TryGetValue(wiring.Event, out var handler) && handler.Client.Script == path)
-            {
-                handler.Client.Script = ""; handler.Client.Function = "";
-                if (handler.Client.Actions.Count == 0 && handler.Server.Script.Length == 0 && handler.Server.Actions.Count == 0) events.Remove(wiring.Event);
-                did.Add($"the {(wiring.OnScreen ? "screen's" : "control's")} {wiring.Event} event no longer runs it");
-            }
+            // Wherever it is wired: the control's event, or (in a project from before MoveOldTicks) the screen's.
+            foreach (var (events, whose) in new[] { (e.Events, "control's"), (ui.Events, "screen's") })
+                if (events.TryGetValue(wiring.Event, out var handler) && handler.Client.Script == path)
+                {
+                    handler.Client.Script = ""; handler.Client.Function = "";
+                    if (handler.Client.Actions.Count == 0 && handler.Server.Script.Length == 0 && handler.Server.Actions.Count == 0) events.Remove(wiring.Event);
+                    did.Add($"the {whose} {wiring.Event} event no longer runs it");
+                }
             if (project.Scripts.TryGetValue(path, out var source))
             {
-                if (source == ScriptSource(e, id)) { project.Scripts.Remove(path); did.Add("deleted " + path); }
+                if (source == ScriptSource(e, id) || (id == "pickup" && source == OldPickup(e.Id))) { project.Scripts.Remove(path); did.Add("deleted " + path); }
                 else did.Add("kept " + path + " because it was edited — delete it in Scripts if it is not wanted");
             }
         }
         if (e.Behaviours.Remove(id)) did.Add("removed the component");
+        return did;
+    }
+
+    /// <summary>Brings a project made before movement scripts moved to their control's tick up to date, and takes the
+    /// old Pickup script's debug message out: a screen tick still running a movement component's script moves to that
+    /// control's own tick (unless the control already has one), and a Pickup script still exactly as first written is
+    /// rewritten without the "Picked up by" popup. Edited scripts are left alone. Returns what it changed.</summary>
+    public static List<string> MoveOldTicks(Project project)
+    {
+        var did = new List<string>();
+        foreach (var ui in project.Screens)
+            foreach (var e in ui.Elements)
+                foreach (var id in e.Behaviours)
+                {
+                    var wiring = ScriptOf(id); if (wiring == null) continue;
+                    string path = ScriptPath(e, id);
+                    if (!wiring.OnScreen && ui.Events.TryGetValue(wiring.Event, out var old) && old.Client.Script == path && !e.Events.ContainsKey(wiring.Event))
+                    {
+                        e.Events[wiring.Event] = new UiEvent { Client = new() { Script = path, Function = old.Client.Function.Length > 0 ? old.Client.Function : wiring.Function } };
+                        old.Client.Script = ""; old.Client.Function = "";
+                        if (old.Client.Actions.Count == 0 && old.Server.Script.Length == 0 && old.Server.Actions.Count == 0) ui.Events.Remove(wiring.Event);
+                        did.Add($"{ui.Id} › {e.Id}: {path} now runs from the control's {wiring.Event} event");
+                    }
+                    if (id == "pickup" && project.Scripts.TryGetValue(path, out var source) && source == OldPickup(e.Id))
+                    {
+                        project.Scripts[path] = Pickup(e.Id);
+                        did.Add($"{path}: the \"Picked up by\" message is gone");
+                    }
+                }
         return did;
     }
 
@@ -269,6 +301,18 @@ public static class Behaviours
         """;
 
     static string Pickup(string id) => $$"""
+        // "{{id}}" is taken when something enters it. Its trigger_enter event runs this.
+        var WORTH = 1;
+
+        function taken(ctx) {
+            // ctx.value is the ID of whatever walked into it, so a pickup can ignore anything but the player.
+            ctx.ui.setVisible('{{id}}', false);
+            ctx.state.set('score', Number(ctx.state.get('score') || 0) + WORTH);
+        }
+        """;
+
+    // The Pickup script as it was first written, with a debug message players saw. Kept to recognise it untouched.
+    static string OldPickup(string id) => $$"""
         // "{{id}}" is taken when something enters it. Its trigger_enter event runs this.
         var WORTH = 1;
 

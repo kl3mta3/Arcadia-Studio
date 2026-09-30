@@ -14,7 +14,7 @@ You never type your password into Arcadia Studio. If you don't make games on Arc
 
 The link is saved for your Windows user, encrypted, and only for that arcade. **Unlink** ends it; you can also remove it on the arcade's website (Profile → Arcadia Studio on your devices), and Arcadia Studio then asks you to link again.
 
-**Arcade address…** chooses another arcade (the default is `https://arcadia.lastweeksproject.com`). Each arcade has its own link and its own copy of your game.
+**Arcade address…** chooses another arcade (the default is `https://arcadia.arcadiastudio.games`). Each arcade has its own link and its own copy of your game.
 
 ## 2. Describe the game
 
@@ -26,13 +26,22 @@ The link is saved for your Windows user, encrypted, and only for that arcade. **
 | **Version** | Raise it every time you publish. Arcadia Studio offers the last one + 1. |
 | **Controls** | How to play, for example `WASD to move · Space to dash`. Up to 200 characters. |
 | **Aspect ratio** | The shape the arcade fits the game to. **From the screen** uses your main screen's size. |
+| **Plays on phones and tablets** | Tick it when the game has touch controls (on-screen buttons or tapping) and fits a small screen. The arcade shows a phone icon, lists it under **Mobile friendly** and features it for players on phones. Unticked, phone players are told it may need a keyboard. |
 
-## 3. Add a screenshot
+## 3. Add a cover, screenshots and videos
 
-The screenshot is the game's card and the picture on its page: **1280 × 800**, real gameplay, no borders.
+Every picture is **1280 × 800** (16:10) at its best, real gameplay, no borders: a PNG, JPEG or WebP of up to 2 MB. Each one can come from either button:
 
 - **Capture from Preview**: the first click opens Preview. Play to a good moment, then click it again. Arcadia Studio takes the game screen (without collider outlines), crops the middle to 16:10 and scales it to 1280 × 800, keeping pixel art sharp.
-- **Choose file…**: a PNG, JPEG or WebP of up to 2 MB.
+- **Choose file…**: a picture from your computer. One over 2 MB is fitted to 1280 × 800 for you.
+
+| | What it's for |
+| --- | --- |
+| **Cover** (required) | The game's card in the arcade and the big picture on its page. |
+| **Screenshots** (optional) | The gallery on the game's page, up to **8**, shown in the order you set: **◀** and **▶** move one earlier or later, **Remove** takes it out. 3 or more is best. |
+| **Videos** (optional) | Up to **3 YouTube links**: `youtube.com/watch?v=…`, `youtu.be/…` or `youtube.com/shorts/…`. They play on the game's page before the screenshots. Only the link is sent, never a video file. A link that isn't YouTube is marked as you type, and Check and Publish refuse it. |
+
+A moderator looks at the pictures and videos along with the game when an upload is reviewed.
 
 ## 4. A leaderboard (optional)
 
@@ -48,9 +57,13 @@ Tick **Keep a leaderboard for this game** and Arcadia records each player's scor
 | **Shortest run** | Seconds. A shorter run isn't counted. |
 | **Score comes from** | A screen variable or a `ctx.state` name. If it holds JSON (a game that keeps everything in one variable with `ctx.state.set('g', JSON.stringify(g))`), put the part to read in **field**, for example `score` or `stats.kills`. |
 | **Run ends when** | Up to 6 conditions; the run has ended when any of them holds: a variable (and field) **is true**, or **equals** a value such as `over`. |
-| **Extra columns** | Up to 8 more figures per run (level reached, crystals…), each with a key (lowercase letters, digits and `_`) and whether to keep the highest, lowest or total. |
+| **Extra columns** | Up to 8 more figures per run (level reached, crystals…), each with a key (lowercase letters, digits and `_`) and whether to keep the highest, lowest or total. Tick **Doesn't grow over time** for a figure like accuracy % or a character number (see below). |
+
+**Score checks.** Arcadia compares each run's pace (its score, and each extra column, per second of play) with the game's usual runs, and a run far ahead of it waits for a moderator before it reaches the board. That suits figures that build up as you play. For one that doesn't (an accuracy %, which character was played), tick **Doesn't grow over time** so it's left out of that comparison.
 
 A score is sent **each time "run ends" turns from false to true**. So it has to be false while playing, true at game over, and false again when a new run starts (for example `mode` going `play` → `over` → `play`). A game that starts in the ended state sends nothing until it has been false once.
+
+**Leaderboard page.** What players see when they open the leaderboard: the arcade's standard board, or a page of your own. **Create leaderboard…** designs one in the editor (a podium, a top 10, the player's own rank and more, filled with the game's real scores), and **Import leaderboard…** brings in a `.lb` file or a page. A project with a page uses it unless you choose the standard board. See [[Leaderboard pages|Leaderboard-Pages]].
 
 ## 5. Check, then publish
 
@@ -80,6 +93,16 @@ Everything in the window is saved with the project, including the game's permane
 
 **If you already have a game with this title** (titles are unique per creator, ignoring case and punctuation), Arcadia Studio asks whether it's this project, which happens when a project has lost its saved game. **Yes** updates that game; **No** lets you give this one a different title.
 
+**If the game's details were changed on Arcadia's website** since you last published (its title, description, genres, controls, videos, cover, screenshots or leaderboard, by you or a moderator), **Publish** checks first and asks:
+
+| Choice | What happens |
+| --- | --- |
+| **Keep Arcadia's** (the default) | The game is updated, its details stay as they are on Arcadia, and they're copied into your project (pictures included), so you aren't asked again. |
+| **Use mine** | The game is updated with the details in this window, replacing the website's. |
+| **Cancel** | Nothing is published. |
+
+**Load details from Arcadia** copies the game's current details from Arcadia into the window at any time, for example after editing them on the website.
+
 **Publishing history…** lists the last 20 uploads and can download any stored version (or what's live) as a zip.
 
 ## Limits
@@ -98,4 +121,4 @@ Games on Arcadia run in a locked-down page:
 
 ## For AI assistants
 
-Over [[MCP|MCP-and-AI-Assistants]], an assistant can fill in these settings, capture the screenshot from Preview, build the package and run the arcade's check (`arcadia_publish`). It can't publish: that's always your click.
+Over [[MCP|MCP-and-AI-Assistants]], an assistant can fill in these settings, capture the cover and screenshots from Preview, add video links, build the package and run the arcade's check (`arcadia_publish`). It can't publish: that's always your click.

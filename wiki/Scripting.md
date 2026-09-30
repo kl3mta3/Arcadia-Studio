@@ -54,9 +54,11 @@ function engineStart(ctx) {
 - `ctx.value`: the event's input (text box text, slider value, row index, the key name for a screen `key` event, and so on).
 - Scripts run separately from the page with the same **2-second limit** as in Minecraft, so a script stuck in a loop is stopped instead of freezing Preview or the app.
 - Sprites: `ui.play(id, 'run')` switches clip. Sound controls: `ui.setValue(id, 'play')` or `'stop'`.
-- Web and desktop ([[advanced tools|Advanced-Tools]]): `ui.animate(id)`, `ui.stopAnimation(id)`, `ui.setVelocity(id, vx, vy)`, `ui.setPosition(id, x, y)`, `ctx.input.isDown(name)`, `ctx.input.axis(name)`, `ctx.physics.touching(id)` (IDs it touches or overlaps), `ctx.physics.isTouching(a, b)`, and `ctx.ui.getElement(id)` with `x`, `y`, `width`, `height`, `vx`, `vy`.
+- Web and desktop ([[advanced tools|Advanced-Tools]]): `ui.animate(id)`, `ui.stopAnimation(id)`, `ui.setVelocity(id, vx, vy)`, `ui.setPosition(id, x, y)`, `ctx.input.isDown(name)`, `ctx.input.axis(name)`, `ctx.input.pointer()` (`x`, `y`, `down`, `presses`: the latest finger or mouse press on the floor, for tap-to-move), `ctx.physics.touching(id)` (IDs it touches or overlaps), `ctx.physics.isTouching(a, b)`, and `ctx.ui.getElement(id)` with `x`, `y`, `width`, `height`, `vx`, `vy`.
 - `ctx.repeat`: `true` when a screen `key` event comes from a key being held down, `false` for a fresh press. Use it to ignore held keys for one-shot actions such as jump or drop.
-- `ctx.state.get(name)` / `ctx.state.set(name, value)`: screen variables (strings). Use them to remember things; JavaScript globals are reset on every call.
+- `ctx.state.get(name)` / `ctx.state.set(name, value)`: screen variables (strings). They start over when the screen opens. Where else to keep things is under [Where to keep state](#where-to-keep-state).
+- `ctx.save`: saved games that survive closing the game (web and desktop); see [Saved games](#saved-games-web--desktop).
+- `ctx.ui.open('screen')`: opens another screen. In web and desktop projects any script can; in a project made for Minecraft (or both), only server scripts can, so use an `open_ui` action instead. An `open_ui` action works on any event, including `tick`, `collide` and `trigger_enter`.
 - `console.log/warn/error`: messages for Preview's console and the game log.
 
 ### UI methods (`ctx.ui`, also available as `ui`)
@@ -77,6 +79,61 @@ function engineStart(ctx) {
 Client scripts also have `ctx.client.playSound(id)` and `ctx.client.sendMessage(text)`.
 
 Web and desktop only: `ctx.client.playSound(id, volume)` plays one sound effect at a volume from 0 to 1, and `ui.setVolume(id, volume)` sets a Sound control's volume, at once if it is playing. Together they make a volume menu: keep the player's levels in a screen variable and pass them along. Minecraft ignores the volume and has no `setVolume`, so check `if (ctx.ui.setVolume)` in a project that also targets Minecraft.
+
+## Where to keep state
+
+Each event runs a script. What happens to the script's own variables depends on the project:
+
+- **Scripts keep their variables between events** (Project settings; web & desktop projects, on for new projects). Each script runs from the top once. After that only the event's function is called, so a top-level `let score = 0` keeps counting from one event to the next, and across screens, until the game starts over or you edit the script. `ctx` and `ui` always mean the current event's, even at the top level.
+- **Off, and always in Minecraft or "both" projects:** every event runs the script from the top, so top-level variables start again each time. This matches Minecraft, where one server runs scripts for many players. Keep state in `ctx.state`, or in a global object (`globalThis.game = globalThis.game || { score: 0 }`), which lasts for the session in web and desktop apps.
+
+```javascript
+// With "Scripts keep their variables between events" on:
+let score = 0;                       // runs once
+const enemies = [];                  // a real array, not a string
+
+function coin(ctx) {                 // runs on every coin event
+    score += 10;
+    ctx.ui.setText('score', 'Score ' + score);
+}
+```
+
+With the setting on, code at the top level that works the screen (`ctx.ui.setText(...)` outside any function) runs only on the first event. **Validate** points out such lines. Move them into a function, usually the screen's `open` event.
+
+Which to use:
+
+| Keep it in | Lasts | Shows in Preview's variables | Use for |
+| --- | --- | --- | --- |
+| Script variables (setting on) | Until the game starts over | No | Game logic: positions, lists, timers |
+| `ctx.state` | Until the screen opens again | Yes | What controls show through `${name}`, conditions, state graphs |
+| `ctx.save` | Until the game clears it | No | Progress that should survive closing the game |
+| **Game variables** (Project settings) | Until the game closes; **Saved between visits** ones come back next time | Yes | A score a Game over screen shows, lives across levels, a best score, settings |
+
+**Game variables** are the whole game's variables. List them in **Project settings → Game variables** as `name=value;name=value` (their starting values). They work exactly like screen variables (`${score}` in a label, `ctx.state.get('score')`, conditions), but keep their value when another screen opens. Names listed under **Saved between visits** are also kept with the game's saved data, so a best score is still there next time. Web & desktop.
+
+## Saved games (web & desktop)
+
+`ctx.save` keeps text by key in the player's browser (or the desktop app's own storage), under the game's ID, so it's still there next time the game opens:
+
+```javascript
+function saveGame(ctx) {
+    ctx.save.set('level', String(level));
+    ctx.save.set('hero', JSON.stringify({ hp: hp, items: items }));   // objects as JSON
+}
+function loadGame(ctx) {
+    if (!ctx.save.has('level')) return;                                // a new player
+    level = Number(ctx.save.get('level'));
+    const hero = JSON.parse(ctx.save.get('hero') || '{}');
+}
+```
+
+- `get(key)` returns the text, or `''` when nothing is saved. `has(key)`, `keys()`, `remove(key)` and `clear()` do what they say.
+- Text only: store objects with `JSON.stringify`. Keys are 1–100 characters, and a game can keep up to **512 KB**.
+- A script run that fails saves nothing, so a crash halfway through can't leave half a save.
+- Each browser keeps its own saves: a player on a phone and a laptop has two. Clearing the browser's site data wipes them.
+- Minecraft has no saved games; **Validate** reports `ctx.save` in a project made for Minecraft.
+- To test a fresh start, call `ctx.save.clear()` from a button or Preview's script box.
+- A site hosting the game can keep saves its own way with `save.load`/`save.store` in `host.js`; see [[Web and desktop apps|Web-and-Desktop-Apps]].
 
 ## Spawned objects (web & desktop)
 
@@ -223,12 +280,16 @@ These return plain values, never Minecraft or Java objects. UI changes from serv
 
 ## Limits
 
-| | In Minecraft | In Preview |
+| | In Minecraft | Web & desktop (and Preview) |
 | --- | --- | --- |
 | Script size | 256 KiB | 1 MiB (web & desktop projects) |
-| Statements per call | 100,000 | 20,000 |
-| Time per call | 2 seconds | 300 ms |
-| UI operations per call | 128 | 128 |
+| Statements per call | 100,000 | No limit (only time) |
+| Time per call | 2 seconds | 2 seconds |
+| Screen changes per call | 128 | 100,000 (128 in projects made for Minecraft or both, so Preview matches the game) |
+
+A **screen change** is anything a script asks the screen to do: every `ctx.ui` call and every `ctx.state.set`. Loops, maths and reading values are free. A call that asks for more than the limit is stopped, and **none** of its changes are applied; the error says which limit it hit.
+
+How many is sensible: each change costs about 0.4–0.8 microseconds from the script to the screen (measured), so 10,000 take 4–8 ms and 100,000 take 40–70 ms. A `tick` script that runs every frame has about 16 ms at 60 fps, so keep it near 10,000–20,000 changes. A one-off event, such as building a level, can use the rest with only a brief pause. For many moving things, let the engine move them (velocities, `seek`, paths, animations) instead of calling `setPosition` for each one every tick.
 
 Server scripts also share a **per-player time budget** (about 100 ms per second, with a 250 ms burst). If one player triggers scripts too fast, their server scripts are skipped until it refills, and the server log notes it.
 

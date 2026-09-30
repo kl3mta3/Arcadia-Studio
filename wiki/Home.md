@@ -35,6 +35,10 @@ Arcadia Studio is a Windows app for designing Minecraft screens (menus, dashboar
 ## Shipping your project
 
 - [[Exporting and installing|Exporting-and-Installing]]: export formats and putting them in Minecraft
+- [[Web and desktop apps|Web-and-Desktop-Apps]]: web pages, Windows apps and Electron apps
+- [[Publishing to Arcadia|Publishing-to-Arcadia]]: put a game on the Arcadia web arcade, with a cover, screenshots, videos and a leaderboard
+- [[Leaderboard pages|Leaderboard-Pages]]: design the page players see for your game's leaderboard
+- [[Publishing to itch.io|Publishing-to-itch.io]]: upload the web version and the Windows app to itch.io
 - [[KubeJS integration|KubeJS-Integration]]: server scripts for KubeJS modpacks
 - [[Security and permissions|Security-and-Permissions]]: for server owners
 
@@ -42,6 +46,7 @@ Arcadia Studio is a Windows app for designing Minecraft screens (menus, dashboar
 
 - [[AI assistants (MCP)|MCP-and-AI-Assistants]]: let Claude, ChatGPT or another assistant build screens with you
 - [[Keyboard shortcuts|Keyboard-Shortcuts]]: defaults and how to change them
+- [[Glossary|Glossary]]: every term in plain words, from sprite and MIDI to Demucs and KubeJS
 - [[Addon API|Addon-API]]: for mod and KubeJS developers
 - [[Limits and troubleshooting|Limits-and-Troubleshooting]]
 
@@ -54,4 +59,4 @@ Arcadia Studio is a Windows app for designing Minecraft screens (menus, dashboar
 | Use your screens in Minecraft | Minecraft Java **1.21.1** with NeoForge **21.1.250** or newer |
 | Use KubeJS server scripts | KubeJS and Rhino installed in the modpack |
 
-*This manual describes Arcadia Studio 1.3 (Minecraft runtime 1.7.0). Arcadia Studio was called Wysicraft before 1.3: projects from then (`.wysicraftproj`) still open, and your settings come across by themselves.*
+*Arcadia Studio was called Wysicraft before: projects from then (`.wysicraftproj`) still open, and your settings come across by themselves.*

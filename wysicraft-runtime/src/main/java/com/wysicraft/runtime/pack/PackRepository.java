@@ -12,7 +12,9 @@ import java.util.zip.*;
 
 public final class PackRepository {
     public static final int MAX_FILE = 32 * 1024 * 1024, MAX_PACK = 256 * 1024 * 1024;
-    public static final Set<String> CONTROLS = new HashSet<>(List.of("button","label","image","textbox","checkbox","slider","progress","dropdown","panel","scroll_panel","item","item_list","texture_region","sprite","shape","sound"));
+    public static final Set<String> CONTROLS = new HashSet<>(List.of("button","label","image","textbox","checkbox","slider","progress","dropdown","panel","scroll_panel","item","item_list","texture_region","sprite","shape","sound","slots"));
+    /** What an item slots control holds: part of the player's inventory, temporary storage, a crafting grid, or its result. */
+    public static final Set<String> SLOT_KINDS = Set.of("player","storage","crafting","result");
     public static final Set<String> CLIENT_ACTIONS = new HashSet<>(List.of("set_text","set_visible","set_enabled","set_value","open_ui","close_ui","play_sound","set_variable","toggle_variable","message","change_texture"));
     public static final Set<String> SERVER_ACTIONS = new HashSet<>(List.of("command","message","set_variable","toggle_variable","open_ui","close_ui","server_function","player_inventory"));
     /** This runtime's version, stamped from build.gradle at build time; packs may require at most this version. */
@@ -142,8 +144,20 @@ public final class PackRepository {
             require(e.rowHeight>=24 && e.rowHeight<=128 && e.primaryLabel.length()<=24 && e.secondaryLabel.length()<=24, location+"invalid row template");
             if (e.type.equals("item")) require(resource(e.item) || template && e.item.equals("${row.item}"), location + "invalid item"); if(e.type.equals("item_list")) com.wysicraft.runtime.model.ItemRows.parse(e.value);
             if(!e.rowElements.isEmpty()) { require(e.type.equals("item_list"),"Row template requires Item List"); com.wysicraft.runtime.model.RowTemplates.check(e); var row=com.wysicraft.runtime.model.RowTemplates.layout(e); validate(row,manifest,screens,files,true); }
+            if (e.type.equals("slots")) {
+                require(SLOT_KINDS.contains(e.slotKind), location + "item slots hold player, storage, crafting or result");
+                require(e.columns >= 1 && e.rows >= 1 && e.columns <= 9 && e.rows <= 6, location + "item slots are 1-9 columns by 1-6 rows");
+                if (e.slotKind.equals("player")) require(e.slotStart >= 0 && e.slotStart + e.columns * e.rows <= 36, location + "player slots are 0-35 (0-8 the hotbar)");
+                if (e.slotKind.equals("crafting")) require(e.columns <= 3 && e.rows <= 3, location + "a crafting grid is at most 3 × 3");
+                if (e.slotKind.equals("result")) require(e.columns == 1 && e.rows == 1, location + "a crafting result is one slot");
+                require(com.wysicraft.runtime.model.ContainerTree.ancestors(ui, e).stream().noneMatch(p -> p.type.equals("scroll_panel")), location + "item slots can't be inside a scroll panel");
+            }
             validateEvents(e.events, events(e.type), location, ui, screens, files);
         }
+        long crafting = ui.elements.stream().filter(e -> e.type.equals("slots") && e.slotKind.equals("crafting")).count(), results = ui.elements.stream().filter(e -> e.type.equals("slots") && e.slotKind.equals("result")).count();
+        require(crafting <= 1 && results <= 1, ui.id + ": at most one crafting grid and one result per screen");
+        require(results == 0 || crafting == 1, ui.id + ": a crafting result needs a crafting grid");
+        if (ui.elements.stream().anyMatch(e -> e.type.equals("slots"))) require(!ui.responsive, ui.id + ": screens with item slots use a fixed layout (turn off Responsive layout)");
         validateEvents(ui.events, Set.of("open","close","tick","key"), ui.id + ": ", ui, screens, files);
         require(ui.tickInterval == 0 || (ui.tickInterval >= 50 && ui.tickInterval <= 60000), ui.id + ": tick interval must be 0 or 50-60000 ms");
         require(ui.keyRepeat == 0 || (ui.keyRepeat >= 50 && ui.keyRepeat <= 2000), ui.id + ": key repeat must be 0 or 50-2000 ms");

@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -27,6 +29,7 @@ public partial class MainWindow
 
     void Preview()
     {
+        if (ui.IsLeaderboard) { PreviewLeaderboard(); return; }
         SaveScriptText(); if (Validation.Errors(project).Count > 0) { Validate(); return; }
         activePreview?.Window.Close(); activePreview = new PreviewSession(this, Json.CloneProject(project), ui.Id); previewRevision = Revision(); activePreview.Window.Show();
     }
@@ -57,6 +60,20 @@ public partial class MainWindow
         return files;
     }
 
+    // The work area (the screen less the taskbar) of the monitor a window is on, in WPF units.
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
+    static Rect WorkArea(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (handle == IntPtr.Zero || !GetMonitorInfo(MonitorFromWindow(handle, 2 /* nearest */), ref info)) return SystemParameters.WorkArea;
+        var toWpf = PresentationSource.FromVisual(window)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+        return new Rect(toWpf.Transform(new Point(info.Work.Left, info.Work.Top)), toWpf.Transform(new Point(info.Work.Right, info.Work.Bottom)));
+    }
+
     sealed class PreviewSession
     {
         const string Host = "preview.wysicraft";
@@ -68,6 +85,13 @@ public partial class MainWindow
         readonly TextBox code = new() { AcceptsReturn = true, AcceptsTab = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Text = "console.log('Hello from the preview!');\n// ui.setText('status', 'It works!');" };
         readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
         readonly CheckBox profilerBox = new() { Content = "Profiler", IsChecked = false, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Show frame, engine, drawing and script times and counts over the game. Never shown in exported apps." };
+        readonly CheckBox fitBox = new() { Content = "Fit game to window", Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Draw the game scaled to fill this window, smaller or larger, as the window and console change. Only Preview's zoom changes: the game's size and layout are its own." };
+        readonly CheckBox muteBox = new() { Content = "Mute", Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Turn the preview's sound off. The game itself is unchanged; kept for the next preview." };
+        // The console and JavaScript panels, and the bar that minimizes them; while minimized, the bar counts what's new.
+        readonly Grid consoleArea = new() { Height = 210 };
+        readonly Button consoleToggle = new() { Padding = new Thickness(10, 1, 10, 1), Margin = new Thickness(0, 2, 4, 2) };
+        readonly TextBlock consoleNews = new() { Foreground = Brushes.LightGray, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+        int unseen; bool unseenError;
         bool closed, profiling; Task? closing;
         public Window Window { get; }
         public PreviewSession(MainWindow designer, Project project, string id)
@@ -75,7 +99,9 @@ public partial class MainWindow
             this.designer = designer; this.project = project; initialUi = id;
             folder = Path.Combine(Path.GetTempPath(), "Arcadia Studio", "Preview", Guid.NewGuid().ToString("N"));
             var screen = project.Screens.First(s => s.Id == id);
-            Window = new Window { Title = "Arcadia Studio • Interactive Preview", Owner = designer, Width = Math.Max(760, screen.Size.Width * 2 + 60), Height = Math.Max(650, screen.Size.Height * 2 + 330), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            // Twice the game's size where there's room; never bigger than the screen the editor is on.
+            var area = WorkArea(designer);
+            Window = new Window { Title = "Arcadia Studio • Interactive Preview", Owner = designer, Width = Math.Min(area.Width, Math.Max(760, screen.Size.Width * 2 + 60)), Height = Math.Min(area.Height, Math.Max(650, screen.Size.Height * 2 + 330)), Background = new SolidColorBrush(Color.FromRgb(29, 32, 37)), Foreground = Brushes.White, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var layout = new DockPanel(); Window.Content = layout;
             var tools = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(tools, Dock.Top); layout.Children.Add(tools);
             var reset = new Button { Content = "Reset preview" }; reset.Click += (_, _) => { if (view.CoreWebView2 != null) { output.Clear(); Print("RESET", "Starting again from " + initialUi); view.CoreWebView2.Reload(); } }; tools.Children.Add(reset);
@@ -87,27 +113,98 @@ public partial class MainWindow
             // The live profiler: frame, engine, draw and script times and what's on screen, over the game.
             profilerBox.Click += async (_, _) => { profiling = profilerBox.IsChecked == true; await Script(ProfilerScript(profiling)); };
             tools.Children.Add(profilerBox);
+            // Sound off for this preview window only (WebView2 mutes the page); the game is unchanged.
+            muteBox.IsChecked = designer.Prefs().PreviewMuted;
+            muteBox.Click += (_, _) => { bool muted = muteBox.IsChecked == true; if (view.CoreWebView2 != null) view.CoreWebView2.IsMuted = muted; designer.Prefs().PreviewMuted = muted; designer.SavePrefs(); };
+            tools.Children.Add(muteBox);
             tools.Children.Add(new TextBlock { Text = "Click controls and use the keyboard to test • Server operations are simulated", Margin = new Thickness(12, 6, 4, 6), VerticalAlignment = VerticalAlignment.Center });
             var sizes = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(sizes, Dock.Top); layout.Children.Add(sizes);
             sizes.Children.Add(new TextBlock { Text = "Layout size (GUI pixels)", Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center });
             var vw = new TextBox { Text = screen.Size.Width.ToString(), Width = 60 }; var vh = new TextBox { Text = screen.Size.Height.ToString(), Width = 60 }; sizes.Children.Add(vw); sizes.Children.Add(vh);
             var resize = new Button { Content = "Apply size" }; sizes.Children.Add(resize);
-            var fit = new Button { Content = "Fit window" }; sizes.Children.Add(fit);
+            var follow = new Button { Content = "Reset size", ToolTip = "Lay the game out for this window again, after Apply size." }; sizes.Children.Add(follow);
+            fitBox.IsChecked = designer.Prefs().PreviewFitGame; sizes.Children.Add(fitBox);
             resize.Click += async (_, _) => {
                 if (!int.TryParse(vw.Text, out int w) || !int.TryParse(vh.Text, out int h) || w < 16 || h < 16 || w > 16384 || h > 16384) { Print("LAYOUT", "Use sizes from 16 to 16384."); return; }
                 await Script($"Wysicraft.app.setViewport({w},{h})"); Print("LAYOUT", project.Screens.Any(s => s.Responsive) ? $"Laid out for {w} × {h}." : "This screen uses a fixed layout. Enable Responsive layout in screen settings to resize controls.");
+                await RefitAsync();
             };
-            fit.Click += async (_, _) => { await Script("Wysicraft.app.setViewport(0,0)"); Print("LAYOUT", "Laid out for the preview window."); };
-            var bottom = new Grid { Height = 235 }; bottom.ColumnDefinitions.Add(new ColumnDefinition()); bottom.ColumnDefinitions.Add(new ColumnDefinition()); DockPanel.SetDock(bottom, Dock.Bottom); layout.Children.Add(bottom);
-            var consolePanel = new DockPanel(); consolePanel.Children.Add(Header("CONSOLE • events, actions and script output")); consolePanel.Children.Add(output); bottom.Children.Add(consolePanel);
-            var scriptPanel = new DockPanel(); Grid.SetColumn(scriptPanel, 1); bottom.Children.Add(scriptPanel); scriptPanel.Children.Add(Header("JAVASCRIPT • runs like a client script on this screen"));
+            follow.Click += async (_, _) => { await Script("Wysicraft.app.setViewport(0,0)"); Print("LAYOUT", "Laid out for the preview window."); await RefitAsync(); };
+            fitBox.Click += async (_, _) => { designer.Prefs().PreviewFitGame = fitBox.IsChecked == true; designer.SavePrefs(); await RefitAsync(); };
+            // The space for the game changes with the window and with the console folding away.
+            view.SizeChanged += async (_, _) => await RefitAsync();
+            // The console and JavaScript panels, under a bar that minimizes them to give the game the room.
+            var bottom = new DockPanel(); DockPanel.SetDock(bottom, Dock.Bottom); layout.Children.Add(bottom);
+            var bar = new DockPanel { Background = new SolidColorBrush(Color.FromRgb(37, 41, 48)) }; DockPanel.SetDock(bar, Dock.Top); bottom.Children.Add(bar);
+            DockPanel.SetDock(consoleToggle, Dock.Right); bar.Children.Add(consoleToggle);
+            var barTitle = new StackPanel { Orientation = Orientation.Horizontal };
+            barTitle.Children.Add(new TextBlock { Text = "CONSOLE & JAVASCRIPT", Foreground = Brushes.LightSkyBlue, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) });
+            barTitle.Children.Add(consoleNews); bar.Children.Add(barTitle);
+            consoleToggle.Click += (_, _) => { designer.Prefs().PreviewConsoleMinimized = consoleArea.Visibility == Visibility.Visible; designer.SavePrefs(); ShowConsole(); };
+            consoleArea.ColumnDefinitions.Add(new ColumnDefinition()); consoleArea.ColumnDefinitions.Add(new ColumnDefinition()); bottom.Children.Add(consoleArea);
+            var consolePanel = new DockPanel(); consolePanel.Children.Add(Header("CONSOLE • events, actions and script output")); consolePanel.Children.Add(output); consoleArea.Children.Add(consolePanel);
+            var scriptPanel = new DockPanel(); Grid.SetColumn(scriptPanel, 1); consoleArea.Children.Add(scriptPanel); scriptPanel.Children.Add(Header("JAVASCRIPT • runs like a client script on this screen"));
+            ShowConsole();
             var run = new Button { Content = "Run JavaScript", HorizontalAlignment = HorizontalAlignment.Right }; DockPanel.SetDock(run, Dock.Bottom); scriptPanel.Children.Add(run); scriptPanel.Children.Add(code);
             run.Click += async (_, _) => { await ready.Task; await Script("Wysicraft.app.runScript(" + JsonSerializer.Serialize(code.Text) + ")"); };
             view.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D);
             layout.Children.Add(view);
             Window.Closing += (_, args) => { if (!closed) { args.Cancel = true; closing ??= CloseAsync(); } };
             Window.Closed += (_, _) => { closed = true; view.Dispose(); try { Directory.Delete(folder, true); } catch { } };
-            Window.Loaded += async (_, _) => await StartAsync();
+            Window.Loaded += async (_, _) =>
+            {
+                KeepOnScreen();
+                await StartAsync();
+            };
+        }
+        /// <summary>Minimized, the panels fold into their bar (which counts new console lines) and the game gets the room.</summary>
+        void ShowConsole()
+        {
+            bool minimized = designer.Prefs().PreviewConsoleMinimized;
+            consoleArea.Visibility = minimized ? Visibility.Collapsed : Visibility.Visible;
+            consoleToggle.Content = minimized ? "Restore ▴" : "Minimize ▾";
+            consoleToggle.ToolTip = minimized ? "Show the console and JavaScript panels." : "Fold the console and JavaScript panels away to give the game more room.";
+            if (!minimized) { unseen = 0; unseenError = false; output.ScrollToEnd(); }
+            consoleNews.Text = !minimized || unseen == 0 ? "" : unseen + " new line" + (unseen == 1 ? "" : "s") + (unseenError ? ", with errors" : "");
+            consoleNews.Foreground = unseenError ? new SolidColorBrush(Color.FromRgb(0xFF, 0x8C, 0x7A)) : Brushes.LightGray;
+        }
+        /// <summary>A window that opened bigger than its screen, or partly off it, is brought fully onto it.</summary>
+        void KeepOnScreen()
+        {
+            if (Window.WindowState != WindowState.Normal) return;
+            var area = WorkArea(Window);
+            double w = Math.Min(Window.ActualWidth, area.Width), h = Math.Min(Window.ActualHeight, area.Height);
+            if (w < Window.ActualWidth) Window.Width = w; if (h < Window.ActualHeight) Window.Height = h;
+            Window.Left = Math.Clamp(Window.Left, area.Left, Math.Max(area.Left, area.Right - w)); Window.Top = Math.Clamp(Window.Top, area.Top, Math.Max(area.Top, area.Bottom - h));
+        }
+        string shownScreen = "";
+        /// <summary>Fit game to window: Preview zooms so the game's screen (with the margins the runtime leaves round it)
+        /// exactly fills the space it has, smaller or larger. Only the zoom of this window changes, never the window's size
+        /// or the game: a fixed screen is fitted at its design size, a responsive one at the size set with Apply size. A
+        /// responsive screen with no size set lays itself out for the window, so it isn't zoomed.</summary>
+        internal async Task RefitAsync()
+        {
+            if (closed || view.CoreWebView2 == null || view.ActualWidth < 1 || view.ActualHeight < 1) return;
+            double zoom = 1;
+            if (fitBox.IsChecked == true)
+                try
+                {
+                    var info = JsonNode.Parse(await Script("(function(){ const a = Wysicraft._app; if (!a || !a.design) return null; const d = a.design;" +
+                        " return { w: d.size.width, h: d.size.height, f: !!d.showFrame, r: !!d.responsive, vw: a.viewport ? a.viewport.width : 0, vh: a.viewport ? a.viewport.height : 0," +
+                        " px: typeof a.padX === 'number' ? a.padX : -1, py: typeof a.padY === 'number' ? a.padY : -1 }; })()"));
+                    if (info is JsonObject o)
+                    {
+                        double vw = (double)o["vw"]!, vh = (double)o["vh"]!;
+                        // A fixed screen is always its design size; a responsive one is the size set with Apply size (if any).
+                        (double w, double h) = !(bool)o["r"]! ? ((double)o["w"]!, (double)o["h"]!) : vw > 0 && vh > 0 ? (vw, vh) : (0, 0);
+                        // The runtime's own margins round the screen (none for a web game without a frame).
+                        double px = (double)o["px"]!, py = (double)o["py"]!;
+                        if (px < 0) { px = 12; py = (bool)o["f"]! ? 32 : 12; }
+                        if (w > 0 && h > 0) zoom = Math.Clamp(Math.Min(view.ActualWidth / (w + px), view.ActualHeight / (h + py)), 0.25, 5);
+                    }
+                }
+                catch (Exception) { }
+            if (!closed && Math.Abs(view.ZoomFactor - zoom) > 0.001) view.ZoomFactor = zoom;
         }
         static string ProfilerScript(bool on) => $"window.wysicraftHost.profiler = {(on ? "true" : "false")}; Wysicraft.app.setProfiler({(on ? "true" : "false")}); 0";
         static TextBlock Header(string title) { var label = new TextBlock { Text = title, Margin = new Thickness(6), Foreground = Brushes.LightSkyBlue, FontSize = 11 }; DockPanel.SetDock(label, Dock.Top); return label; }
@@ -116,6 +213,7 @@ public partial class MainWindow
             if (closed) return;
             if (output.Text.Length > 100000) output.Text = output.Text[^50000..];
             output.AppendText($"[{category}] {text}\n"); output.ScrollToEnd();
+            if (consoleArea.Visibility != Visibility.Visible) { unseen++; unseenError |= category == "ERROR"; ShowConsole(); }
         }
         async Task StartAsync()
         {
@@ -127,6 +225,7 @@ public partial class MainWindow
                 if (closed) return;
                 var web = view.CoreWebView2;
                 web.Settings.AreDefaultContextMenusEnabled = false; web.Settings.IsStatusBarEnabled = false; web.Settings.IsZoomControlEnabled = false; web.Settings.AreBrowserAcceleratorKeysEnabled = false;
+                web.IsMuted = muteBox.IsChecked == true;
                 web.SetVirtualHostNameToFolderMapping(Host, folder, CoreWebView2HostResourceAccessKind.DenyCors);
                 web.NavigationStarting += (_, e) => { if (!e.Uri.StartsWith($"https://{Host}/")) e.Cancel = true; };
                 web.NewWindowRequested += (_, e) => e.Handled = true;
@@ -150,9 +249,11 @@ public partial class MainWindow
                 string S(string key) => m[key]?.ToString() ?? "";
                 switch (kind)
                 {
-                    case "ready": ready.TrySetResult(); if (profiling) _ = Script(ProfilerScript(true)); break;
+                    case "ready": ready.TrySetResult(); if (profiling) _ = Script(ProfilerScript(true)); _ = RefitAsync(); break;
                     case "event":
                     {
+                        // Another screen may be another size.
+                        if (S("screen").Length > 0 && S("screen") != shownScreen) { shownScreen = S("screen"); _ = RefitAsync(); }
                         string ev = S("event"), where = S("screen") + "." + (S("element").Length > 0 ? S("element") + "." : "") + ev;
                         bool assigned = m["assigned"]?.GetValue<bool>() ?? false;
                         if (ev is "tick" or "key" or "hover" or "mouse_enter" or "mouse_leave") { if (assigned && ev is not ("tick" or "key" or "hover")) Print("EVENT", where); break; }
@@ -308,6 +409,79 @@ public partial class MainWindow
             string size = await Script("(() => { const c = Wysicraft._app.ui.elements.find(e => e.id === 'cam_test'); const s = c.bounds.width + 'x' + c.bounds.height; Wysicraft._app.ui.elements.splice(Wysicraft._app.ui.elements.indexOf(c), 1); Wysicraft._app.render(); return s; })()");
             if (JsonNode.Parse(size)!.GetValue<string>() != "120x60") throw new InvalidOperationException("ui.setSize did not resize the camera: " + size);
         }
+        /// <summary>The window tools: Mute mutes the page, Minimize folds the console away (the game gets the room and new
+        /// lines are counted), and Fit game to window zooms the game to fill the window without changing either.</summary>
+        internal async Task VerifyWindowToolsAsync()
+        {
+            await WaitReady();
+            void Click(System.Windows.Controls.Primitives.ButtonBase b) => b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            void Expect(bool ok, string what) { if (!ok) throw new InvalidOperationException("Preview window tools: " + what + "\n" + output.Text[Math.Max(0, output.Text.Length - 600)..]); }
+            muteBox.IsChecked = true; Click(muteBox);
+            Expect(view.CoreWebView2.IsMuted && designer.Prefs().PreviewMuted, "Mute mutes the preview");
+            muteBox.IsChecked = false; Click(muteBox);
+            Expect(!view.CoreWebView2.IsMuted && !designer.Prefs().PreviewMuted, "unticking Mute turns the sound back on");
+
+            Window.UpdateLayout(); double before = view.ActualHeight;
+            Click(consoleToggle); Window.UpdateLayout();
+            Expect(consoleArea.Visibility == Visibility.Collapsed && view.ActualHeight >= before + 200 && (string)consoleToggle.Content == "Restore ▴", "Minimize folds the console away and the game gets the room");
+            Print("TEST", "one"); Print("ERROR", "two");
+            Expect(consoleNews.Text == "2 new lines, with errors", "while minimized, new lines are counted: " + consoleNews.Text);
+            Click(consoleToggle); Window.UpdateLayout();
+            Expect(consoleArea.Visibility == Visibility.Visible && Math.Abs(view.ActualHeight - before) < 1 && consoleNews.Text == "", "Restore brings it back and clears the count");
+
+            // A game bigger than the window: with Fit game to window it's zoomed down to fit, and fills it; the window
+            // and the game (its layout size and design) stay exactly as they were.
+            string game = await Script("JSON.stringify({ v: Wysicraft._app.viewport, w: Wysicraft._app.design.size.width, h: Wysicraft._app.design.size.height })");
+            Window.WindowState = WindowState.Normal; Window.Width = 560; Window.Height = 600; Window.UpdateLayout();
+            async Task<JsonObject> Shown()
+            {
+                for (int i = 0; i < 20; i++) { await Task.Delay(50); await RefitAsync(); }
+                var shown = JsonNode.Parse(JsonNode.Parse(await Script("JSON.stringify((function(){ const a = Wysicraft._app, s = a.scale; return { gw: (a.ui.size.width + a.padX) * s, gh: (a.ui.size.height + a.padY) * s, W: a.container.clientWidth, H: a.container.clientHeight }; })())"))!.GetValue<string>())!.AsObject();
+                return shown;
+            }
+            fitBox.IsChecked = true; Click(fitBox);
+            var fitted = await Shown();
+            double gw = (double)fitted["gw"]!, gh = (double)fitted["gh"]!, W = (double)fitted["W"]!, H = (double)fitted["H"]!;
+            Expect(gw <= W + 1 && gh <= H + 1 && (gw >= W - 2 || gh >= H - 2), $"the game is zoomed to fill the space: zoom {view.ZoomFactor:0.###}, game {gw:0}×{gh:0} in {W:0}×{H:0}");
+            // A smaller window: the game is squeezed down with it, and still fits.
+            double wider = view.ZoomFactor; Window.Height = 430; Window.UpdateLayout(); fitted = await Shown();
+            (gw, gh, W, H) = ((double)fitted["gw"]!, (double)fitted["gh"]!, (double)fitted["W"]!, (double)fitted["H"]!);
+            Expect(view.ZoomFactor < wider - 0.01 && gw <= W + 1 && gh <= H + 1 && (gw >= W - 2 || gh >= H - 2), $"a smaller window squeezes the game to fit: zoom {wider:0.###} → {view.ZoomFactor:0.###}, game {gw:0}×{gh:0} in {W:0}×{H:0}");
+            Expect(Math.Abs(Window.Width - 560) < 1 && Math.Abs(Window.Height - 430) < 1, "fitting never resizes the window");
+            Expect(await Script("JSON.stringify({ v: Wysicraft._app.viewport, w: Wysicraft._app.design.size.width, h: Wysicraft._app.design.size.height })") == game, "fitting leaves the game (its layout size and design) alone");
+            // Folding the console away gives the game more room, and the fit follows.
+            double zoomBefore = view.ZoomFactor;
+            Click(consoleToggle); Window.UpdateLayout(); await Shown();
+            Expect(view.ZoomFactor > zoomBefore + 0.01, $"the fit follows the space: zoom {zoomBefore:0.###} → {view.ZoomFactor:0.###} with the console folded");
+            Click(consoleToggle); Window.UpdateLayout();
+            fitBox.IsChecked = false; Click(fitBox); await Shown();
+            Expect(Math.Abs(view.ZoomFactor - 1) < 0.001 && !designer.Prefs().PreviewFitGame, "unticked, the game is shown at its own size again");
+            fitBox.IsChecked = true; Click(fitBox);
+            await Script("Wysicraft.app.setViewport(0,0)");
+            // Opening a screen of another size changes the fit's zoom, which resizes the page without a window resize:
+            // the game must lay itself out again, or it draws small in a corner and clicks land in the wrong place.
+            await Shown(); double zoomBeforeSwitch = view.ZoomFactor;
+            await Script("(() => { const a = Wysicraft._app, other = Object.keys(a.screens).find(k => k !== a.ui.id); a.screens[other].size = { width: 256, height: 224 }; a.api().open(other); })()");
+            string laid = "";
+            for (int i = 0; i < 40; i++)
+            {
+                await Task.Delay(50);
+                laid = JsonNode.Parse(await Script("JSON.stringify((() => { const a = Wysicraft._app; return { cw: a.canvas.clientWidth, ch: a.canvas.clientHeight, W: a.container.clientWidth, H: a.container.clientHeight, dpr: a.dpr, real: window.devicePixelRatio, screen: a.ui.id }; })())"))!.GetValue<string>();
+                var l = JsonNode.Parse(laid)!;
+                if (Math.Abs((double)l["cw"]! - (double)l["W"]!) <= 1 && Math.Abs((double)l["ch"]! - (double)l["H"]!) <= 1 && Math.Abs((double)l["dpr"]! - (double)l["real"]!) < 0.001 && i > 10) break;
+            }
+            var after = JsonNode.Parse(laid)!;
+            Expect(Math.Abs((double)after["cw"]! - (double)after["W"]!) <= 1 && Math.Abs((double)after["ch"]! - (double)after["H"]!) <= 1 && Math.Abs((double)after["dpr"]! - (double)after["real"]!) < 0.001,
+                "after opening a screen of another size, the game is laid out for the page it has now: " + laid);
+            Expect(Math.Abs(view.ZoomFactor - zoomBeforeSwitch) > 0.01, $"(the switch changed the fit: zoom {zoomBeforeSwitch:0.###} → {view.ZoomFactor:0.###})");
+        }
+        /// <summary>The window around the game (toolbars and console), for a look at the layout; the game itself draws elsewhere.</summary>
+        internal void SaveWindowPicture(string path)
+        {
+            Window.UpdateLayout(); var root = (FrameworkElement)Window.Content;
+            var bitmap = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
+            var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(bitmap)); using var file = File.Create(path); png.Save(file);
+        }
         internal async Task VerifyEventTestAsync(string element, string eventName, string expected)
         {
             await WaitReady(); TriggerTest(element, eventName); await Task.Delay(100); await WaitReady();
@@ -318,7 +492,9 @@ public partial class MainWindow
     internal async Task VerifyPreviewAsync(string capture)
     {
         var preview = new PreviewSession(this, Json.CloneProject(project), ui.Id);
-        try { preview.Window.Show(); await preview.VerifyClickAsync(); await preview.CaptureCanvas(capture); }
-        finally { await preview.CloseAsync(); }
+        var prefs = Prefs(); bool muted = prefs.PreviewMuted, minimized = prefs.PreviewConsoleMinimized, fitGame = prefs.PreviewFitGame;
+        prefs.PreviewConsoleMinimized = false;
+        try { preview.Window.Show(); await preview.VerifyClickAsync(); await preview.VerifyWindowToolsAsync(); await preview.CaptureCanvas(capture); preview.SaveWindowPicture(capture + ".window.png"); }
+        finally { await preview.CloseAsync(); prefs.PreviewMuted = muted; prefs.PreviewConsoleMinimized = minimized; prefs.PreviewFitGame = fitGame; SavePrefs(); }
     }
 }

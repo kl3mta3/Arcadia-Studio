@@ -30,6 +30,8 @@
 - [[Exporting and installing|Exporting-and-Installing]]
 - [[Web and desktop apps|Web-and-Desktop-Apps]]
 - [[Publishing to Arcadia|Publishing-to-Arcadia]]
+- [[Leaderboard pages|Leaderboard-Pages]]
+- [[Publishing to itch.io|Publishing-to-itch.io]]
 - [[Advanced tools|Advanced-Tools]]
 - [[KubeJS|KubeJS-Integration]]
 - [[Security|Security-and-Permissions]]
@@ -37,5 +39,6 @@
 **Extras**
 - [[AI assistants (MCP)|MCP-and-AI-Assistants]]
 - [[Keyboard shortcuts|Keyboard-Shortcuts]]
+- [[Glossary|Glossary]]
 - [[Addon API|Addon-API]]
 - [[Limits and troubleshooting|Limits-and-Troubleshooting]]

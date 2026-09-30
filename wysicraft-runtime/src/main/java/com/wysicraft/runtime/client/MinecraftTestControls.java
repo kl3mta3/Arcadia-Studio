@@ -44,7 +44,7 @@ public final class MinecraftTestControls {
         var key=InputConstants.getKey(e.getKeyCode(),e.getScanCode());
         if(OPEN.isActiveAndMatches(key)) { e.setCanceled(true); command(true); }
         else if(CLOSE.isActiveAndMatches(key)) { e.setCanceled(true); command(false); }
-        else if(CONTROLS.isActiveAndMatches(key)) { e.setCanceled(true); if(e.getScreen() instanceof ControlScreen) e.getScreen().onClose(); else if(e.getScreen() instanceof DynamicScreen) toolbar=!toolbar; else Minecraft.getInstance().setScreen(new ControlScreen()); }
+        else if(CONTROLS.isActiveAndMatches(key)) { e.setCanceled(true); if(e.getScreen() instanceof ControlScreen) e.getScreen().onClose(); else if(DynamicScreen.of(e.getScreen()) != null) toolbar=!toolbar; else Minecraft.getInstance().setScreen(new ControlScreen()); }
     }
     static void command(boolean open) {
         if(!available()) return;
@@ -55,7 +55,7 @@ public final class MinecraftTestControls {
         mc.player.connection.sendCommand(MinecraftTestHarness.project()+(open?".open":".close"));
     }
     private static void render(ScreenEvent.Render.Post e) {
-        if(!(e.getScreen() instanceof DynamicScreen) || !available() || !toolbar) return;
+        if(!(DynamicScreen.of(e.getScreen()) != null) || !available() || !toolbar) return;
         var g=e.getGuiGraphics(); var font=Minecraft.getInstance().font;
         g.pose().pushPose(); g.pose().translate(0,0,500);
         for(int i=0;i<2;i++) {
@@ -67,7 +67,7 @@ public final class MinecraftTestControls {
         g.pose().popPose();
     }
     private static void click(ScreenEvent.MouseButtonPressed.Pre e) {
-        if(!(e.getScreen() instanceof DynamicScreen) || !available() || !toolbar || e.getButton()!=0 || e.getMouseY()<5 || e.getMouseY()>=25) return;
+        if(!(DynamicScreen.of(e.getScreen()) != null) || !available() || !toolbar || e.getButton()!=0 || e.getMouseY()<5 || e.getMouseY()>=25) return;
         if(e.getMouseX()>=5 && e.getMouseX()<67) { e.setCanceled(true); command(true); }
         else if(e.getMouseX()>=71 && e.getMouseX()<133) { e.setCanceled(true); command(false); }
     }

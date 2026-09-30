@@ -17,8 +17,13 @@ public sealed record Limits(int ScreenSize, int Elements, int Screens, int MinTi
     /// Elements is measured, not chosen: drawing plain controls costs about 0.63 ms per thousand and stays linear to
     /// 16,000 (10.7 ms, two thirds of a 60 fps frame), then collapses to 37 ms at 24,000. Controls with text cost
     /// about 2.6x that. So 16,000 is the last count the renderer carries, and Validation.Advice says so from
-    /// <see cref="HeavyScreen"/> upwards rather than refusing. tests/web/elements.html re-measures it.</summary>
-    public static readonly Limits Web = new(16384, 16000, 1000, 16, 10000, 1024 * 1024);
+    /// <see cref="HeavyScreen"/> upwards rather than refusing. tests/web/elements.html re-measures it.
+    ///
+    /// ScriptOps (screen changes one script run may ask for) is measured too: 0.4-0.8 µs each, end to end, and linear
+    /// (10,000 took 4-7.5 ms, 100,000 took 38-71 ms). There is no ceiling where it breaks; the cap only stops a
+    /// runaway loop. A script run every frame at 60 fps should stay near 10,000-20,000; a one-off event (building a
+    /// level) can use the rest.</summary>
+    public static readonly Limits Web = new(16384, 16000, 1000, 16, 100000, 1024 * 1024);
     /// <summary>Where a screen starts costing a real share of a frame to draw: 4,000 controls is 2.4 ms of plain
     /// panels, or 6.2 ms once they have text on them. Advice, not an error.</summary>
     public const int HeavyScreen = 4000;
@@ -48,8 +53,13 @@ public static class Compatibility
         foreach (var (screen, element, sound) in SoundAssets.Uses(p))
             if (SoundAssets.Find(p, sound) is string file && !file.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)) Add(screen, element, $"plays {System.IO.Path.GetFileName(file)} (Minecraft only plays .ogg sounds)");
         if (p.Manifest.Inputs.Count > 0) Add("", "", $"{p.Manifest.Inputs.Count} input(s) in the Inputs window");
+        if (p.Manifest.GameVariables.Count > 0) Add("", "", $"{p.Manifest.GameVariables.Count} game variable(s) in Project settings (Minecraft screens keep only their own variables)");
         foreach (var (path, source) in Limits.UsedScripts(p))
+        {
             if (Limits.SizeOf(source) > m.ScriptBytes) Add("", "", $"script {path} is {Limits.SizeOf(source) / 1024} KiB (Minecraft allows {m.ScriptBytes / 1024} KiB)");
+            if (ScriptShape.UsesSave(source)) Add("", "", $"script {path} saves with ctx.save (saved games are web and desktop only)");
+            if (path.StartsWith("scripts/client/") && ScriptShape.UsesOpen(source)) Add("", "", $"client script {path} opens a screen with ui.open (in Minecraft, use an open_ui action or a server script)");
+        }
         if (p.Screens.Count(s => !s.IsComponent) > m.Screens) Add("", "", $"{p.Screens.Count} screens (Minecraft allows {m.Screens})");
         foreach (var ui in p.Screens)
         {

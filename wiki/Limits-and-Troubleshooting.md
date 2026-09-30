@@ -17,6 +17,10 @@ These are Minecraft's limits. Projects made for web and desktop can go further; 
 | State graphs | 64 per screen, 64 states each, 16 ways out of a state (web & desktop) |
 | Fonts | `.ttf`, `.otf`, `.woff2`, `.woff`, 8 MiB each (web & desktop) |
 | Script size | 256 KiB each (web & desktop: 1 MiB; only attached scripts are exported) |
+| Screen changes per script run | 128 (web & desktop: 100,000). Every `ctx.ui` call and `ctx.state.set` counts; going over applies none of that run's changes. See [[Scripting limits|Scripting#limits]] |
+| Time per script run | 2 seconds |
+| Saved games (`ctx.save`) | None in Minecraft (web & desktop: text only, 512 KB per game) |
+| Label text | One line: longer text is cut to fit the label. Use several labels for a paragraph |
 | Images | PNG, 8192 × 8192 px and 32 MiB each |
 | Project / export size | 256 MiB total, 2048 files |
 | Download size (web & desktop) | Advice, never a refusal: the Export dialog and **Validate** warn past 100 MB for a web game and 500 MB for a desktop app. See [[How big should a game be?|Web-and-Desktop-Apps#how-big-should-a-game-be]] |
@@ -69,7 +73,25 @@ Click **Validate** and fix the errors listed in Output. Common causes: an action
 They've used up the per-player script time budget; it refills within seconds, and the server log mentions throttling. Make scripts lighter, or raise the event's cooldown.
 
 **My AI assistant can't connect.**
-The assistant must run on this computer and support MCP over HTTP. After restarting Arcadia Studio or the MCP server, copy the new configuration: the port and token change every time. See [[AI assistants (MCP)|MCP-and-AI-Assistants]].
+The assistant must run on this computer and support MCP over HTTP. The port (4730) and token stay the same across restarts, so a configuration you copied once keeps working. Copy it again after **Regenerate token**, or if another program was using port 4730 (then a free port is used, and **Copy connection config** shows it). See [[AI assistants (MCP)|MCP-and-AI-Assistants]].
+
+**My script's variables reset on every event.**
+Each event runs the script from the top unless the project keeps script state. In a web & desktop project, tick **Scripts keep their variables between events** in Project settings. Otherwise keep values in `ctx.state`. See [[Where to keep state|Scripting#where-to-keep-state]].
+
+**A script says it asked for more than 100,000 (or 128) screen changes.**
+One run made too many `ctx.ui` calls or `ctx.state.set` calls, so none of them were applied. Spread the work over several ticks, or let velocities, `seek`, paths and animations move things for you. 128 is Minecraft's limit and applies to projects made for Minecraft or both.
+
+**Resizing the window or turning the phone put my game back to the start.**
+Games exported with earlier versions of Arcadia Studio put every control back where the editor had it when the window changed size. Export the game again: controls a script or the player moved now stay where they are.
+
+**The game forgets its progress when the page reloads.**
+Save it with `ctx.save`; see [[Saved games|Scripting#saved-games-web--desktop]]. Screen variables and script variables last only while the game is open.
+
+**My second movement component stopped the first one working.**
+Movement components used to share the screen's one `tick` event. They now each tick on their own control, and opening an older project moves them over.
+
+**I changed the project's ID and a script can't find a sound or picture.**
+Changing the ID moves the project's files and updates every control and action, but scripts are text: one that names `"old_id:..."` must be changed to the new ID. Project settings lists them when you change the ID, and **Validate** points out each one.
 
 **The editor crashed.**
 Reopen it and use **File → Recover unsaved project…**. A crash log is saved in `%LOCALAPPDATA%\Arcadia Studio\Logs`.

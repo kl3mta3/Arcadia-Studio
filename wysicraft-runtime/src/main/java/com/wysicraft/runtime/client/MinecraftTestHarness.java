@@ -50,8 +50,8 @@ public final class MinecraftTestHarness {
     private static void tick(ClientTickEvent.Post event) {
         var mc = Minecraft.getInstance();
         mc.options.pauseOnLostFocus = false;
-        activeUi = mc.screen instanceof DynamicScreen screen ? screen.ui.id : "";
-        if (mc.screen instanceof DynamicScreen screen) {
+        activeUi = DynamicScreen.of(mc.screen) instanceof DynamicScreen screen ? screen.ui.id : "";
+        if (DynamicScreen.of(mc.screen) instanceof DynamicScreen screen) {
             var snapshot = new LinkedHashMap<String,String>();
             var data = new LinkedHashMap<String,String>();
             for (var element : screen.ui.elements) { snapshot.put(element.id,element.text); data.put(element.id,element.type.equals("item")?element.item:element.value); }
@@ -118,19 +118,19 @@ public final class MinecraftTestHarness {
         }
         if (request != null && "click".equals(request.kind) && (mc.getSingleplayerServer() != null || LOCAL_SERVER)) {
             lastRequest = request.id;
-            if (mc.screen instanceof DynamicScreen screen && screen.ui.element(request.command) != null) {
+            if (DynamicScreen.of(mc.screen) instanceof DynamicScreen screen && screen.ui.element(request.command) != null) {
                 var element = screen.ui.element(request.command);
                 screen.testClick(element);
                 lastResult = "Clicked " + request.command;
             } else lastError = "No active UI element: " + request.command;
             request = null;
         }
-        if(request!=null && "row_click".equals(request.kind) && mc.screen instanceof DynamicScreen screen) {
+        if(request!=null && "row_click".equals(request.kind) && DynamicScreen.of(mc.screen) instanceof DynamicScreen screen) {
             String[] parts=request.command.split(":");
             try { var element=screen.ui.element(parts[0]); if(element==null || !element.type.equals("item_list")) throw new IllegalArgumentException("Expected Item List"); screen.testRowClick(element,Integer.parseInt(parts[2]),parts[1].equals("secondary")); lastResult="Clicked row "+request.command; } catch(Exception ex) {lastError=ex.getMessage();}
             lastRequest=request.id; request=null;
         }
-        if(request!=null && "type".equals(request.kind) && mc.screen instanceof DynamicScreen screen) {
+        if(request!=null && "type".equals(request.kind) && DynamicScreen.of(mc.screen) instanceof DynamicScreen screen) {
             String[] parts=request.command.split(":",2); var element=screen.ui.element(parts[0]);
             if(element!=null && element.type.equals("textbox") && parts.length==2) {screen.testClick(element); for(char c:parts[1].toCharArray()) screen.charTyped(c,0);}
             lastRequest=request.id; request=null;

@@ -32,7 +32,11 @@ var links = new List<(string Page, string Href)>();
 foreach (string page in pages) {
     string file = Path.Combine(wiki, page + ".md");
     if (!File.Exists(file)) { Console.Error.WriteLine("Sidebar page missing: " + page); return 1; }
-    string markdown = wikiLink.Replace(File.ReadAllText(file), m => { var t = Target(m); string href = "#" + Anchor(t.Page, t.Section); links.Add((page, href)); return "[" + m.Groups[1].Value.Trim() + "](" + href + ")"; });
+    // Links within the page ("[Profiler](#profiler)", the Glossary's letters) point at this page's own headings, which
+    // the one-page manual prefixes with the page name; they're checked like any other link. (Done before the wiki
+    // links below are turned into "#Page" links, so those aren't touched.)
+    string source = Regex.Replace(File.ReadAllText(file), @"\]\(#([\w\-]+)\)", m => { string href = "#" + Anchor(page, m.Groups[1].Value); links.Add((page, href)); return "](" + href + ")"; });
+    string markdown = wikiLink.Replace(source, m => { var t = Target(m); string href = "#" + Anchor(t.Page, t.Section); links.Add((page, href)); return "[" + m.Groups[1].Value.Trim() + "](" + href + ")"; });
     markdown = Regex.Replace(markdown, @"\]\(images/([^)\s]+)\)", m => "](" + DataUri(Path.Combine(wiki, "images", m.Groups[1].Value)) + ")");
     var document = Markdown.Parse(markdown, pipeline);
     foreach (var h in document.Descendants<HeadingBlock>()) {

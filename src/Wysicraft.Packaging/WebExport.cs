@@ -27,6 +27,7 @@ public static class WebExport
         var minecraftTextures = elements.Select(e => e.Texture).Concat(handlers.SelectMany(h => h.Client.Actions.Concat(h.Server.Actions)).Where(a => a.Type == "change_texture").Select(a => a.Value))
             .Where(t => t.Length > 0 && !t.StartsWith(project.Manifest.Id + ":") && !TextureAssets.TryGet(project, t, out _)).Distinct().ToList();
         if (minecraftTextures.Count > 0) warnings.Add($"{minecraftTextures.Count} Minecraft texture(s) can't be included (they belong to Mojang), so they show nothing: {string.Join(", ", minecraftTextures.Take(4))}{(minecraftTextures.Count > 4 ? ", …" : "")}. Import your own PNGs instead.");
+        if (elements.Any(e => e.Type == "slots")) warnings.Add("Item slots hold real items only in Minecraft. Web and desktop apps leave them out.");
         if (elements.Any(e => e.Type is "item" or "item_list")) warnings.Add("Item icons show a placeholder. To show real icons, add images named like the item under textures/item (for example assets/<namespace>/textures/item/diamond.png).");
         var server = handlers.SelectMany(h => h.Server.Actions).Where(a => a.Type is "command" or "server_function" or "player_inventory").Select(a => a.Type).Distinct().ToList();
         if (server.Count > 0) warnings.Add($"Server actions ({string.Join(", ", server)}) have no Minecraft to run in: they are passed to the hooks in host.js (onCommand, onServerFunction), where your own code can handle them.");
@@ -96,7 +97,7 @@ public static class WebExport
                     if (script.Length > 0 && !scripts.ContainsKey(script) && project.Scripts.TryGetValue(script, out var code) && script.StartsWith("scripts/") && script.EndsWith(".js") && Limits.SizeOf(code) <= Limits.For(project).ScriptBytes)
                         scripts[script] = code;
         }
-        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, screens, components, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
+        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, keepScriptState = manifest.Target == "web" && manifest.KeepScriptState, gameVariables = manifest.GameVariables, savedVariables = manifest.SavedVariables, screens, components, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
         // JSON inside a <script>: escape "</" so a string can never end the script block.
         string projectJs = "window.WYSICRAFT_PROJECT = " + JsonSerializer.Serialize(data).Replace("</", "<\\/") + ";\n";
         string hostJs = options.HostScript ?? HostTemplate(options.Desktop);
@@ -175,8 +176,11 @@ window.wysicraftHost = {
   closeOnEscape: false,
   // Player details that server scripts see through ctx.player.
   player: { name: 'Player', uuid: '00000000-0000-0000-0000-000000000000', position: { x: 0, y: 0, z: 0, dimension: 'app' }, inventory: [], permission: 0 },
-  // Force a GUI scale (1, 2, 3…) instead of the largest that fits the window.
+  // Force a GUI scale (1, 2, 3…). 0 fits the game to the page.
   guiScale: 0,
+  // Saved games (ctx.save) are kept in this browser's storage under the game's ID. To keep them somewhere else, give
+  // load(gameId), returning the saved text or null, and store(gameId, text):
+  // save: { load(id) { return localStorage.getItem('my-site:' + id); }, store(id, text) { localStorage.setItem('my-site:' + id, text); } },
   // Text font (Minecraft's font isn't included).
   fontFamily: '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
 };

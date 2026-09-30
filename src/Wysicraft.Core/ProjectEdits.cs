@@ -26,16 +26,21 @@ public sealed class ProjectEdit
 public static class ProjectEdits
 {
     static readonly JsonSerializerOptions Strict = new(Json.Options) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
-    // After the project ID changes, moves images from assets/<old>/ to assets/<new>/ and updates every
-    // <old>:... texture, font and change_texture reference so controls keep their images.
-    public static void MoveAssetNamespace(Project project,string oldId) {
-        string newId=project.Manifest.Id;if(oldId==newId)return;
+    // After the project ID changes, moves images, sounds and fonts from assets/<old>/ to assets/<new>/ and updates every
+    // <old>:... reference so the game keeps them: textures, fonts, Sound controls, change_texture and play_sound
+    // actions, particle textures, on screens, components and leaderboard pages. Scripts are text and aren't rewritten;
+    // the ones naming the old ID are returned (and Validate points them out) so the person can change them.
+    public static List<string> MoveAssetNamespace(Project project,string oldId) {
+        string newId=project.Manifest.Id;if(oldId==newId)return [];
         string Rename(string value)=>value.StartsWith(oldId+":")?newId+value[oldId.Length..]:value;
         project.Assets=project.Assets.ToDictionary(p=>p.Key.StartsWith("assets/"+oldId+"/")?"assets/"+newId+"/"+p.Key[(8+oldId.Length)..]:p.Key,p=>p.Value);
-        foreach(var s in project.Screens) {
-            foreach(var e in s.Elements) { e.Texture=Rename(e.Texture); e.Font=Rename(e.Font); }
-            foreach(var ev in s.Events.Values.Concat(s.Elements.SelectMany(e=>e.Events.Values))) foreach(var h in new[]{ev.Client,ev.Server}) foreach(var a in h.Actions) if(a.Type=="change_texture") a.Value=Rename(a.Value);
+        foreach(var s in project.Screens.Concat(project.Leaderboards)) {
+            foreach(var e in s.Elements) { e.Texture=Rename(e.Texture); e.Font=Rename(e.Font); e.Sound=Rename(e.Sound); }
+            foreach(var ev in s.Events.Values.Concat(s.Elements.SelectMany(e=>e.Events.Values))) foreach(var h in new[]{ev.Client,ev.Server}) foreach(var a in h.Actions) if(a.Type is "change_texture" or "play_sound") a.Value=Rename(a.Value);
         }
+        foreach(var fx in project.Manifest.Particles) fx.Texture=Rename(fx.Texture);
+        var mention=new System.Text.RegularExpressions.Regex("['\"`]"+System.Text.RegularExpressions.Regex.Escape(oldId)+":[a-z0-9_./-]+['\"`]");
+        return project.Scripts.Where(p=>mention.IsMatch(p.Value)).Select(p=>p.Key).OrderBy(k=>k,StringComparer.Ordinal).ToList();
     }
     public static Project Apply(Project original, IReadOnlyList<ProjectEdit> edits)
     {
@@ -43,7 +48,8 @@ public static class ProjectEdits
         var project = Json.Clone(original);
         foreach (var edit in edits)
         {
-            UiDefinition Screen() => project.Screens.SingleOrDefault(s => s.Id == edit.Screen) ?? throw new InvalidDataException("Screen not found: " + edit.Screen);
+            // Element edits reach leaderboard pages too, by their ID (a screen of the same ID comes first).
+            UiDefinition Screen() => project.Screens.SingleOrDefault(s => s.Id == edit.Screen) ?? project.Leaderboards.SingleOrDefault(b => b.Id == edit.Screen) ?? throw new InvalidDataException("Screen or leaderboard not found: " + edit.Screen);
             switch (edit.Kind)
             {
                 case "add_component_template": ComponentStarters.Add(project,edit.Key);break;
@@ -69,7 +75,30 @@ public static class ProjectEdits
                     if (screen.Id != edit.Screen) throw new InvalidDataException("Screen ID must match screen; renaming IDs is not supported here.");
                     if (old == null) project.Screens.Add(screen); else project.Screens[project.Screens.IndexOf(old)] = screen;
                     break;
-                case "delete_screen": project.Screens.Remove(Screen()); break;
+                case "delete_screen": project.Screens.Remove(project.Screens.SingleOrDefault(s => s.Id == edit.Screen) ?? throw new InvalidDataException("Screen not found: " + edit.Screen)); break;
+                case "new_leaderboard":
+                {
+                    if (!Validation.Id(edit.Key)) throw new InvalidDataException("A leaderboard ID uses lowercase letters, digits and _, starting with a letter.");
+                    if (project.Leaderboards.Any(b => b.Id == edit.Key) || project.Screens.Any(s => s.Id == edit.Key)) throw new InvalidDataException(edit.Key + " is already a screen or leaderboard.");
+                    bool starter = edit.Data.ValueKind != JsonValueKind.Object || !edit.Data.TryGetProperty("starter", out var s) || s.GetBoolean();
+                    var board = starter ? LeaderboardPages.Starter(edit.Key) : new UiDefinition { Id = edit.Key, IsLeaderboard = true, Size = new() { Width = 640, Height = 400 }, Elements = [] };
+                    if (edit.Data.ValueKind == JsonValueKind.Object && edit.Data.TryGetProperty("title", out var title)) board.Title = title.GetString() ?? "";
+                    project.Leaderboards.Add(board);
+                    break;
+                }
+                case "upsert_leaderboard":
+                {
+                    var was = project.Leaderboards.SingleOrDefault(b => b.Id == edit.Screen) ?? throw new InvalidDataException("Leaderboard not found: " + edit.Screen + " (make one with new_leaderboard)");
+                    var board = Patch(was, edit.Data, edit.Replace, new UiDefinition { Id = edit.Screen, IsLeaderboard = true });
+                    if (board.Id != edit.Screen) throw new InvalidDataException("Leaderboard ID must match screen; renaming isn't supported here.");
+                    board.IsLeaderboard = true; board.IsComponent = false;
+                    project.Leaderboards[project.Leaderboards.IndexOf(was)] = board;
+                    break;
+                }
+                case "delete_leaderboard":
+                    if (project.Leaderboards.RemoveAll(b => b.Id == edit.Key) == 0) throw new InvalidDataException("Leaderboard not found: " + edit.Key);
+                    if (project.Publishing.LeaderboardPage == "board:" + edit.Key) project.Publishing.LeaderboardPage = "";
+                    break;
                 case "upsert_element":
                     var target = Screen(); var before = target.Elements.SingleOrDefault(e => e.Id == edit.Element);
                     var element = Patch(before ?? new Element { Id = edit.Element },edit.Data,edit.Replace,new Element { Id = edit.Element });
@@ -215,6 +244,15 @@ public static class ProjectEdits
             }
         }
         project.Manifest.Ui = project.Screens.Select(s => s.Id).ToList();
+        // A leaderboard page holds page pieces and leaderboard widgets only, with IDs of its own.
+        foreach (var board in project.Leaderboards)
+        {
+            var odd = board.Elements.FirstOrDefault(e => !LeaderboardPages.Types.Contains(e.Type));
+            if (odd != null) throw new InvalidDataException($"{board.Id}.{odd.Id}: a leaderboard page holds labels, images, panels, shapes and leaderboard widgets ({string.Join(", ", LeaderboardPages.Widgets)}), not a {odd.Type}.");
+            var twice = board.Elements.GroupBy(e => e.Id).FirstOrDefault(g => g.Count() > 1);
+            if (twice != null) throw new InvalidDataException($"{board.Id}: two controls are called {twice.Key}.");
+            foreach (var e in board.Elements.Where(e => e.Type.StartsWith("lb_"))) e.Board ??= new BoardWidget();
+        }
         var errors = Validation.Errors(project);
         if (errors.Count > 0) throw new InvalidDataException(string.Join("\n",errors));
         return project;

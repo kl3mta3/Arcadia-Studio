@@ -21,7 +21,7 @@ public partial class MainWindow
             foreach(var entry in entries)menu.Items.Add(entry switch {string id when id=="-"=>new Separator(),string id=>CommandItem(id),_=>entry});
             TrackChecks(menu);Menus.Items.Add(menu);return menu;
         }
-        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","file.looseCopy","-","file.export","file.exportKube","file.publish","-","file.exit");
+        Top("_File","file.new","file.open","file.recover","-","file.save","file.saveAs","file.looseCopy","-","file.export","file.exportKube","file.publish","file.publishItch","-","file.exit");
         Top("_Edit","edit.undo","edit.redo","-","edit.cut","edit.copy","edit.paste","edit.duplicate","edit.delete","edit.selectAll","-",
             "edit.group","edit.ungroup","edit.newGroup","edit.isolate","-","edit.attach","edit.detach","edit.toggleLock","-","edit.rename","-",OrderMenu(),ArrangeMenu());
         MenuItem OrderMenu(){var order=new MenuItem {Header="Arrange"};foreach(var id in new[]{"edit.bringToFront","edit.bringForward","edit.sendBackward","edit.sendToBack"})order.Items.Add(CommandItem(id));return order;}
@@ -30,7 +30,7 @@ public partial class MainWindow
             var item=new MenuItem {Header=title};item.Click+=(_,_)=>Guard(()=>ShowDock(id));panels.Items.Add(item);
         }
         Top("_View",panels,"view.resetLayout","-","view.zoomIn","view.zoomOut","view.zoomActual","view.zoomFit","-","view.grid","view.snap","-","view.shortcuts","view.askLockChildren");
-        advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.toolbox");
+        advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.leaderboard.new","advanced.leaderboard.open","advanced.leaderboard.import","-","advanced.toolbox");
         Top("_Project","project.preview","project.test","project.validate","-","project.screen","project.settings","-","project.importTexture","project.pixelEditor","project.spriteSheet","-","project.musicMaker","project.soundEffects","project.importAudio","-","project.mcp");
         Top("_Help","help.manual","help.scriptApi","view.shortcuts","-","help.updates","help.autoUpdates","-","help.about");
 

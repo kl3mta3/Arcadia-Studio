@@ -21,17 +21,22 @@ public static class DesktopExport
     /// Runs on Windows 10/11 with nothing else to install.</summary>
     public static void WindowsApp(Project project, string zipPath, string appHostExe)
     {
+        string name = AppName(project); var files = WindowsAppFiles(project, appHostExe);
+        WriteZip(zipPath, zip => { foreach (var (path, bytes) in files) Add(zip, $"{name}/{path}", bytes); });
+    }
+    /// <summary>The Windows app's files, its program at the top: "Name.exe", "app.ini" and "app/…" (the web export).
+    /// The ZIP export puts them in a "Name" folder; itch.io takes them as they are.</summary>
+    public static Dictionary<string, byte[]> WindowsAppFiles(Project project, string appHostExe)
+    {
         if (!File.Exists(appHostExe)) throw new FileNotFoundException("The Windows app host is missing from this Arcadia Studio install.", appHostExe);
         var web = WebExport.Files(project, new(Desktop: true)); string name = AppName(project); var (w, h) = WebExport.WindowSize(project);
         var ini = $"title={name.Replace("\n", " ")}\nid={Slug(project)}\nwidth={w}\nheight={h}\nbackground=#15181D\n";
-        WriteZip(zipPath, zip => {
-            Add(zip, $"{name}/{name}.exe", File.ReadAllBytes(appHostExe));
-            Add(zip, $"{name}/app.ini", Encoding.UTF8.GetBytes(ini));
-            // The host has the WebView2 SDK loader linked in; its license asks for the notice to travel with it.
-            string notice = Path.Combine(Path.GetDirectoryName(appHostExe)!, "WysicraftAppHost-NOTICES.txt");
-            if (File.Exists(notice)) Add(zip, $"{name}/THIRD-PARTY-NOTICES.txt", File.ReadAllBytes(notice));
-            foreach (var (path, bytes) in web) Add(zip, $"{name}/app/{path}", bytes);
-        });
+        var files = new Dictionary<string, byte[]> { [$"{name}.exe"] = File.ReadAllBytes(appHostExe), ["app.ini"] = Encoding.UTF8.GetBytes(ini) };
+        // The host has the WebView2 SDK loader linked in; its license asks for the notice to travel with it.
+        string notice = Path.Combine(Path.GetDirectoryName(appHostExe)!, "WysicraftAppHost-NOTICES.txt");
+        if (File.Exists(notice)) files["THIRD-PARTY-NOTICES.txt"] = File.ReadAllBytes(notice);
+        foreach (var (path, bytes) in web) files["app/" + path] = bytes;
+        return files;
     }
 
     // ---- Electron ----

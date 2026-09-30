@@ -26,6 +26,7 @@ public partial class MainWindow
         Add("file.export","File","Export…","Ctrl+E",Export);
         Add("file.exportKube","File","Export for KubeJS…","",ExportKube);
         Add("file.publish","File","Publish to Arcadia…","",PublishToArcadia);
+        Add("file.publishItch","File","Publish to itch.io…","",PublishToItch);
         Add("file.exit","File","Exit","",Close);
         Add("edit.undo","Edit","Undo","Ctrl+Z",history.Undo);
         Add("edit.redo","Edit","Redo","Ctrl+Y",history.Redo);
@@ -73,6 +74,9 @@ public partial class MainWindow
         Add("advanced.layers","Advanced","Collision layers…","",ShowCollisionLayers);
         Add("advanced.stateGraphs","Advanced","State graphs…","",ShowStateGraphsWindow);
         Add("advanced.shaders","Advanced","Shaders…","",ShowShadersWindow);
+        Add("advanced.leaderboard.new","Advanced","Create leaderboard","",()=>CreateLeaderboard());
+        Add("advanced.leaderboard.open","Advanced","Open leaderboard…","",ChooseLeaderboard);
+        Add("advanced.leaderboard.import","Advanced","Import leaderboard…","",()=>ImportLeaderboard());
         Add("advanced.inputCreator","Advanced","Input creator (with the assistant)…","",ShowInputCreator);
         Add("advanced.particles","Advanced","Particles…","",ShowParticlesWindow);
         Add("advanced.particleMaker","Advanced","Particle maker…","",()=>OpenParticleMaker());

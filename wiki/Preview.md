@@ -17,8 +17,10 @@ Preview runs your project on the same engine as [[web page, Windows and Electron
 | --- | --- |
 | **Reset preview** | Restores the screen's starting values. |
 | **Clear console** | Empties the console. |
-| **Layout size (GUI pixels)** + **Apply size** | Lays the screen out at another size, to test [[anchors|Anchors-and-Responsive-Layouts]]. Only works when **Responsive layout** is on for the screen. Doesn't change your design. |
-| **Console** | Clicks, actions, script output (`console.log`) and errors with file and line. |
+| **Mute** | Turns the preview's sound off (the game itself is unchanged). Remembered for the next preview. |
+| **Layout size (GUI pixels)** + **Apply size** | Lays the screen out at another size, to test [[anchors|Anchors-and-Responsive-Layouts]]. Only works when **Responsive layout** is on for the screen. Doesn't change your design. **Reset size** lays it out for the window again. |
+| **Fit game to window** | On (the default): the game is drawn scaled to fill the Preview window, squeezed down when the window is smaller than the game and enlarged when it's bigger, and it follows as you resize the window or fold the console away. Only Preview's zoom changes: the window keeps its size and the game keeps its own size and layout. A responsive screen already lays itself out for the window, so it's only zoomed after **Apply size**. Preview also opens no bigger than your screen. |
+| **Console** | Clicks, actions, script output (`console.log`) and errors with file and line. **Minimize ▾** on its bar folds the console and JavaScript panels away to give the game the room; while they're folded the bar counts new lines (and says when there are errors). **Restore ▴** brings them back. Remembered for the next preview. |
 | **JavaScript scratchpad** + **Run JavaScript** | Try script code instantly against the previewed screen. |
 | **Profiler** | Shows where each frame's time goes, over the game. See [Profiler](#profiler). |
 

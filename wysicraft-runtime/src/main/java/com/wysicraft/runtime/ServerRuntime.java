@@ -22,6 +22,19 @@ public final class ServerRuntime {
         Session(Ui ui) { this.ui = ui.id; definition = ui.copy(); state = new HashMap<>(ui.variables); }
     }
     public void forget(UUID player) { sessions.remove(player); cooldowns.remove(player); scriptBudget.forget(player); }
+    /** Whether this player's open screen is still the one with this session token (item slot containers check it). */
+    public boolean hasSession(ServerPlayer player, String token) { Session s = sessions.get(player.getUUID()); return s != null && s.token.equals(token); }
+    /** Whether a control on the player's open screen is shown (or usable), by the same rules events are checked with. */
+    private boolean shown(ServerPlayer player, String token, String id, boolean usable) {
+        Session s = sessions.get(player.getUUID()); if (s == null || !s.token.equals(token)) return false;
+        Element e = s.definition.element(id); if (e == null) return false;
+        java.util.List<Element> chain = new java.util.ArrayList<>(com.wysicraft.runtime.model.ContainerTree.ancestors(s.definition, e)); chain.add(e);
+        for (Element c : chain) {
+            if (!c.visible || !Expressions.evaluate(c.visibleIf, s.state)) return false;
+            if (usable && (!c.enabled || !Expressions.evaluate(c.enabledIf, s.state))) return false;
+        }
+        return true;
+    }
     public void openRelative(ServerPlayer player, String id) {
         Session current=sessions.get(player.getUUID());
         if (!id.contains(":") && current!=null) id=current.ui.substring(0,current.ui.indexOf(':')+1)+id;
@@ -80,6 +93,11 @@ public final class ServerRuntime {
             Ui client = ui.copy(); client.events.values().forEach(e -> e.server = new Handler()); client.elements.forEach(e -> e.events.values().forEach(v -> v.server = new Handler()));
             byte[] data = com.wysicraft.runtime.network.UiCompression.pack(Models.JSON.toJson(client));
             PacketDistributor.sendToPlayer(player,new Payloads.OpenUi(session.token,data));
+            // Item slots: the screen opens as a real container so the server moves the items (see WysicraftMenu).
+            if (com.wysicraft.runtime.menu.WysicraftMenu.hasSlots(session.definition)) {
+                String token = session.token;
+                com.wysicraft.runtime.menu.WysicraftMenu.open(player, token, session.definition, control -> shown(player, token, control, false), control -> shown(player, token, control, true));
+            }
             Event ev = ui.events.get("open"); if (ev != null) { mirror(session,ev.client); execute(player,session,ev.server); if (sessions.get(player.getUUID()) == session) navigate(player,ev.client); }
         } catch (Exception ex) { sessions.remove(player.getUUID()); Wysicraft.LOG.warn("Open UI {} failed: {}",id,ex.toString()); }
         finally { depth--; }
@@ -90,6 +108,8 @@ public final class ServerRuntime {
     private void close(ServerPlayer player, boolean notifyClient) {
         Session s = sessions.remove(player.getUUID()); if (s == null) return;
         if (notifyClient) PacketDistributor.sendToPlayer(player,new Payloads.CloseUi(s.token));
+        // Its item slots close with it; anything left in its storage or crafting grid goes back to the player.
+        if (player.containerMenu instanceof com.wysicraft.runtime.menu.WysicraftMenu menu && menu.token.equals(s.token)) player.closeContainer();
         Ui ui = packs.get(s.ui); if (ui != null && ui.events.containsKey("close") && depth < 16) { depth++; try { execute(player,s,ui.events.get("close").server); } finally { depth--; } }
     }
     public void event(ServerPlayer player, Payloads.UiEvent packet) {
@@ -183,6 +203,8 @@ public final class ServerRuntime {
                     case "player_uuid" -> player.getUUID().toString();
                     case "player_position" -> Models.JSON.toJson(Map.of("x",player.getX(),"y",player.getY(),"z",player.getZ(),"dimension",player.level().dimension().location().toString()));
                     case "player_inventory" -> WysicraftApi.inventoryJson(player);
+                    case "slot_items" -> WysicraftApi.slotsJson(player,argument);
+                    case "slot_take" -> { var p=argument.trim().split("\\s+"); if(p.length<2) throw new IllegalArgumentException("takeFromSlot needs an element, an item and a count"); yield Integer.toString(WysicraftApi.takeFromSlots(player,p[0],p[1],p.length>2?Integer.parseInt(p[2]):1)); }
                     case "player_permission" -> { int level=Integer.parseInt(argument); if(level<0 || level>4) throw new IllegalArgumentException("Permission level must be 0–4"); yield Boolean.toString(player.hasPermissions(level)); }
                     default -> throw new IllegalArgumentException(operation);
                 };

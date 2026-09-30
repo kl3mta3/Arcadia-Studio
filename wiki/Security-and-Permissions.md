@@ -46,4 +46,4 @@ Projects are read directly from their archives without extracting. Unsafe paths,
 
 ## The editor's AI connection (MCP)
 
-The MCP server only listens on your own computer (`127.0.0.1`) and requires a random access token that changes every time it starts. Browser pages can't connect. Treat the copied connection settings like a password: anyone with them can read and edit the open project. See [[AI assistants (MCP)|MCP-and-AI-Assistants]].
+The MCP server only listens on your own computer (`127.0.0.1`) and requires a random access token. The token is kept (encrypted for your Windows account) so saved assistant settings keep working; **Regenerate token** replaces it if it may have leaked. Browser pages can't connect. Treat the copied connection settings like a password: anyone with them can read and edit the open project. See [[AI assistants (MCP)|MCP-and-AI-Assistants]].

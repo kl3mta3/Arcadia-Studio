@@ -24,6 +24,11 @@ public final class ElementRenderers {
         Renderer panel = (s,g,e,x,y,w,h,hover) -> { };
         register("panel",panel); register("scroll_panel",panel);
         register("label",(s,g,e,x,y,w,h,hover) -> s.text(g,e,x,y,w,h,s.bind(e.text)));
+        // Item slots: Minecraft's sunken slot look; the items themselves are the container's (SlotScreen).
+        register("slots",(s,g,e,x,y,w,h,hover) -> {
+            if (e.slotKind.equals("result")) { slot(g,x+(w-26)/2,y+(h-26)/2,26); return; }
+            for (int row = 0; row < e.rows; row++) for (int column = 0; column < e.columns; column++) slot(g,x+column*18,y+row*18,18);
+        });
         register("button",(s,g,e,x,y,w,h,hover) -> { if (hover) roundedFill(g,x,y,w,h,e.cornerRadius,0x22FFFFFF); s.text(g,e,x,y,w,h,s.bind(e.text)); });
         register("textbox",(s,g,e,x,y,w,h,hover) -> { if (s.focused == e) g.renderOutline(x,y,w,h,0xFF91CFFF); s.text(g,e,x+3,y,w-6,h,e.value + (s.focused == e && (System.currentTimeMillis()/500)%2 == 0 ? "_" : "")); });
         register("checkbox",(s,g,e,x,y,w,h,hover) -> { int size = Math.min(16,h); g.renderOutline(x,y,size,size,0xFFB0B8C0); if (Boolean.parseBoolean(e.value)) g.fill(x+3,y+3,x+size-3,y+size-3,0xFF69C8EE); s.text(g,e,x+size+4,y,w-size-4,h,s.bind(e.text)); });
@@ -92,6 +97,11 @@ public final class ElementRenderers {
         double r = Math.clamp(radius,0,Math.min(w,h)/2.0);
         if (r == 0) { g.fill(x,y,x+w,y+h,color); return; }
         for (int row = 0; row < h; row++) { int edge = inset(row,h,r); g.fill(x+edge,y+row,x+w-edge,y+row+1,color); }
+    }
+    static void slot(GuiGraphics g,int x,int y,int size) {
+        g.fill(x,y,x+size,y+size,0xFF8B8B8B);
+        g.fill(x,y,x+size-1,y+1,0xFF373737); g.fill(x,y,x+1,y+size-1,0xFF373737);
+        g.fill(x+1,y+size-1,x+size,y+size,0xFFFFFFFF); g.fill(x+size-1,y+1,x+size,y+size,0xFFFFFFFF);
     }
     public static void skin(GuiGraphics g,Element e,int x,int y,int w,int h) {
         if (!e.fillEnabled || e.type.equals("shape") || e.type.equals("sound")) return; // shapes fill their own outline

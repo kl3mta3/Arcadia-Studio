@@ -18,7 +18,7 @@ using Wysicraft.Packaging;
 namespace Wysicraft.Designer;
 
 // File → Publish to Arcadia (docs/ARCADIA.md): link this computer to a player's Arcadia account once, then pack the
-// project (the folder web export, game.json and a screenshot), check it and upload it. The key is DPAPI-protected in
+// project (the folder web export, game.json, the cover and any screenshots), check it and upload it. The key is DPAPI-protected in
 // preferences and only ever sent in the Authorization header. An AI assistant can prepare and check a package over MCP,
 // but publishing is always the person's own click.
 public partial class MainWindow
@@ -26,23 +26,46 @@ public partial class MainWindow
     internal static string WysicraftVersion => (typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "").Split('+')[0];
     string ArcadeUrl => Prefs().ArcadeUrl.Length > 0 ? Prefs().ArcadeUrl : ArcadiaPackage.DefaultArcade;
     ArcadiaClient NewArcadiaClient() => new(ArcadeUrl, WysicraftVersion);
-    static string ArcadiaDeviceName() { string name = Environment.MachineName + " (Arcadia Studio " + WysicraftVersion + ")"; return name.Length > 60 ? name[..60] : name; }
+    // The arcade lists linked computers by this name.
+    static string ArcadiaDeviceName() { string name = Environment.MachineName + " (Arcadia Studio)"; return name.Length > 60 ? name[..60] : name; }
+
+    /// <summary>An arcade that moved to a new address is the same server: its link and game IDs saved under the old
+    /// address count for the new one (the link is copied across the first time it's needed; the new address wins after).</summary>
+    internal static readonly Dictionary<string, string> FormerHosts = new(StringComparer.OrdinalIgnoreCase) { ["arcadia.arcadiastudio.games"] = "arcadia.lastweeksproject.com" };
+    static IEnumerable<string> HostAndFormer(string host) { yield return host; if (FormerHosts.TryGetValue(host, out var old)) yield return old; }
 
     string? ArcadiaKey(string host)
     {
-        if (!Prefs().ArcadiaKeys.TryGetValue(host, out var stored) || stored.Length == 0) return null;
+        if ((!Prefs().ArcadiaKeys.TryGetValue(host, out var stored) || stored.Length == 0) && FormerHosts.TryGetValue(host, out var former)
+            && Prefs().ArcadiaKeys.TryGetValue(former, out var carried) && carried.Length > 0)
+        {
+            stored = Prefs().ArcadiaKeys[host] = carried; SavePrefs();
+            Log("Your Arcadia link carried over from " + former + " to its new address, " + host + ".");
+        }
+        if (stored == null || stored.Length == 0) return null;
         try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(stored), null, DataProtectionScope.CurrentUser)); }
         catch (Exception) { Prefs().ArcadiaKeys.Remove(host); SavePrefs(); Log("The saved Arcadia link for " + host + " couldn't be read, so it was removed. Link again to publish."); return null; }
     }
     void StoreArcadiaKey(string host, string key) { Prefs().ArcadiaKeys[host] = Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser)); SavePrefs(); }
-    void ForgetArcadiaKey(string host) { if (Prefs().ArcadiaKeys.Remove(host)) SavePrefs(); }
+    // Both addresses, so a revoked or unlinked key can't come back from the old one.
+    void ForgetArcadiaKey(string host) { bool removed = false; foreach (var h in HostAndFormer(host).ToList()) removed |= Prefs().ArcadiaKeys.Remove(h); if (removed) SavePrefs(); }
 
     /// <summary>The game this project became on an arcade: from the project, or from preferences when the project
     /// wasn't saved after its first publish (publishing it again must not make a second game).</summary>
     string? RememberedGameId(string host)
     {
-        if (project.Publishing.Arcades.TryGetValue(host, out var game) && game.GameId.Length > 0) return game.GameId;
-        return Prefs().ArcadiaGames.TryGetValue(host + "|" + project.Manifest.Id, out var id) && id.Length > 0 ? id : null;
+        foreach (var h in HostAndFormer(host))
+        {
+            if (project.Publishing.Arcades.TryGetValue(h, out var game) && game.GameId.Length > 0) return game.GameId;
+            if (Prefs().ArcadiaGames.TryGetValue(h + "|" + project.Manifest.Id, out var id) && id.Length > 0) return id;
+        }
+        return null;
+    }
+    /// <summary>What the project remembers about its game on an arcade (or under the arcade's old address).</summary>
+    ArcadeGame? SavedGame(string host)
+    {
+        foreach (var h in HostAndFormer(host)) if (project.Publishing.Arcades.TryGetValue(h, out var game) && game.GameId.Length > 0) return game;
+        return null;
     }
     void RememberGame(string host, string gameId, string version)
     {
@@ -50,10 +73,12 @@ public partial class MainWindow
         project.Publishing.Arcades[host] = new ArcadeGame { GameId = gameId, LastVersion = version };
         Prefs().ArcadiaGames[host + "|" + project.Manifest.Id] = gameId; SavePrefs();
     }
+    // Both addresses, so "Publish as a new game" can't be undone by the old address's entry.
     void ForgetGame(string host)
     {
-        Change(); project.Publishing.Arcades.Remove(host);
-        if (Prefs().ArcadiaGames.Remove(host + "|" + project.Manifest.Id)) SavePrefs();
+        Change(); bool removed = false;
+        foreach (var h in HostAndFormer(host).ToList()) { project.Publishing.Arcades.Remove(h); removed |= Prefs().ArcadiaGames.Remove(h + "|" + project.Manifest.Id); }
+        if (removed) SavePrefs();
     }
     // Self-checks run against a fake arcade and must not open pages in the person's browser.
     internal static bool NoBrowser;
@@ -71,7 +96,7 @@ public partial class MainWindow
     }
     static string When(long? ms) => ms is long t ? DateTimeOffset.FromUnixTimeMilliseconds(t).ToLocalTime().ToString("ddd d MMM, HH:mm", CultureInfo.CurrentCulture) : "soon";
 
-    /// <summary>A screenshot the arcade's size (1280 × 800): the middle of the picture at 16:10, scaled. Pixel art is
+    /// <summary>A cover or screenshot the arcade's size (1280 × 800): the middle of the picture at 16:10, scaled. Pixel art is
     /// enlarged with hard edges; a larger picture is shrunk smoothly. PNG, or JPEG when a PNG would pass 2 MB.</summary>
     static (byte[] Bytes, string Type) FitScreenshot(byte[] picture)
     {
@@ -97,7 +122,8 @@ public partial class MainWindow
         arcadiaDialog = new ArcadiaDialog(this); arcadiaDialog.Closed += (_, _) => arcadiaDialog = null; arcadiaDialog.Show();
     }
 
-    /// <summary>The Publish to Arcadia window: account, game details, screenshot, leaderboard, check and publish.</summary>
+    /// <summary>The Publish to Arcadia window: account, game details, cover, screenshots and videos, leaderboard, check
+    /// and publish.</summary>
     sealed partial class ArcadiaDialog : Window
     {
         readonly MainWindow editor;
@@ -106,7 +132,8 @@ public partial class MainWindow
         ArcadiaMe? me;
         bool busy;
         CancellationTokenSource? work;
-        byte[] screenshot; string screenshotType;
+        byte[] cover; string coverType;
+        readonly List<PublishImage> gallery;
         // Account
         readonly TextBlock account = Wrap(), mode = Wrap(Brushes.LightGray), limit = Wrap(Brushes.LightGray);
         readonly Button link = new() { Content = "Link to Arcadia…" }, arcade = new() { Content = "Arcade address…" }, profile = new() { Content = "Set up a creator profile", Visibility = Visibility.Collapsed };
@@ -114,11 +141,18 @@ public partial class MainWindow
         readonly TextBox title = new(), description = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 64, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, version = new(), controls = new();
         readonly ComboBox[] genres = [Editable(ArcadiaPackage.Genres), Editable(ArcadiaPackage.Genres), Editable(ArcadiaPackage.Genres)];
         readonly ComboBox aspect;
-        // Screenshot
+        readonly CheckBox mobile = new() { Content = "Plays on phones and tablets" };
+        // Cover
         readonly Image picture = new() { Width = 256, Height = 160, Stretch = Stretch.Uniform };
         readonly TextBlock pictureInfo = Wrap(Brushes.LightGray);
+        // Screenshots and videos
+        readonly WrapPanel shots = new();
+        readonly TextBlock shotsInfo = Wrap(Brushes.LightGray), videoNote = Wrap(new SolidColorBrush(Color.FromRgb(0xFF, 0x8C, 0x7A)));
+        readonly Button shotCapture = new() { Content = "Capture from Preview", Margin = new Thickness(0, 0, 8, 0) }, shotChoose = new() { Content = "Choose files…" };
+        readonly TextBox[] videos = [new(), new(), new()];
         // Leaderboard
         readonly CheckBox leaderboard = new() { Content = "Keep a leaderboard for this game" };
+        readonly ComboBox boardPage = new() { MinWidth = 260 };
         readonly StackPanel scoresPanel = new();
         readonly TextBox label = new(), min = new(), max = new(), minSeconds = new(), scorePath = new();
         readonly ComboBox format = Choice(("points", "Points"), ("number", "Number"), ("time", "Time (milliseconds)")), order = Choice(("desc", "Higher is better"), ("asc", "Lower is better")),
@@ -129,12 +163,18 @@ public partial class MainWindow
         // Check and publish
         readonly ListBox findings = new() { MinHeight = 60, MaxHeight = 180 };
         readonly TextBlock status = Wrap();
+        /// <summary>A line for the person in the status area (another window handing over, for example).</summary>
+        internal void Note(string text) => status.Text = text;
         readonly ProgressBar progress = new() { Height = 6, Minimum = 0, Maximum = 1, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 0, 4) };
         readonly Button check = new() { Content = "Check" }, publish = new() { Content = "Publish", FontWeight = FontWeights.SemiBold }, history = new() { Content = "Publishing history…" }, open = new() { Content = "Open in browser", Visibility = Visibility.Collapsed };
         string openUrl = "";
         // Self-checks answer the window's yes/no questions through this instead of a message box.
         internal Func<string, bool>? Confirm;
         bool Ask(string question) => Confirm?.Invoke(question) ?? MessageBox.Show(this, question, "Publish to Arcadia", MessageBoxButton.YesNo) == MessageBoxResult.Yes;
+        // Self-checks answer the "details were changed on Arcadia" question through this: false keeps Arcadia's, true
+        // uses the project's, null cancels.
+        internal Func<ArcadiaDetails, bool?>? ChooseDetails;
+        readonly Button loadDetails = new() { Content = "Load details from Arcadia", ToolTip = "Replace this form's title, description, genres, controls, videos, cover, screenshots and leaderboard with what's on Arcadia now (for example after editing them on the website)." };
         /// <summary>What to ask when the saved game can't be updated: deleted by you, removed by a moderator, or not
         /// one of this account's games on this arcade (any other 404).</summary>
         static string CantUpdate(ArcadiaException ex, string name)
@@ -146,7 +186,7 @@ public partial class MainWindow
                 "removed" => "A moderator removed " + game + " from Arcadia, so it can't be updated." + (ex.Message.Length > 0 ? " " + ex.Message : ""),
                 _ => game + " isn't one of your games on this arcade anymore, so it can't be updated."
             };
-            return why + "\n\nPublish it as a new game? Its title, description, screenshot and leaderboard stay as they are, and its version starts again at 1.0.0.";
+            return why + "\n\nPublish it as a new game? Its title, description, cover, screenshots, videos and leaderboard stay as they are, and its version starts again at 1.0.0.";
         }
 
         public ArcadiaDialog(MainWindow editor, ArcadiaClient? testClient = null)
@@ -160,14 +200,15 @@ public partial class MainWindow
             string fromScreen = ArcadiaPackage.AspectRatio(editor.project);
             aspect = Editable(["From the screen (" + fromScreen + ")", "16:9", "4:3"]);
             var s = editor.project.Publishing;
-            screenshot = s.Screenshot; screenshotType = s.ScreenshotType;
+            cover = s.Cover; coverType = s.CoverType;
+            gallery = s.Screenshots.Select(x => new PublishImage { Type = x.Type, Bytes = x.Bytes }).ToList();
 
             var root = new DockPanel { Margin = new Thickness(12) }; Content = root;
             // The bottom bar: findings, status and the two buttons stay in view while the form scrolls.
             var bottom = new StackPanel { Margin = new Thickness(0, 8, 0, 0) }; DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom);
             bottom.Children.Add(Heading("Check")); bottom.Children.Add(findings); bottom.Children.Add(progress); bottom.Children.Add(status);
             var buttons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) }; bottom.Children.Add(buttons);
-            foreach (var b in new[] { check, publish, open, history }) { b.Margin = new Thickness(0, 0, 8, 0); b.Padding = new Thickness(12, 3, 12, 3); buttons.Children.Add(b); }
+            foreach (var b in new[] { check, publish, open, history, loadDetails }) { b.Margin = new Thickness(0, 0, 8, 0); b.Padding = new Thickness(12, 3, 12, 3); buttons.Children.Add(b); }
             var form = new StackPanel(); root.Children.Add(new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
 
             // Account
@@ -192,20 +233,54 @@ public partial class MainWindow
             form.Children.Add(Row("Version", version, "Raise it every time you publish."));
             form.Children.Add(Row("Controls", controls, "How to play, for example \"WASD to move · Space to dash\". Up to 200 characters."));
             form.Children.Add(Row("Aspect ratio", aspect, "The arcade letterboxes the game to this shape."));
+            mobile.IsChecked = s.Mobile;
+            form.Children.Add(Row("", mobile, "Touch controls (on-screen buttons or tapping) and it fits a small screen. The arcade shows a phone icon and lists it under Mobile friendly; otherwise phone players are told it may need a keyboard."));
 
-            // Screenshot
-            form.Children.Add(Heading("Screenshot"));
+            // Cover
+            form.Children.Add(Heading("Cover"));
             var shotRow = new StackPanel { Orientation = Orientation.Horizontal };
             shotRow.Children.Add(new Border { Child = picture, BorderBrush = new SolidColorBrush(Color.FromRgb(0x45, 0x4B, 0x56)), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Color.FromRgb(0x15, 0x18, 0x1D)) });
             var shotButtons = new StackPanel { Margin = new Thickness(12, 0, 0, 0), Width = 300 };
             var capture = new Button { Content = "Capture from Preview", Margin = new Thickness(0, 0, 0, 6) }; var choose = new Button { Content = "Choose file…", Margin = new Thickness(0, 0, 0, 6) };
             shotButtons.Children.Add(capture); shotButtons.Children.Add(choose); shotButtons.Children.Add(pictureInfo);
             shotRow.Children.Add(shotButtons); form.Children.Add(shotRow);
-            form.Children.Add(Wrap(Brushes.LightGray, "The game's card and page picture: 1280 × 800, real gameplay, no borders. Captures are cropped to 16:10 from the middle."));
+            form.Children.Add(Wrap(Brushes.LightGray, "The game's card in the arcade and the big picture on its page: 1280 × 800, real gameplay, no borders. PNG, JPEG or WebP up to 2 MB. Captures are cropped to 16:10 from the middle."));
+
+            // Screenshots
+            form.Children.Add(Heading("Screenshots"));
+            form.Children.Add(Wrap(Brushes.LightGray, "The gallery on the game's page, in this order. Up to 8, same size and rules as the cover. 3 or more is best."));
+            form.Children.Add(shots);
+            var shotBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+            shotBar.Children.Add(shotCapture); shotBar.Children.Add(shotChoose); form.Children.Add(shotBar); form.Children.Add(shotsInfo);
+
+            // Videos
+            form.Children.Add(Heading("Videos"));
+            var videoList = new StackPanel();
+            for (int i = 0; i < videos.Length; i++) { videos[i].Text = i < s.Videos.Count ? s.Videos[i] : ""; videos[i].Margin = new Thickness(0, 0, 0, 4); videos[i].TextChanged += (_, _) => ShowVideoNote(); videoList.Children.Add(videos[i]); }
+            videoList.Children.Add(videoNote);
+            form.Children.Add(Row("YouTube links", videoList, "Up to 3, shown on the game's page before the screenshots: youtube.com/watch?v=…, youtu.be/… or youtube.com/shorts/…. Only the link is sent, never a video file."));
 
             // Leaderboard
             form.Children.Add(Heading("Leaderboard"));
-            leaderboard.IsChecked = s.Leaderboard; form.Children.Add(leaderboard); form.Children.Add(scoresPanel);
+            leaderboard.IsChecked = s.Leaderboard; form.Children.Add(leaderboard);
+            // The leaderboard page players see: the arcade's standard board, one made here, or a page imported as it is.
+            var pageRow = new StackPanel();
+            var pageButtons = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+            Button PageButton(string text, string tip) { var b = new Button { Content = text, ToolTip = tip, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 1, 8, 1) }; pageButtons.Children.Add(b); return b; }
+            var createPage = PageButton("Create leaderboard…", "Design a leaderboard page in the editor: lists, a podium, rank boxes and more, filled from the game's board.");
+            var importPage = PageButton("Import leaderboard…", "A .lb file, or a page. A page made in Arcadia Studio can be edited again; any other page is used as it is.");
+            var editPage = PageButton("Edit", "Open the chosen leaderboard page in the editor.");
+            pageRow.Children.Add(boardPage); pageRow.Children.Add(pageButtons);
+            form.Children.Add(Row("Leaderboard page", pageRow, "What players see when they open the game's leaderboard. Needs Keep a leaderboard."));
+            FillBoardPages(s.LeaderboardPage);
+            createPage.Click += (_, _) => { var made = editor.CreateLeaderboard(); FillBoardPages("board:" + made.Id); editor.Activate(); };
+            importPage.Click += (_, _) => { try { if (editor.ImportLeaderboard(open: false) is string choice) FillBoardPages(choice); } catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { status.Text = ex.Message; } };
+            editPage.Click += (_, _) => { if (Chosen(boardPage) is string c && c.StartsWith("board:") && editor.project.Leaderboards.FirstOrDefault(b => b.Id == c[6..]) is UiDefinition board) { editor.OpenLeaderboard(board); editor.Activate(); } };
+            boardPage.SelectionChanged += (_, _) => editPage.IsEnabled = Chosen(boardPage).StartsWith("board:");
+            editPage.IsEnabled = Chosen(boardPage).StartsWith("board:");
+            // Pages made or changed in the editor meanwhile appear when the window is used again.
+            Activated += (_, _) => { if (!busy) FillBoardPages(null); };
+            form.Children.Add(scoresPanel);
             var c = s.Scores;
             label.Text = c.Label; Select(format, c.Format); Select(order, c.Order); Select(aggregate, c.Aggregate);
             min.Text = c.Min.ToString(CultureInfo.InvariantCulture); max.Text = c.Max?.ToString(CultureInfo.InvariantCulture) ?? ""; minSeconds.Text = c.MinSeconds.ToString(CultureInfo.InvariantCulture);
@@ -230,7 +305,9 @@ public partial class MainWindow
             void ShowScores() => scoresPanel.Visibility = leaderboard.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             leaderboard.Click += (_, _) => ShowScores(); ShowScores();
 
-            ShowPicture();
+            ShowPicture(); ShowShots(); ShowVideoNote();
+            shotCapture.Click += async (_, _) => await Guard(CaptureScreenshot);
+            shotChoose.Click += (_, _) => ChooseScreenshots();
             link.Click += async (_, _) => await Guard(key == null ? Link : Unlink);
             profile.Click += (_, _) => OpenInBrowser(new Uri(client.Arcade, "#/me").ToString());
             arcade.Click += async (_, _) => await Guard(ChangeArcade);
@@ -240,6 +317,7 @@ public partial class MainWindow
             publish.Click += async (_, _) => await Guard(Publish);
             open.Click += (_, _) => OpenInBrowser(openUrl);
             history.Click += async (_, _) => await Guard(History);
+            loadDetails.Click += async (_, _) => await Guard(LoadDetails);
             findings.MouseDoubleClick += (_, _) => OpenFinding();
             Closing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Wait for the upload to finish before closing."; return; } Apply(); };
             Loaded += async (_, _) => await Guard(Refresh);
@@ -269,6 +347,20 @@ public partial class MainWindow
             var box = new ComboBox(); foreach (var (value, text) in items) box.Items.Add(new ComboBoxItem { Content = text, Tag = value });
             box.SelectedIndex = 0; return box;
         }
+        /// <summary>The leaderboard page choices, keeping (or setting) the chosen one. "" (never chosen) picks the project's
+        /// first leaderboard, or the standard board when it has none.</summary>
+        void FillBoardPages(string? choose)
+        {
+            var project = editor.project;
+            string current = choose ?? (boardPage.SelectedItem is ComboBoxItem { Tag: string tag } ? tag : project.Publishing.LeaderboardPage);
+            boardPage.Items.Clear();
+            boardPage.Items.Add(new ComboBoxItem { Content = "The arcade's standard board", Tag = "standard" });
+            foreach (var b in project.Leaderboards) boardPage.Items.Add(new ComboBoxItem { Content = "My page: " + (b.Title.Length > 0 ? b.Title + " (" + b.Id + ")" : b.Id), Tag = "board:" + b.Id });
+            if (project.Publishing.LeaderboardHtml.Length > 0) boardPage.Items.Add(new ComboBoxItem { Content = $"Imported page ({project.Publishing.LeaderboardHtml.Length / 1024.0:0} KB, used as it is)", Tag = "file" });
+            if (current == "") current = AutoBoardPage();
+            Select(boardPage, current); if (boardPage.SelectedItem == null) boardPage.SelectedIndex = 0;
+        }
+        string AutoBoardPage() => editor.project.Leaderboards.Count > 0 ? "board:" + editor.project.Leaderboards[0].Id : "standard";
         static void Select(ComboBox box, string value) { foreach (ComboBoxItem item in box.Items) if ((string)item.Tag == value) { box.SelectedItem = item; return; } }
         static string Chosen(ComboBox box) => (string?)((ComboBoxItem?)box.SelectedItem)?.Tag ?? "";
         sealed class UniformGrid3 : System.Windows.Controls.Primitives.UniformGrid
@@ -293,17 +385,21 @@ public partial class MainWindow
         }
         void AddStat(PublishStat st)
         {
-            var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+            var outer = new StackPanel { Margin = new Thickness(0, 2, 0, 4) };
+            var row = new DockPanel();
+            var steady = new CheckBox { Content = "Doesn't grow over time", IsChecked = !st.Check, Margin = new Thickness(6, 3, 0, 0),
+                ToolTip = "For a column like accuracy % or a character number. Arcadia compares every run's pace with play time; this column is left out of that." };
             var keyBox = new TextBox { Text = st.Key }; var labelBox = new TextBox { Text = st.Label }; var variable = Editable(names); variable.Text = st.Variable; var path = new TextBox { Text = st.Path };
             var how = Choice(("max", "highest"), ("min", "lowest"), ("sum", "total")); Select(how, st.Aggregate);
-            var remove = new Button { Content = "Remove", Margin = new Thickness(6, 0, 0, 0) }; remove.Click += (_, _) => stats.Children.Remove(row);
+            var remove = new Button { Content = "Remove", Margin = new Thickness(6, 0, 0, 0) }; remove.Click += (_, _) => stats.Children.Remove(outer);
             var left = new StackPanel { Orientation = Orientation.Horizontal };
             left.Children.Add(Labelled("key", keyBox, 70)); left.Children.Add(Labelled("name", labelBox, 90));
             var right = new StackPanel { Orientation = Orientation.Horizontal };
             right.Children.Add(Labelled("field", path, 80)); right.Children.Add(Labelled("keep", how, 80)); right.Children.Add(remove);
             DockPanel.SetDock(left, Dock.Left); DockPanel.SetDock(right, Dock.Right); row.Children.Add(left); row.Children.Add(right); row.Children.Add(Labelled("from", variable, 110));
-            row.Tag = (Func<PublishStat>)(() => new PublishStat { Key = keyBox.Text.Trim(), Label = labelBox.Text.Trim(), Variable = variable.Text.Trim(), Path = path.Text.Trim(), Aggregate = Chosen(how), Format = "number" });
-            stats.Children.Add(row);
+            outer.Tag = (Func<PublishStat>)(() => new PublishStat { Key = keyBox.Text.Trim(), Label = labelBox.Text.Trim(), Variable = variable.Text.Trim(), Path = path.Text.Trim(), Aggregate = Chosen(how), Format = "number", Check = steady.IsChecked != true });
+            outer.Children.Add(row); outer.Children.Add(steady);
+            stats.Children.Add(outer);
         }
 
         // ---- What the form says ----
@@ -314,7 +410,14 @@ public partial class MainWindow
             s.Title = title.Text.Trim(); s.Description = description.Text.Trim(); s.Version = version.Text.Trim(); s.Controls = controls.Text.Trim();
             s.Genre = genres.Select(g => g.Text.Trim()).Where(g => g.Length > 0).ToList();
             s.AspectRatio = aspect.Text.StartsWith("From the screen") ? "" : aspect.Text.Trim();
-            s.Screenshot = screenshot; s.ScreenshotType = screenshotType;
+            s.Mobile = mobile.IsChecked == true;
+            // Left at "" while it's still the automatic choice, so a leaderboard made later is picked up by itself.
+            string page = Chosen(boardPage);
+            s.LeaderboardPage = editor.project.Publishing.LeaderboardPage == "" && page == AutoBoardPage() ? "" : page;
+            s.LeaderboardHtml = editor.project.Publishing.LeaderboardHtml;
+            s.Cover = cover; s.CoverType = coverType;
+            s.Screenshots = gallery.Select(x => new PublishImage { Type = x.Type, Bytes = x.Bytes }).ToList();
+            s.Videos = videos.Select(v => v.Text.Trim()).Where(v => v.Length > 0).ToList();
             s.Leaderboard = leaderboard.IsChecked == true;
             s.Scores = new PublishScores
             {
@@ -322,7 +425,7 @@ public partial class MainWindow
                 Min = Number(min.Text, 0), Max = max.Text.Trim().Length == 0 ? null : Number(max.Text, 0), MinSeconds = Number(minSeconds.Text, 3),
                 Score = new PublishWatch { Variable = scoreFrom.Text.Trim(), Path = scorePath.Text.Trim() },
                 Triggers = triggers.Children.OfType<DockPanel>().Select(r => ((Func<PublishTrigger>)r.Tag)()).ToList(),
-                Stats = stats.Children.OfType<DockPanel>().Select(r => ((Func<PublishStat>)r.Tag)()).ToList(),
+                Stats = stats.Children.OfType<StackPanel>().Select(r => ((Func<PublishStat>)r.Tag)()).ToList(),
                 Round = whole.IsChecked == true ? "floor" : "none"
             };
             return s;
@@ -331,7 +434,8 @@ public partial class MainWindow
         void Apply()
         {
             var s = Collect();
-            if (Json.Write(s) == Json.Write(editor.project.Publishing) && ReferenceEquals(s.Screenshot, editor.project.Publishing.Screenshot)) return;
+            var was = editor.project.Publishing;
+            if (Json.Write(s) == Json.Write(was) && ReferenceEquals(s.Cover, was.Cover) && s.Screenshots.Select(x => x.Bytes).SequenceEqual(was.Screenshots.Select(x => x.Bytes), ReferenceEqualityComparer.Instance) && ReferenceEquals(s.LeaderboardHtml, was.LeaderboardHtml)) return;
             editor.Change(); editor.project.Publishing = s;
         }
 
@@ -356,7 +460,7 @@ public partial class MainWindow
         {
             key = editor.ArcadiaKey(client.Host); me = null; profile.Visibility = Visibility.Collapsed;
             link.Content = key == null ? "Link to Arcadia…" : "Unlink";
-            string last = editor.project.Publishing.Arcades.TryGetValue(client.Host, out var g) ? g.LastVersion : "";
+            string last = editor.SavedGame(client.Host)?.LastVersion ?? "";
             if (version.Text.Length == 0) version.Text = last.Length > 0 ? ArcadiaPackage.NextVersion(last) : editor.project.Publishing.Version.Length > 0 ? editor.project.Publishing.Version : editor.project.Manifest.Version;
             if (key == null) { account.Text = "Not linked to " + client.Host + ". Link this computer to your Arcadia account to publish (no password is typed here)."; mode.Text = limit.Text = ""; return; }
             account.Text = "Checking your account on " + client.Host + "…";
@@ -445,39 +549,111 @@ public partial class MainWindow
             await Task.CompletedTask;
         }
 
-        // ---- Screenshot ----
+        // ---- Cover, screenshots and videos ----
+        /// <summary>A small copy of a picture for showing in the window, or null if it can't be read.</summary>
+        static BitmapImage? Thumbnail(byte[] bytes, int width)
+        {
+            try { var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = width; image.StreamSource = new MemoryStream(bytes); image.EndInit(); image.Freeze(); return image; }
+            catch (Exception) { return null; }
+        }
+        static string Describe(byte[] bytes, string type) => (ArcadiaPackage.ImageSize(bytes) is var (w, h) ? $"{w} × {h}, " : "") + $"{bytes.Length / 1024.0:0} KB {type.ToUpperInvariant()}";
         void ShowPicture()
         {
-            if (screenshot.Length == 0) { picture.Source = null; pictureInfo.Text = "No screenshot yet."; return; }
-            try
-            {
-                var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = new MemoryStream(screenshot); image.EndInit(); picture.Source = image;
-                var size = ArcadiaPackage.ImageSize(screenshot);
-                pictureInfo.Text = (size is var (w, h) ? $"{w} × {h}, " : "") + $"{screenshot.Length / 1024.0:0} KB {screenshotType.ToUpperInvariant()}";
-            }
-            catch (Exception) { picture.Source = null; pictureInfo.Text = "This picture can't be shown here; the check will say what's wrong with it."; }
+            if (cover.Length == 0) { picture.Source = null; pictureInfo.Text = "No cover yet."; return; }
+            picture.Source = Thumbnail(cover, 512);
+            pictureInfo.Text = picture.Source == null ? "This picture can't be shown here; the check will say what's wrong with it." : Describe(cover, coverType);
         }
-        async Task Capture()
+        void ShowShots()
+        {
+            shots.Children.Clear();
+            var frame = new SolidColorBrush(Color.FromRgb(0x45, 0x4B, 0x56)); var back = new SolidColorBrush(Color.FromRgb(0x15, 0x18, 0x1D));
+            for (int i = 0; i < gallery.Count; i++)
+            {
+                int at = i; var shot = gallery[i];
+                var card = new StackPanel { Margin = new Thickness(0, 0, 10, 10), Width = 160 };
+                var thumb = Thumbnail(shot.Bytes, 320);
+                card.Children.Add(new Border { BorderBrush = frame, BorderThickness = new Thickness(1), Background = back, Height = 100, ToolTip = Describe(shot.Bytes, shot.Type),
+                    Child = thumb != null ? new Image { Source = thumb, Stretch = Stretch.Uniform } : new TextBlock { Text = "Can't show this picture", Foreground = Brushes.Gray, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
+                var bar = new DockPanel { Margin = new Thickness(0, 3, 0, 0) };
+                Button Small(string text, string tip, bool enabled, Action act)
+                {
+                    var b = new Button { Content = text, ToolTip = tip, IsEnabled = enabled, Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(4, 0, 0, 0) };
+                    b.Click += (_, _) => { act(); ShowShots(); }; return b;
+                }
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(buttons, Dock.Right);
+                buttons.Children.Add(Small("◀", "Move earlier", at > 0, () => { gallery.RemoveAt(at); gallery.Insert(at - 1, shot); }));
+                buttons.Children.Add(Small("▶", "Move later", at < gallery.Count - 1, () => { gallery.RemoveAt(at); gallery.Insert(at + 1, shot); }));
+                buttons.Children.Add(Small("Remove", "Take this screenshot out", true, () => gallery.RemoveAt(at)));
+                bar.Children.Add(buttons);
+                bar.Children.Add(new TextBlock { Text = (at + 1).ToString(CultureInfo.InvariantCulture), Foreground = Brushes.LightGray, VerticalAlignment = VerticalAlignment.Center });
+                card.Children.Add(bar); shots.Children.Add(card);
+            }
+            shotsInfo.Text = gallery.Count == 0 ? "No screenshots yet." : $"{gallery.Count} of {ArcadiaPackage.MaxScreenshots}.";
+            shotCapture.IsEnabled = shotChoose.IsEnabled = gallery.Count < ArcadiaPackage.MaxScreenshots;
+        }
+        void ShowVideoNote()
+        {
+            var bad = videos.Select((v, i) => (Text: v.Text.Trim(), Number: i + 1)).Where(v => v.Text.Length > 0 && !ArcadiaPackage.IsYouTube(v.Text)).Select(v => v.Number).ToList();
+            videoNote.Text = bad.Count == 0 ? "" : (bad.Count == 1 ? "Link " + bad[0] + " isn't" : "Links " + string.Join(" and ", bad) + " aren't") + " a YouTube video link. Check and Publish refuse it.";
+            videoNote.Visibility = bad.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            var brush = new SolidColorBrush(Color.FromRgb(0xFF, 0x8C, 0x7A));
+            foreach (var v in videos) { bool wrong = v.Text.Trim().Length > 0 && !ArcadiaPackage.IsYouTube(v.Text); if (wrong) v.BorderBrush = brush; else v.ClearValue(Control.BorderBrushProperty); }
+        }
+        /// <summary>The Preview screen fitted to 1280 × 800, or null when Preview wasn't open (it opens, for next time).</summary>
+        async Task<(byte[] Bytes, string Type)?> CapturePreview()
         {
             if (editor.activePreview == null || !editor.activePreview.IsOpen)
             {
                 editor.Preview();
                 status.Text = "Preview is open. Play to a good moment, then click Capture from Preview again.";
-                return;
+                return null;
             }
-            var raw = await editor.activePreview.CaptureScreenAsync();
-            (screenshot, screenshotType) = FitScreenshot(raw); ShowPicture();
-            status.Text = "Captured the Preview screen.";
+            return FitScreenshot(await editor.activePreview.CaptureScreenAsync());
         }
+        async Task Capture()
+        {
+            if (await CapturePreview() is not { } got) return;
+            (cover, coverType) = got; ShowPicture();
+            status.Text = "Captured the Preview screen as the cover.";
+        }
+        async Task CaptureScreenshot()
+        {
+            if (gallery.Count >= ArcadiaPackage.MaxScreenshots) return;
+            if (await CapturePreview() is not { } got) return;
+            gallery.Add(new PublishImage { Type = got.Type, Bytes = got.Bytes }); ShowShots();
+            status.Text = $"Captured the Preview screen as screenshot {gallery.Count}.";
+        }
+        /// <summary>A chosen picture ready to use: its bytes and type, fitted to 1280 × 800 when it's over 2 MB. Null (and
+        /// a note in problems) when it isn't really a PNG, JPEG or WebP.</summary>
+        static (byte[] Bytes, string Type)? ReadPicture(string file, List<string> problems, List<string> fitted)
+        {
+            var bytes = File.ReadAllBytes(file);
+            string? type = ArcadiaPackage.ImageType(bytes);
+            if (type == null) { problems.Add(Path.GetFileName(file) + " isn't really a PNG, JPEG or WebP picture."); return null; }
+            if (bytes.LongLength > ArcadiaPackage.MaxScreenshotBytes && type != "webp") { (bytes, type) = FitScreenshot(bytes); fitted.Add(Path.GetFileName(file)); }
+            return (bytes, type);
+        }
+        static string Fitted(List<string> names) => names.Count == 0 ? "" : " " + string.Join(", ", names) + (names.Count == 1 ? " was" : " were") + " over 2 MB, so fitted to 1280 × 800.";
         void Choose()
         {
-            var dialog = new OpenFileDialog { Title = "Choose a screenshot", Filter = "Pictures (PNG, JPEG, WebP)|*.png;*.jpg;*.jpeg;*.webp" };
+            var dialog = new OpenFileDialog { Title = "Choose a cover", Filter = "Pictures (PNG, JPEG, WebP)|*.png;*.jpg;*.jpeg;*.webp" };
             if (dialog.ShowDialog(this) != true) return;
-            var bytes = File.ReadAllBytes(dialog.FileName);
-            string? type = ArcadiaPackage.ImageType(bytes);
-            if (type == null) { status.Text = Path.GetFileName(dialog.FileName) + " isn't really a PNG, JPEG or WebP picture."; return; }
-            if (bytes.LongLength > ArcadiaPackage.MaxScreenshotBytes && type != "webp") { (bytes, type) = FitScreenshot(bytes); status.Text = "The picture was over 2 MB, so it was fitted to 1280 × 800."; }
-            screenshot = bytes; screenshotType = type; ShowPicture();
+            List<string> problems = [], fitted = [];
+            if (ReadPicture(dialog.FileName, problems, fitted) is not { } got) { status.Text = problems[0]; return; }
+            (cover, coverType) = got; ShowPicture();
+            status.Text = ("Cover chosen." + Fitted(fitted)).Trim();
+        }
+        void ChooseScreenshots()
+        {
+            int room = ArcadiaPackage.MaxScreenshots - gallery.Count; if (room <= 0) return;
+            var dialog = new OpenFileDialog { Title = "Choose screenshots", Filter = "Pictures (PNG, JPEG, WebP)|*.png;*.jpg;*.jpeg;*.webp", Multiselect = true };
+            if (dialog.ShowDialog(this) != true) return;
+            List<string> problems = [], fitted = []; int added = 0;
+            foreach (var file in dialog.FileNames.Take(room))
+                if (ReadPicture(file, problems, fitted) is { } got) { gallery.Add(new PublishImage { Type = got.Type, Bytes = got.Bytes }); added++; }
+            ShowShots();
+            string left = dialog.FileNames.Length > room ? $" {dialog.FileNames.Length - room} more didn't fit: at most {ArcadiaPackage.MaxScreenshots}." : "";
+            status.Text = $"Added {added} screenshot{(added == 1 ? "" : "s")}." + Fitted(fitted) + left + (problems.Count > 0 ? " " + string.Join(" ", problems) : "");
         }
 
         // ---- Check and publish ----
@@ -553,13 +729,38 @@ public partial class MainWindow
                 var (s, zip, local) = await Build();
                 if (zip.Length == 0) { ShowFindings(local, []); status.Text = "Fix the problems marked red before publishing."; return; }
                 string? gameId = editor.RememberedGameId(client.Host);
+                // An update is checked first: the game's details may have been edited on Arcadia since the last publish,
+                // and the person chooses whose to keep. Arcadia's are kept unless they say otherwise.
+                bool? overwrite = null; ArcadiaGameDetails? keepArcade = null;
+                if (gameId != null)
+                {
+                    ArcadiaCheck pre;
+                    try { pre = await client.CheckAsync(key!, zip, gameId, Sending("Checking with Arcadia:"), work!.Token); }
+                    catch (ArcadiaException ex) when (ex.GameGone) { ShowFindings(local, []); if (!OfferNewGame(ex, gameId)) return; continue; }
+                    catch (ArcadiaException ex) when (ex.Code == "title-taken") { ShowFindings(local, []); if (!OfferExistingGame(ex)) return; continue; }
+                    if (pre.Refused) { ShowFindings(local, pre.Findings); status.Text = "The arcade would refuse this upload: fix the problems marked red."; return; }
+                    if (pre.Details is { Conflict: true } clash)
+                    {
+                        bool? mine = ChooseDetails != null ? ChooseDetails(clash) : AskDetails(clash);
+                        if (mine == null) { status.Text = "Nothing was published."; return; }
+                        overwrite = mine; if (mine == false) keepArcade = clash.Arcade;
+                    }
+                }
                 ArcadiaUpload upload;
-                try { upload = await client.UploadAsync(key!, gameId, zip, Sending("Uploading:"), work!.Token); }
+                try { upload = await client.UploadAsync(key!, gameId, zip, Sending("Uploading:"), work!.Token, overwrite); }
                 catch (ArcadiaException ex) when (ex.GameGone && gameId != null) { ShowFindings(local, []); if (!OfferNewGame(ex, gameId)) return; continue; }
                 catch (ArcadiaException ex) when (ex.Code == "title-taken") { ShowFindings(local, []); if (!OfferExistingGame(ex)) return; continue; }
                 // The game's permanent ID is kept at once, so publishing again updates this game rather than making another.
                 editor.RememberGame(client.Host, upload.Game.Id, s.Version);
                 editor.Log($"Uploaded {s.Title} {s.Version} to Arcadia ({client.Host}), game {upload.Game.Id}.");
+                // Arcadia's details were kept: they come into the project too, so the next publish doesn't ask again.
+                string kept = "";
+                if (upload.Details is { Used: "arcade" } used && used.Kept.Count > 0) kept = " Kept Arcadia's " + ArcadiaDetailsMerge.Names(used.Kept).ToLowerInvariant() + ".";
+                if (keepArcade != null)
+                {
+                    try { await TakeArcadeDetails(keepArcade); }
+                    catch (Exception ex) when (ex is ArcadiaException or InvalidDataException or System.Net.Http.HttpRequestException or TaskCanceledException) { kept += " The details couldn't be copied into this project (" + ex.Message + "): use Load details from Arcadia."; }
+                }
                 var submission = upload.Submission;
                 status.Text = "Publishing…";
                 for (int i = 0; submission.Status == "processing" && i < 90; i++)
@@ -573,7 +774,7 @@ public partial class MainWindow
                 open.Visibility = Visibility.Visible;
                 status.Text = submission.Status switch
                 {
-                    "live" => s.Title + " is live!",
+                    "live" => (keepArcade?.Title ?? s.Title) + " is live!" + kept,
                     "held" => "Waiting for review." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message) + " You'll get an email when a moderator approves or declines it.",
                     "declined" => "Not published." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message),
                     "failed" => "Something went wrong on the arcade's side." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message) + " It didn't use up an upload: try again.",
@@ -585,6 +786,66 @@ public partial class MainWindow
                 try { me = await client.MeAsync(key!, work!.Token); ShowAccount(); } catch (ArcadiaException) { }
                 return;
             }
+        }
+        /// <summary>Asks whose details to keep when they were changed on Arcadia since the last publish: true uses this
+        /// project's, false keeps Arcadia's (the default), null publishes nothing.</summary>
+        bool? AskDetails(ArcadiaDetails clash)
+        {
+            string who = clash.EditedBy == "mod" ? " by a moderator" : "";
+            string when = clash.EditedAt is long at ? " on " + DateTimeOffset.FromUnixTimeMilliseconds(at).ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.CurrentCulture) : "";
+            string fields = clash.Changed.Count > 0 ? " (" + ArcadiaDetailsMerge.Names(clash.Changed) + ")" : "";
+            var window = new Window { Owner = this, Title = "Details changed on Arcadia", Width = 480, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
+            window.SetResourceReference(StyleProperty, typeof(Window));
+            var panel = new StackPanel { Margin = new Thickness(16) }; window.Content = panel;
+            panel.Children.Add(Wrap(Brushes.White, $"Your game's details were changed on Arcadia{who}{when}{fields}."));
+            panel.Children.Add(Wrap(Brushes.LightGray, "Keep Arcadia's, or replace them with the ones from Arcadia Studio? The game itself is updated either way. Keeping Arcadia's also copies them into this project, so you won't be asked again."));
+            bool? answer = null;
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; panel.Children.Add(bar);
+            void Choice(string text, bool? value, bool isDefault = false, bool isCancel = false)
+            {
+                var b = new Button { Content = text, IsDefault = isDefault, IsCancel = isCancel, Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(8, 0, 0, 0) };
+                b.Click += (_, _) => { answer = value; window.Close(); }; bar.Children.Add(b);
+            }
+            Choice("Keep Arcadia's", false, isDefault: true); Choice("Use mine", true); Choice("Cancel", null, isCancel: true);
+            window.ShowDialog();
+            return answer;
+        }
+        /// <summary>Load details from Arcadia: the form (and the project) take the game's details as they are on Arcadia now.</summary>
+        async Task LoadDetails()
+        {
+            string? gameId = editor.RememberedGameId(client.Host);
+            if (key == null || gameId == null) { status.Text = "Publish this game to Arcadia first: there are no details there to load yet."; return; }
+            status.Text = "Loading the game's details from Arcadia…";
+            var game = await client.GameAsync(key, gameId, work!.Token);
+            if (game.ArcadeDetails is not ArcadiaGameDetails details) { status.Text = "Arcadia didn't send this game's details, so nothing changed."; return; }
+            await TakeArcadeDetails(details);
+            status.Text = "Loaded the details from Arcadia" + (game.EditedAt is long at ? " (last edited on the website " + DateTimeOffset.FromUnixTimeMilliseconds(at).ToLocalTime().ToString("d MMM yyyy", CultureInfo.CurrentCulture) + ")" : "") + ". Publishing now sends these.";
+        }
+        async Task TakeArcadeDetails(ArcadiaGameDetails details)
+        {
+            var merged = await ArcadiaDetailsMerge.Merge(Collect(), details, media => client.MediaAsync(key!, media.Url, work!.Token));
+            FillDetails(merged); Apply();
+            editor.Log("Arcadia: took the game's details from Arcadia into the project.");
+        }
+        /// <summary>Puts a game's details into the form: what Load details from Arcadia and Keep Arcadia's show.</summary>
+        void FillDetails(PublishSettings s)
+        {
+            title.Text = s.Title; description.Text = s.Description; controls.Text = s.Controls;
+            for (int i = 0; i < 3; i++) genres[i].Text = i < s.Genre.Count ? s.Genre[i] : "";
+            mobile.IsChecked = s.Mobile;
+            for (int i = 0; i < videos.Length; i++) videos[i].Text = i < s.Videos.Count ? s.Videos[i] : "";
+            cover = s.Cover; coverType = s.CoverType;
+            gallery.Clear(); gallery.AddRange(s.Screenshots.Select(x => new PublishImage { Type = x.Type, Bytes = x.Bytes }));
+            leaderboard.IsChecked = s.Leaderboard; scoresPanel.Visibility = s.Leaderboard ? Visibility.Visible : Visibility.Collapsed;
+            var c = s.Scores;
+            label.Text = c.Label; Select(format, c.Format); Select(order, c.Order); Select(aggregate, c.Aggregate);
+            min.Text = c.Min.ToString(CultureInfo.InvariantCulture); max.Text = c.Max?.ToString(CultureInfo.InvariantCulture) ?? ""; minSeconds.Text = c.MinSeconds.ToString(CultureInfo.InvariantCulture);
+            scoreFrom.Text = c.Score.Variable; scorePath.Text = c.Score.Path; whole.IsChecked = c.Round != "none";
+            triggers.Children.Clear(); stats.Children.Clear();
+            foreach (var t in c.Triggers) AddTrigger(t);
+            foreach (var st in c.Stats) AddStat(st);
+            if (c.Triggers.Count == 0) AddTrigger(new PublishTrigger());
+            ShowPicture(); ShowShots(); ShowVideoNote();
         }
         void ShowFindings(List<ArcadiaFinding> local, List<ArcadiaFinding> arcade)
         {
@@ -712,7 +973,7 @@ public partial class MainWindow
     }
 
     // ---- MCP: prepare and check only; publishing is the person's own click ----
-    internal Task<string> McpArcadia(string action, string expected, string settings, string screenshot, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(async () =>
+    internal Task<string> McpArcadia(string action, string expected, string settings, string cover, string screenshots, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(async () =>
     {
         try
         {
@@ -727,16 +988,28 @@ public partial class MainWindow
                     arcade = client.Arcade.ToString(), linked = arcadiaKey != null && problem == null, problem,
                     creator = account?.Creator.Name, autoPublish = account?.Creator.AutoPublish, uploadsOpen = account?.Publishing.Enabled, maxUploadMb = account?.Publishing.MaxUploadMb,
                     gameId = RememberedGameId(client.Host), gameInAccount = account == null || RememberedGameId(client.Host) == null ? (bool?)null : account.Games.Any(g => g.Id == RememberedGameId(client.Host)), newGameLimit = account?.Limits.NewGame,
-                    settings = project.Publishing, hasScreenshot = project.Publishing.Screenshot.Length > 0, scoreSources = ArcadiaPackage.StateNames(project),
+                    settings = project.Publishing, hasCover = project.Publishing.Cover.Length > 0, screenshots = project.Publishing.Screenshots.Count, scoreSources = ArcadiaPackage.StateNames(project),
                     runtimeSha256 = ArcadiaPackage.RuntimeSha256,
                     note = "Publishing itself is done by the person, in File → Publish to Arcadia."
                 });
             }
             if (action is not ("prepare" or "check")) throw new InvalidOperationException("action is status, prepare or check.");
-            if (settings.Trim().Length > 0 || screenshot.Trim().Length > 0)
+            if (settings.Trim().Length > 0 || cover.Trim().Length > 0 || screenshots.Trim().Length > 0)
             {
                 CheckRevision(expected);
                 var s = Json.CloneProject(project).Publishing;
+                // "capture" takes the open Preview's screen; anything else is an absolute path to a picture.
+                async Task<(byte[] Bytes, string Type)> Picture(string source, string what)
+                {
+                    if (source.Trim() == "capture")
+                    {
+                        if (activePreview == null || !activePreview.IsOpen) throw new InvalidOperationException("Open Preview first (preview_control open), then capture.");
+                        return FitScreenshot(await activePreview.CaptureScreenAsync());
+                    }
+                    if (!Path.IsPathFullyQualified(source) || !File.Exists(source)) throw new InvalidDataException(what + " is \"capture\" or an absolute path to a PNG, JPEG or WebP.");
+                    var bytes = File.ReadAllBytes(source);
+                    return (bytes, ArcadiaPackage.ImageType(bytes) ?? throw new InvalidDataException(Path.GetFileName(source) + " isn't really a PNG, JPEG or WebP picture."));
+                }
                 if (settings.Trim().Length > 0)
                 {
                     var given = Json.Read<PublishSettings>(settings);
@@ -745,18 +1018,31 @@ public partial class MainWindow
                     if (node.ContainsKey("genre")) s.Genre = given.Genre; if (node.ContainsKey("version")) s.Version = given.Version;
                     if (node.ContainsKey("controls")) s.Controls = given.Controls; if (node.ContainsKey("aspectRatio")) s.AspectRatio = given.AspectRatio;
                     if (node.ContainsKey("leaderboard")) s.Leaderboard = given.Leaderboard; if (node.ContainsKey("scores")) s.Scores = given.Scores;
+                    if (node.ContainsKey("mobile")) s.Mobile = given.Mobile;
+                    if (node.ContainsKey("leaderboardPage"))
+                    {
+                        string page = given.LeaderboardPage.Trim();
+                        if (!(page is "" or "standard" || (page == "file" && s.LeaderboardHtml.Length > 0) || (page.StartsWith("board:") && project.Leaderboards.Any(b => b.Id == page[6..]))))
+                            throw new InvalidDataException("leaderboardPage is \"\" (the first leaderboard), \"standard\", or \"board:<id>\" of one of: " + string.Join(", ", project.Leaderboards.Select(b => b.Id)));
+                        s.LeaderboardPage = page;
+                    }
+                    if (node.ContainsKey("videos"))
+                    {
+                        var links = given.Videos.Select(v => v.Trim()).Where(v => v.Length > 0).ToList();
+                        if (links.Count > ArcadiaPackage.MaxVideos) throw new InvalidDataException($"At most {ArcadiaPackage.MaxVideos} video links.");
+                        var wrong = links.FirstOrDefault(l => !ArcadiaPackage.IsYouTube(l));
+                        if (wrong != null) throw new InvalidDataException("\"" + wrong + "\" isn't a YouTube video link (youtube.com/watch?v=…, youtu.be/… or youtube.com/shorts/…).");
+                        s.Videos = links;
+                    }
                 }
-                if (screenshot.Trim() == "capture")
+                if (cover.Trim().Length > 0) (s.Cover, s.CoverType) = await Picture(cover, "cover");
+                if (screenshots.Trim().Length > 0)
                 {
-                    if (activePreview == null || !activePreview.IsOpen) throw new InvalidOperationException("Open Preview first (preview_control open), then capture.");
-                    (s.Screenshot, s.ScreenshotType) = FitScreenshot(await activePreview.CaptureScreenAsync());
-                }
-                else if (screenshot.Trim().Length > 0)
-                {
-                    if (!Path.IsPathFullyQualified(screenshot) || !File.Exists(screenshot)) throw new InvalidDataException("screenshot is \"capture\" or an absolute path to a PNG, JPEG or WebP.");
-                    var bytes = File.ReadAllBytes(screenshot);
-                    s.ScreenshotType = ArcadiaPackage.ImageType(bytes) ?? throw new InvalidDataException("That file isn't really a PNG, JPEG or WebP picture.");
-                    s.Screenshot = bytes;
+                    var sources = Json.Read<List<string>>(screenshots);
+                    if (sources.Count > ArcadiaPackage.MaxScreenshots) throw new InvalidDataException($"At most {ArcadiaPackage.MaxScreenshots} screenshots.");
+                    var list = new List<PublishImage>();
+                    foreach (var source in sources) { var (bytes, type) = await Picture(source, "each screenshot"); list.Add(new PublishImage { Type = type, Bytes = bytes }); }
+                    s.Screenshots = list;
                 }
                 Change(); project.Publishing = s; RefreshAll();
                 Log("MCP updated the Publish to Arcadia settings.");
@@ -786,6 +1072,9 @@ public partial class MainWindow
                 package = zipPath, files = files.Count, bytes = zip.Length, gameJson = System.Text.Json.Nodes.JsonNode.Parse(Encoding.UTF8.GetString(files["game.json"])),
                 local, blocked = local.Any(f => f.Level == "block"),
                 arcade = arcade == null ? null : new { arcade.Ok, arcade.WouldHold, arcade.Refused, arcade.Findings },
+                // Details edited on the website since the last publish: the person is asked in the Publish window whether to
+                // keep Arcadia's (the default) or use the project's. An assistant only reports it; it never chooses.
+                detailsChanged = arcade?.Details is { Conflict: true } clash ? new { fields = clash.Changed.Select(ArcadiaDetailsMerge.Name).ToList(), clash.EditedBy, clash.EditedAt, note = "These were changed on Arcadia since the last publish. When the person publishes, they choose whether to keep Arcadia's (the default) or replace them with the project's; Load details from Arcadia copies Arcadia's into the project." } : null,
                 revision = Revision(),
                 note = "Nothing was published. The person publishes from File → Publish to Arcadia."
             });
@@ -797,6 +1086,6 @@ public partial class MainWindow
 
 public sealed partial class DesignerMcpTools
 {
-    [McpServerTool(Name = "arcadia_publish"), Description("Prepare a game for Arcadia (the web arcade) and check it. This never publishes: the person publishes from File → Publish to Arcadia. action: status (link, account, limits, current settings, score sources; read-only), prepare (build the package zip under LocalAppData/Wysicraft/McpExports and run the local upload rules), check (prepare, then the arcade's own dry run; needs this computer linked). settings (optional JSON, saved to the project as one Undo step): {title, description, genre: [up to 3], version, controls, aspectRatio, leaderboard: bool, scores: {label, format: points|number|time, order: desc|asc, aggregate: best|sum, min, max, minSeconds, score: {variable, path}, triggers: [{variable, path, equals?}], stats: [{key, label, aggregate: max|min|sum, variable, path}], round: floor|none}}. A trigger without equals means 'is true'. screenshot (optional): \"capture\" takes it from the open Preview (fitted to 1280×800), or an absolute path to a PNG/JPEG/WebP. expectedRevision is needed when settings or screenshot are given.")]
-    public Task<string> ArcadiaPublish(string action, string expectedRevision = "", string settings = "", string screenshot = "", CancellationToken cancellationToken = default) => editor.McpArcadia(action, expectedRevision, settings, screenshot, cancellationToken);
+    [McpServerTool(Name = "arcadia_publish"), Description("Prepare a game for Arcadia (the web arcade) and check it. This never publishes: the person publishes from File → Publish to Arcadia. action: status (link, account, limits, current settings, score sources; read-only), prepare (build the package zip under LocalAppData/Arcadia Studio/McpExports and run the local upload rules), check (prepare, then the arcade's own dry run; needs this computer linked). settings (optional JSON, saved to the project as one Undo step): {title, description, genre: [up to 3], version, controls, aspectRatio, mobile: bool (plays on phones and tablets: touch controls and fits a small screen), videos: [up to 3 YouTube links: youtube.com/watch?v=, youtu.be/ or youtube.com/shorts/], leaderboard: bool, scores: {label, format: points|number|time, order: desc|asc, aggregate: best|sum, min, max, minSeconds, score: {variable, path}, triggers: [{variable, path, equals?}], stats: [{key, label, aggregate: max|min|sum, variable, path, check: false for a stat that doesn't grow over time, like accuracy %}], round: floor|none}}. A trigger without equals means 'is true'. cover (optional; required before publishing): \"capture\" takes it from the open Preview (fitted to 1280×800), or an absolute path to a PNG/JPEG/WebP. screenshots (optional): a JSON array of up to 8, each \"capture\" or an absolute path, replacing the gallery in that order ([] clears it). screenshot is the older name for cover. expectedRevision is needed when settings, cover or screenshots are given.")]
+    public Task<string> ArcadiaPublish(string action, string expectedRevision = "", string settings = "", string cover = "", string screenshots = "", string screenshot = "", CancellationToken cancellationToken = default) => editor.McpArcadia(action, expectedRevision, settings, cover.Length > 0 ? cover : screenshot, screenshots, cancellationToken);
 }

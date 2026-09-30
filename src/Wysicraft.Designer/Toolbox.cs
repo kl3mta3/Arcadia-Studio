@@ -13,6 +13,13 @@ public partial class MainWindow
     static readonly (string Tag, string Icon, string Label)[] ShapeStamps =
         [("shape:rectangle", "rectangle", "Rectangle"), ("shape:ellipse", "ellipse", "Circle / oval"), ("shape:triangle", "triangle", "Triangle"),
          ("shape:diamond", "diamond", "Diamond"), ("shape:hexagon", "hexagon", "Hexagon"), ("shape:star", "star", "Star")];
+    static readonly (string Tag, string Icon, string Label, string Tip)[] SlotStamps =
+        [("slots:crafting_table", "crafting_table", "Crafting table", "A 3 × 3 crafting grid, its result and the player's inventory and hotbar below, laid out like Minecraft's crafting table. Items move for real and recipes work."),
+         ("slots:player", "slots", "Player inventory", "The player's 27 inventory slots (9 × 3). Items move for real."),
+         ("slots:hotbar", "slots", "Hotbar", "The player's 9 hotbar slots."),
+         ("slots:storage", "slots", "Storage slots", "Temporary slots (9 × 3). Whatever is left in them goes back to the player when the screen closes."),
+         ("slots:crafting", "slots", "Crafting grid", "A 3 × 3 crafting grid using the game's recipes. Add a Crafting result beside it. Left-over items go back to the player."),
+         ("slots:result", "slots", "Crafting result", "The crafting grid's output slot.")];
     static readonly (string Tag, string Icon, string Label, string Tip)[] AdvancedTools =
         [("collider:box", "collider", "Box collider", "An invisible wall or floor for physics. Draw it over your art."),
          ("collider:circle", "collider_circle", "Circle collider", "An invisible round collision area for physics."),
@@ -35,9 +42,16 @@ public partial class MainWindow
             row.Children.Add(new TextBlock { Text = text, FontWeight = FontWeights.SemiBold, Foreground = open == null ? Brushes.Gray : new SolidColorBrush(Color.FromRgb(0x91, 0xCF, 0xFF)) });
             return new ListBoxItem { Content = row, Focusable = open != null, IsHitTestVisible = open != null, Padding = new Thickness(6, 8, 6, 3), ToolTip = tip, Cursor = open != null ? System.Windows.Input.Cursors.Hand : null };
         }
-        foreach (var spec in Registry.Controls.Values.Where(s => !s.Advanced && s.Type != "shape")) Toolbox.Items.Add(Item(spec.Type, spec.Type, spec.DisplayName));
+        // A leaderboard page has its own toolbox: page pieces and the widgets that read the arcade's board.
+        if (ui.IsLeaderboard) { LeaderboardToolbox((tag, icon, label, tip, indent) => Item(tag, icon, label, tip, indent), (text, open, tip) => Header(text, open, tip)); return; }
+        foreach (var spec in Registry.Controls.Values.Where(s => !s.Advanced && s.Type is not ("shape" or "slots"))) Toolbox.Items.Add(Item(spec.Type, spec.Type, spec.DisplayName));
         Toolbox.Items.Add(Header("Shapes"));
         foreach (var (tag, icon, label) in ShapeStamps) Toolbox.Items.Add(Item(tag, icon, label, "A shape with a color or texture fill. Stretch it into ovals and rectangles.", 6));
+        if (project.Manifest.Target != "web")
+        {
+            Toolbox.Items.Add(Header("Item slots · Minecraft"));
+            foreach (var (tag, icon, label, tip) in SlotStamps) Toolbox.Items.Add(Item(tag, icon, label, tip + " Minecraft only.", 6));
+        }
         if (advancedMenu != null) advancedMenu.Visibility = project.Manifest.Target == "minecraft" ? Visibility.Collapsed : Visibility.Visible;
         if (project.Manifest.Target == "minecraft") return;
         bool open = Prefs().AdvancedOpen;
@@ -68,10 +82,31 @@ public partial class MainWindow
         prefs.AdvancedOpen = !prefs.AdvancedOpen; SavePrefs(); RebuildToolbox();
     }
 
+    /// <summary>An item slots control's size from its grid: 18 GUI pixels a slot (a result is one big 26 × 26 slot).</summary>
+    internal static void FitSlots(Element e)
+    {
+        if (e.SlotKind == "result") { e.Bounds.Width = 26; e.Bounds.Height = 26; return; }
+        e.Bounds.Width = Math.Clamp(e.Columns, 1, 9) * Registry.SlotCell; e.Bounds.Height = Math.Clamp(e.Rows, 1, 6) * Registry.SlotCell;
+    }
     void ApplyControlPreset(Element element, string preset)
     {
         switch (element.Type)
         {
+            case "slots":
+            {
+                var (kind, columns, rows, start, id) = preset switch
+                {
+                    "hotbar" => ("player", 9, 1, 0, "hotbar"),
+                    "storage" => ("storage", 9, 3, 0, "storage"),
+                    "crafting" => ("crafting", 3, 3, 0, "crafting_grid"),
+                    "result" => ("result", 1, 1, 0, "crafting_result"),
+                    _ => ("player", 9, 3, 9, "inventory")
+                };
+                element.SlotKind = kind; element.Columns = columns; element.Rows = rows; element.SlotStart = start;
+                element.Id = Unique(id); element.Text = ""; element.FillEnabled = false; element.BorderWidth = 0;
+                FitSlots(element);
+                break;
+            }
             case "shape":
                 if (Shapes.Names.Contains(preset)) element.Shape = preset;
                 element.Id = Unique(element.Shape == "ellipse" ? "circle" : element.Shape);

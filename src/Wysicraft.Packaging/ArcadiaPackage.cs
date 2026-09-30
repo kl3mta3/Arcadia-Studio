@@ -22,15 +22,15 @@ public sealed class ArcadiaFinding
     public ArcadiaFinding(string level, string code, string message, string? file = null) { Level = level; Code = code; Message = message; File = file; }
 }
 
-/// <summary>A game packed for Arcadia (docs/ARCADIA.md): the ordinary folder web export, plus game.json and the
-/// screenshot at the root of a zip. Check applies the arcade's upload rules locally, so most mistakes show before
+/// <summary>A game packed for Arcadia (docs/ARCADIA.md): the ordinary folder web export, plus game.json, the cover and
+/// any screenshots, in a zip. Check applies the arcade's upload rules locally, so most mistakes show before
 /// anything is sent.</summary>
 public static class ArcadiaPackage
 {
-    public const string DefaultArcade = "https://arcadia.lastweeksproject.com";
+    public const string DefaultArcade = "https://arcadia.arcadiastudio.games";
     public const int MaxFiles = 1000, MaxFolders = 10, DefaultMaxUploadMb = 50;
     public const long MaxFileBytes = 25L * 1024 * 1024, MaxScreenshotBytes = 2L * 1024 * 1024;
-    public const int ScreenshotWidth = 1280, ScreenshotHeight = 800;
+    public const int ScreenshotWidth = 1280, ScreenshotHeight = 800, MaxScreenshots = 8, MaxVideos = 3;
     public static readonly string[] Genres = ["Action", "Arcade", "Puzzle", "Platformer", "Runner", "Shooter", "Strategy", "Survival", "Roguelike", "Racing", "Sports", "Casual", "Classic"];
     static readonly HashSet<string> Allowed = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -42,6 +42,27 @@ public static class ArcadiaPackage
     static readonly Regex PathPart = new(@"^[A-Za-z0-9_][A-Za-z0-9_.\-() ]*$");
     static readonly Regex StatKey = new(@"^[a-z0-9_]+$");
     static readonly Regex StateSet = new(@"ctx\.state\.set\(\s*['""]([A-Za-z_][A-Za-z0-9_]*)['""]");
+    // YouTube links the arcade takes: youtube.com/watch?v=…, youtu.be/… and youtube.com/shorts/… (11-character video IDs).
+    static readonly Regex YouTube = new(@"^https?://(?:(?:www\.|m\.)?youtube\.com/(?:watch\?(?:[^\s#]*&)?v=[A-Za-z0-9_-]{11}(?:[&#][^\s]*)?|shorts/[A-Za-z0-9_-]{11}(?:[/?#][^\s]*)?)|youtu\.be/[A-Za-z0-9_-]{11}(?:[/?#][^\s]*)?)$", RegexOptions.IgnoreCase);
+    /// <summary>Whether a link is a YouTube video the arcade will take (a watch, youtu.be or shorts link).</summary>
+    public static bool IsYouTube(string link) => YouTube.IsMatch(link.Trim());
+    /// <summary>The cover's name in the package: cover.png, cover.jpg or cover.webp.</summary>
+    public static string CoverName(PublishSettings s) => "cover." + (s.CoverType.Length > 0 ? s.CoverType : "png");
+    /// <summary>The leaderboard page an upload carries: one of the project's leaderboards (Board), a page imported as it is
+    /// (Html), or neither (the arcade's standard board). "" means the project's first leaderboard, if it has one.</summary>
+    public static (UiDefinition? Board, byte[]? Html, bool Chosen) LeaderboardPageOf(Project project, PublishSettings s)
+    {
+        string choice = s.LeaderboardPage;
+        if (choice == "standard") return (null, null, false);
+        if (choice == "file") return (null, s.LeaderboardHtml.Length > 0 ? s.LeaderboardHtml : null, true);
+        if (choice.StartsWith("board:", StringComparison.Ordinal)) return (project.Leaderboards.FirstOrDefault(b => b.Id == choice[6..]), null, true);
+        var first = project.Leaderboards.FirstOrDefault();
+        return (first, null, first != null);
+    }
+    // Anything a page would load from another website: the arcade runs pages with no network.
+    static readonly Regex Outside = new(@"(?:\b(?:src|href|action)\s*=\s*[""']?\s*|url\(\s*[""']?\s*|@import\s+[""']?)(?:https?:)?//", RegexOptions.IgnoreCase);
+    /// <summary>The screenshots' names in the package, in gallery order: screenshots/1.png, screenshots/2.jpg …</summary>
+    public static List<string> ScreenshotNames(PublishSettings s) => s.Screenshots.Select((x, i) => "screenshots/" + (i + 1) + "." + (x.Type.Length > 0 ? x.Type : "png")).ToList();
     // Already-compressed formats are stored rather than deflated again.
     static readonly HashSet<string> Stored = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".mp4", ".webm", ".ogv", ".woff", ".woff2" };
 
@@ -88,9 +109,16 @@ public static class ArcadiaPackage
             ["genre"] = new JsonArray(s.Genre.Where(g => g.Trim().Length > 0).Select(g => (JsonNode)JsonValue.Create(g.Trim())!).ToArray()),
             ["version"] = s.Version.Trim(),
             ["entry"] = "index.html",
-            ["screenshot"] = "screenshot." + (s.ScreenshotType.Length > 0 ? s.ScreenshotType : "png"),
+            ["cover"] = CoverName(s),
             ["controls"] = s.Controls.Trim()
         };
+        if (s.Screenshots.Count > 0) game["screenshots"] = new JsonArray(ScreenshotNames(s).Select(n => (JsonNode)JsonValue.Create(n)!).ToArray());
+        var videos = s.Videos.Select(v => v.Trim()).Where(v => v.Length > 0).ToList();
+        if (videos.Count > 0) game["videos"] = new JsonArray(videos.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray());
+        // Only when it's true: left out, the arcade tells phone players the game may need a keyboard.
+        if (s.Mobile) game["mobile"] = true;
+        var page = LeaderboardPageOf(project, s);
+        if (page.Board != null || page.Html != null) game["leaderboardPage"] = Leaderboards.PageName;
         string aspect = s.AspectRatio.Trim().Length > 0 ? s.AspectRatio.Trim() : AspectRatio(project);
         game["aspectRatio"] = double.TryParse(aspect, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) ? JsonValue.Create(number) : JsonValue.Create(aspect);
         game["wysicraft"] = new JsonObject { ["version"] = wysicraftVersion, ["projectId"] = project.Manifest.Id };
@@ -105,7 +133,12 @@ public static class ArcadiaPackage
                 ["min"] = c.Min, ["minSeconds"] = c.MinSeconds
             };
             if (c.Max is double max) scores["max"] = max;
-            scores["stats"] = new JsonArray(c.Stats.Select(st => (JsonNode)new JsonObject { ["key"] = st.Key.Trim(), ["label"] = st.Label.Trim(), ["format"] = st.Format, ["aggregate"] = st.Aggregate }).ToArray());
+            scores["stats"] = new JsonArray(c.Stats.Select(st =>
+            {
+                var stat = new JsonObject { ["key"] = st.Key.Trim(), ["label"] = st.Label.Trim(), ["format"] = st.Format, ["aggregate"] = st.Aggregate };
+                if (!st.Check) stat["check"] = false;
+                return (JsonNode)stat;
+            }).ToArray());
             var triggers = new JsonArray();
             foreach (var t in c.Triggers) { var w = Watch(t.Variable, t.Path); if (t.EqualsValue != null) w["equals"] = t.EqualsValue; triggers.Add(w); }
             scores["watch"] = new JsonObject
@@ -121,12 +154,18 @@ public static class ArcadiaPackage
     }
 
     /// <summary>Every file in the package: the folder web export (never the single-file one: Arcadia recognises the
-    /// official runtime only as its own file), game.json and the screenshot.</summary>
+    /// official runtime only as its own file), game.json, the cover and the screenshots. Videos are links only.</summary>
     public static Dictionary<string, byte[]> Files(Project project, PublishSettings s, string wysicraftVersion)
     {
         var files = WebExport.Files(project);
         files["game.json"] = Encoding.UTF8.GetBytes(GameJson(project, s, wysicraftVersion));
-        if (s.Screenshot.Length > 0) files["screenshot." + (s.ScreenshotType.Length > 0 ? s.ScreenshotType : "png")] = s.Screenshot;
+        if (s.Cover.Length > 0) files[CoverName(s)] = s.Cover;
+        var names = ScreenshotNames(s);
+        for (int i = 0; i < names.Count; i++) if (s.Screenshots[i].Bytes.Length > 0) files[names[i]] = s.Screenshots[i].Bytes;
+        // The leaderboard page: made from the project's leaderboard now, or the imported page as it is.
+        var page = LeaderboardPageOf(project, s);
+        if (page.Board != null) foreach (var (path, bytes) in Leaderboards.Page(project, page.Board)) files[path] = bytes;
+        else if (page.Html != null) files[Leaderboards.PageName] = page.Html;
         return files;
     }
 
@@ -183,8 +222,8 @@ public static class ArcadiaPackage
         return null;
     }
 
-    /// <summary>The arcade's upload rules, applied here first: the details, the leaderboard, the screenshot, and every
-    /// file's path, type and size. Anything at level block would be refused.</summary>
+    /// <summary>The arcade's upload rules, applied here first: the details, the leaderboard, the cover, screenshots and
+    /// video links, and every file's path, type and size. Anything at level block would be refused.</summary>
     public static List<ArcadiaFinding> Check(Project project, PublishSettings s, Dictionary<string, byte[]> files, int maxUploadMb = DefaultMaxUploadMb)
     {
         var found = new List<ArcadiaFinding>();
@@ -234,22 +273,46 @@ public static class ArcadiaPackage
             if (c.Stats.GroupBy(st => st.Key.Trim()).Any(g => g.Count() > 1)) Add("block", "scores", "Two extra columns have the same key.");
         }
 
-        // The screenshot.
-        var shot = files.FirstOrDefault(f => f.Key.StartsWith("screenshot.", StringComparison.Ordinal));
-        if (shot.Key == null) Add("block", "screenshot", "Add a screenshot: capture one from Preview or choose a picture.");
-        else
+        // The pictures: the cover (required) and the screenshots (optional, up to 8), each checked the same way.
+        void Picture(string code, string what, string name, byte[] bytes)
         {
-            string? type = ImageType(shot.Value);
-            if (type == null || !shot.Key.EndsWith("." + type, StringComparison.Ordinal)) Add("block", "screenshot", "The screenshot isn't really a PNG, JPEG or WebP picture.", shot.Key);
-            if (shot.Value.Length > MaxScreenshotBytes) Add("block", "screenshot", $"The screenshot is {shot.Value.Length / 1048576.0:0.0} MB; at most 2 MB.", shot.Key);
-            if (ImageSize(shot.Value) is var (w, h) && (w != ScreenshotWidth || h != ScreenshotHeight)) Add("warn", "screenshot", $"The screenshot is {w} × {h}. Arcadia shows it at 1280 × 800 (16:10), so it may be cropped or blurry.", shot.Key);
+            string? type = ImageType(bytes);
+            if (type == null || !name.EndsWith("." + type, StringComparison.Ordinal)) Add("block", code, $"{what} isn't really a PNG, JPEG or WebP picture.", name);
+            if (bytes.Length > MaxScreenshotBytes) Add("block", code, $"{what} is {bytes.Length / 1048576.0:0.0} MB; at most 2 MB.", name);
+            if (ImageSize(bytes) is var (w, h) && (w != ScreenshotWidth || h != ScreenshotHeight)) Add("warn", code, $"{what} is {w} × {h}. Arcadia shows it at 1280 × 800 (16:10), so it may be cropped or blurry.", name);
         }
+        string coverName = CoverName(s);
+        if (!files.TryGetValue(coverName, out var cover)) Add("block", "cover", "Add a cover: capture one from Preview or choose a picture.");
+        else Picture("cover", "The cover", coverName, cover);
+        var shotNames = ScreenshotNames(s);
+        if (shotNames.Count > MaxScreenshots) Add("block", "screenshots", $"{shotNames.Count} screenshots; at most {MaxScreenshots}.");
+        for (int i = 0; i < shotNames.Count; i++)
+        {
+            if (!files.TryGetValue(shotNames[i], out var shot)) Add("block", "screenshots", $"Screenshot {i + 1} has no picture.", shotNames[i]);
+            else Picture("screenshots", $"Screenshot {i + 1}", shotNames[i], shot);
+        }
+        if (shotNames.Count is > 0 and < 3) Add("info", "screenshots", "Games with 3 or more screenshots show a fuller gallery on their page.");
+        else if (shotNames.Count == 0) Add("info", "screenshots", "No screenshots: add a few (3 or more is best) to show the game on its page.");
+
+        // The video links: YouTube only, and never files.
+        var links = s.Videos.Select(v => v.Trim()).Where(v => v.Length > 0).ToList();
+        if (links.Count > MaxVideos) Add("block", "videos", $"{links.Count} video links; at most {MaxVideos}.");
+        foreach (var link in links.Where(l => !IsYouTube(l))) Add("block", "videos", $"\"{link}\" isn't a YouTube video link (youtube.com/watch?v=…, youtu.be/… or youtube.com/shorts/…).");
+
+        // The leaderboard page.
+        var board = LeaderboardPageOf(project, s);
+        if (board.Chosen && board.Board == null && board.Html == null)
+            Add("block", "leaderboard-page", s.LeaderboardPage == "file" ? "The imported leaderboard page is missing: import it again or choose another." : $"The leaderboard page \"{s.LeaderboardPage[6..]}\" isn't in the project anymore: choose another.");
+        if ((board.Board != null || board.Html != null) && !s.Leaderboard) Add("warn", "leaderboard-page", "There's a leaderboard page but Keep a leaderboard is off, so the page would have nothing to show.");
+        if (board.Board != null) foreach (var problem in Leaderboards.Problems(project, board.Board)) Add("warn", "leaderboard-page", "Leaderboard page: " + problem);
+        if (files.TryGetValue(Leaderboards.PageName, out var pageBytes) && Outside.IsMatch(Encoding.UTF8.GetString(pageBytes)))
+            Add("block", "leaderboard-page", "The leaderboard page loads something from another website. Pages on the arcade can only use files in the game.", Leaderboards.PageName);
 
         // The files.
         if (!files.ContainsKey("game.json")) Add("block", "game-json", "game.json is missing.");
         if (!files.ContainsKey("index.html")) Add("block", "entry", "index.html is missing.");
-        if (!files.TryGetValue("wysicraft/wysicraft-web.js", out var runtime)) Add("block", "runtime", "The Arcadia Studio runtime (wysicraft/wysicraft-web.js) is missing.");
-        else if (Convert.ToHexString(SHA256.HashData(runtime)).ToLowerInvariant() != RuntimeSha256) Add("hold", "runtime", "The Arcadia Studio runtime isn't the one this version of Arcadia Studio ships, so a moderator would have to look at it.", "wysicraft/wysicraft-web.js");
+        if (!files.TryGetValue("wysicraft/wysicraft-web.js", out var runtime)) Add("block", "runtime", "The Arcadia Studio runtime is missing from the game.");
+        else if (Convert.ToHexString(SHA256.HashData(runtime)).ToLowerInvariant() != RuntimeSha256) Add("hold", "runtime", "The game's Arcadia Studio runtime has been changed, so a moderator would have to look at it.");
         if (files.Count > MaxFiles) Add("block", "files", $"{files.Count} files; at most {MaxFiles}.");
         var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (path, bytes) in files)

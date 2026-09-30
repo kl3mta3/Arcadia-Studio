@@ -101,7 +101,7 @@ public partial class MainWindow : Window {
 		history = new History<Project>(() => project, delegate(Project value)
 		{
 			project = value;
-			ui = project.Screens.FirstOrDefault((UiDefinition s) => s.Id == ui.Id) ?? project.Screens[0];
+			ui = ResolveUi(ui);
 			dirty = true;
 			RefreshAll();
 		}, Json.CloneProject);
@@ -401,6 +401,8 @@ public partial class MainWindow : Window {
 			editingScript = null;
 			project = new Project();
 			project.Manifest.Name = text;
+			// New games keep script state between events once they're made for web & desktop (see Project settings).
+			project.Manifest.KeepScriptState = true;
 			project.Manifest.Id = Regex.Replace(text.ToLowerInvariant(), "[^a-z0-9_]", "_");
 			if (!Wysicraft.Core.Validation.Id(project.Manifest.Id))
 			{
@@ -545,9 +547,9 @@ public partial class MainWindow : Window {
 	private void RefreshAll()
 	{
 		refreshing = true;
-		if (toolboxTarget != project.Manifest.Target) { toolboxTarget = project.Manifest.Target; RebuildToolbox(); }
+		if (toolboxTarget != ToolboxKey()) { toolboxTarget = ToolboxKey(); RebuildToolbox(); }
 		Screens.ItemsSource = project.Screens.Where(s=>!s.IsComponent).Select((UiDefinition s) => s.Id).ToList();
-		Screens.SelectedItem = ui.IsComponent?null:ui.Id;
+		Screens.SelectedItem = ui.IsComponent || ui.IsLeaderboard ? null : ui.Id;
         RefreshSourceContext();
 		refreshing = false;
 		RefreshScripts();
@@ -562,6 +564,11 @@ public partial class MainWindow : Window {
 	{
 		// Toolbox stamps carry a preset after a colon: "shape:star", "collider:circle".
 		string preset = ""; int colon = type.IndexOf(':'); if (colon > 0) { preset = type[(colon + 1)..]; type = type[..colon]; }
+		// What can go where: a leaderboard page takes page pieces and widgets only, and widgets go nowhere else.
+		if (type == "lb") { AddBoardWidget(preset, Snap(x), Snap(y)); return; }
+		if (ui.IsLeaderboard && !Leaderboards.Types.Contains(type)) throw new InvalidOperationException("A leaderboard page holds labels, pictures, panels, shapes and leaderboard widgets.");
+		if (!ui.IsLeaderboard && type.StartsWith("lb_")) throw new InvalidOperationException("Leaderboard widgets go on leaderboard pages: Advanced → Create leaderboard.");
+		if (type == "slots" && preset == "crafting_table") { AddCraftingTable(Snap(x), Snap(y)); return; }
 		Change();
 		Element element = new Element();
 		element.Type = type;
@@ -1064,6 +1071,8 @@ public partial class MainWindow : Window {
 		Element? element = ui.Elements.FirstOrDefault((Element e) => selected.Contains(e.Id));
 		// Ask Agent sits above everything, including Identity: it is about the thing as a whole, not one field of it.
 		AddAskAgent(Properties, element);
+		if (element == null && ui.IsLeaderboard) { BuildLeaderboardSettings(); return; }
+		if (element != null && ui.IsLeaderboard) { BuildLeaderboardElementInspector(element); return; }
 		if (element == null)
 		{
 			BuildComponentFields(null); BuildScreenSettings();
@@ -1361,11 +1370,29 @@ public partial class MainWindow : Window {
 		target.SelectionChanged += (_, _) => clone.Target = targets[target.SelectedIndex].Key;
 		targetRow.Children.Add(target); stackPanel.Children.Add(targetRow);
 		stackPanel.Children.Add(new TextBlock { Text = "Web & desktop projects can use the Advanced toolbox and bigger screens. Minecraft exports list anything Minecraft can't run.", TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 0, 0, 8) });
+		// Kept script state: only for web & desktop, where a game is one player in one browser.
+		var keep = new CheckBox { Content = "Scripts keep their variables between events", IsChecked = clone.KeepScriptState, Margin = new Thickness(0, 2, 0, 2),
+			ToolTip = "Each script runs from the top once; after that only the event's function is called, so top-level variables (let score = 0) last until the game starts over. Web & desktop only: Minecraft runs every event from the top." };
+		keep.Checked += (_, _) => clone.KeepScriptState = true; keep.Unchecked += (_, _) => clone.KeepScriptState = false;
+		var keepNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 0, 0, 8) };
+		void KeepShown() { bool web = clone.Target == "web"; keep.IsEnabled = web; keepNote.Text = web ? "Top-level variables in scripts last from one event to the next. Keep anything the game should save or show in Preview's variables in ctx.state or ctx.save." : "Only for Web & desktop projects: Minecraft runs each event's script from the top, so keep state in ctx.state."; }
+		target.SelectionChanged += (_, _) => KeepShown(); KeepShown();
+		stackPanel.Children.Add(keep); stackPanel.Children.Add(keepNote);
+		// Game variables: the whole game's, in the same name=value;name=value form as a screen's variables.
+		TextBox Row(string label, string text, string tip)
+		{
+			var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+			row.Children.Add(new TextBlock { Text = label, Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, ToolTip = tip });
+			var box = new TextBox { Text = text, ToolTip = tip }; row.Children.Add(box); stackPanel.Children.Add(row); return box;
+		}
+		var gameVars = Row("Game variables", string.Join(";", clone.GameVariables.Select(v => v.Key + "=" + v.Value)), "Variables of the whole game, as name=value;name=value. They keep their value when another screen opens, so a Game over screen can show ${score}. Web & desktop.");
+		var savedVars = Row("Saved between visits", string.Join(";", clone.SavedVariables), "Which game variables are kept after the game closes, as name;name (a best score, settings). Web & desktop.");
+		stackPanel.Children.Add(new TextBlock { Text = "Game variables work like screen variables but carry across screens; saved ones come back next time the game opens.", TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 0, 0, 8) });
 		Window window = new Window
 		{
 			Title = "Project settings",
 			Width = 490.0,
-			Height = 540.0,
+			Height = 740.0,
 			Owner = this,
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Content = stackPanel
@@ -1377,6 +1404,12 @@ public partial class MainWindow : Window {
 		};
 		button.Click += delegate
 		{
+			// Game variables from their text fields; a bad name is said at once rather than left for Validate.
+			var variables = new Dictionary<string, string>(); var savedNames = new List<string>(); string? bad = null;
+			foreach (var pair in gameVars.Text.Split(';', StringSplitOptions.RemoveEmptyEntries)) { var parts = pair.Split('=', 2); string name = parts[0].Trim(); if (!Wysicraft.Core.Validation.Variable(name)) { bad ??= "Game variables: \"" + name + "\" isn't a valid variable name."; continue; } variables[name] = parts.Length > 1 ? parts[1] : ""; }
+			foreach (var name in savedVars.Text.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(n => n.Trim()).Distinct()) { if (!variables.ContainsKey(name)) { bad ??= "Saved between visits: " + name + " isn't one of the game variables."; continue; } savedNames.Add(name); }
+			if (bad != null) { MessageBox.Show(bad); return; }
+			clone.GameVariables = variables; clone.SavedVariables = savedNames;
 			bool flag = !Wysicraft.Core.Validation.Id(clone.Id) || !Wysicraft.Core.Validation.Version(clone.Version) || !Wysicraft.Core.Validation.Version(clone.RuntimeVersion);
 			if (!flag)
 			{
@@ -1393,9 +1426,13 @@ public partial class MainWindow : Window {
 				Change();
 				string oldId = project.Manifest.Id;
 				project.Manifest = clone;
-				ProjectEdits.MoveAssetNamespace(project, oldId); // keep images working when the Id changes
+				// Keeps images, sounds and fonts working when the Id changes; scripts are text, so the ones naming the old
+				// Id are listed for the person to change.
+				var scripts = ProjectEdits.MoveAssetNamespace(project, oldId);
 				window.Close();
 				RefreshAll();
+				if (scripts.Count > 0)
+					MessageBox.Show(this, $"Images, sounds and fonts now use the ID \"{project.Manifest.Id}\". These scripts still name files as \"{oldId}:…\" and need changing to \"{project.Manifest.Id}:…\":\n\n" + string.Join("\n", scripts) + "\n\nValidate lists each one.", "Project ID changed", MessageBoxButton.OK, MessageBoxImage.Information);
 			}
 		};
 		stackPanel.Children.Add(button);
@@ -1593,8 +1630,10 @@ public partial class MainWindow : Window {
 			frameworkElement = list;
 			break;
 		}
-        case "sprite": case "shape": case "collider": case "camera": case "particles": case "tilemap":
+        case "sprite": case "shape": case "collider": case "camera": case "particles": case "tilemap": case "slots":
             frameworkElement = RenderNewControl(e); break;
+        case "lb_table": case "lb_podium": case "lb_rank": case "lb_icon": case "lb_range": case "lb_slider": case "lb_me": case "lb_periods":
+            frameworkElement = RenderBoardWidget(e); break;
         case "item":
             var icon=ItemImage(e.Item);frameworkElement=icon!=null?new Image {Source=icon,Stretch=Stretch.Uniform}:new TextBlock {Text=e.Item,Foreground=Brush(e.Foreground),TextWrapping=TextWrapping.Wrap};RenderOptions.SetBitmapScalingMode(frameworkElement,BitmapScalingMode.NearestNeighbor);break;
 		default:
@@ -1609,6 +1648,8 @@ public partial class MainWindow : Window {
 			};
 			break;
 		}
+		// On a leaderboard page a label shows what {title}, {players} and the like become (with sample figures).
+		if (ui.IsLeaderboard && e.Type == "label" && frameworkElement is TextBlock boardLabel) boardLabel.Text = BoardText(e.Text, 0);
 		ApplyFont(frameworkElement, e);
 		if (e.Type != "button")
 		{

@@ -75,11 +75,15 @@ public static class ProjectStore
         int scriptBytes = Limits.For(p).ScriptBytes;
         foreach (var (path, code) in p.Scripts) { if (pack && !usedScripts.Contains(path)) continue; if (!path.StartsWith("scripts/") || !path.EndsWith(".js") || Limits.SizeOf(code) > scriptBytes) throw new InvalidDataException("Invalid script"); files.Add(Validation.SafePath(path), Encoding.UTF8.GetBytes(code)); }
         foreach (var (path, data) in TextureAssets.CanonicalAssets(p)) { if (pack && TextureAssets.IsEditorOnly(path)) continue; if (data.Length > MaxEntry) throw new InvalidDataException("Invalid asset"); files.Add(path, data); }
-        // Publishing settings stay with the project file only: never in a pack or an export.
+        // Leaderboard pages and publishing settings stay with the project file only: never in a pack or an export.
+        if (!pack) foreach (var board in p.Leaderboards) files["leaderboards/" + Validation.SafePath(board.Id) + Leaderboards.Extension] = Leaderboards.Write(board);
         if (!pack && !p.Publishing.IsEmpty)
         {
             files["publishing.json"] = Encoding.UTF8.GetBytes(Json.Write(p.Publishing));
-            if (p.Publishing.Screenshot.Length > 0 && p.Publishing.ScreenshotType is "png" or "jpg" or "webp") files["publishing/screenshot." + p.Publishing.ScreenshotType] = p.Publishing.Screenshot;
+            if (p.Publishing.Cover.Length > 0 && p.Publishing.CoverType is "png" or "jpg" or "webp") files["publishing/cover." + p.Publishing.CoverType] = p.Publishing.Cover;
+            for (int i = 0; i < p.Publishing.Screenshots.Count; i++)
+                if (p.Publishing.Screenshots[i] is { Bytes.Length: > 0, Type: "png" or "jpg" or "webp" } shot) files["publishing/screenshots/" + (i + 1) + "." + shot.Type] = shot.Bytes;
+            if (p.Publishing.LeaderboardHtml.Length > 0) files["publishing/leaderboard.html"] = p.Publishing.LeaderboardHtml;
         }
         if (files.Sum(f => (long)f.Value.Length) > MaxPack) throw new InvalidDataException("Pack exceeds 256 MiB");
         return files;
@@ -127,8 +131,16 @@ public static class ProjectStore
         if (files.TryGetValue("publishing.json", out var publishing))
         {
             project.Publishing = Json.Read<PublishSettings>(Encoding.UTF8.GetString(publishing));
-            if (files.TryGetValue("publishing/screenshot." + project.Publishing.ScreenshotType, out var shot)) project.Publishing.Screenshot = shot;
+            var s = project.Publishing;
+            if (files.TryGetValue("publishing/cover." + s.CoverType, out var cover) || files.TryGetValue("publishing/screenshot." + s.CoverType, out cover)) s.Cover = cover;
+            // A screenshot whose picture is missing from the file is dropped rather than published empty.
+            for (int i = 0; i < s.Screenshots.Count; i++) if (files.TryGetValue("publishing/screenshots/" + (i + 1) + "." + s.Screenshots[i].Type, out var shot)) s.Screenshots[i].Bytes = shot;
+            s.Screenshots.RemoveAll(x => x.Bytes.Length == 0);
+            if (files.TryGetValue("publishing/leaderboard.html", out var page)) s.LeaderboardHtml = page;
         }
+        Behaviours.MoveOldTicks(project);
+        foreach (var (name, bytes) in files.Where(f => f.Key.StartsWith("leaderboards/") && f.Key.EndsWith(Leaderboards.Extension)).OrderBy(f => f.Key, StringComparer.Ordinal))
+            project.Leaderboards.Add(Leaderboards.Read(bytes).Board);
         if (files.ContainsKey("manifest.json")) { var errors = Validation.Check(project); if (errors.Count != 0) throw new InvalidDataException(string.Join("\n", errors)); }
         return project;
     }

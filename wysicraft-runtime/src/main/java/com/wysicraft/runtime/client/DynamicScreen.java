@@ -43,6 +43,14 @@ public final class DynamicScreen extends Screen {
         mouseClicked((x(e)+e.bounds.width-6-bw*(secondary?0.5:1.5))*viewScale,(y(e)+index*e.rowHeight-listScroll(e.id)+8)*viewScale,0);
     }
     Element focused, hovered, dragging; private int originX, originY; private boolean opened, closed; private long lastHover, lastTick;
+    /** Set when this screen has item slots: the container screen that shows it (and owns opening and closing). */
+    SlotScreen host;
+    int originX() { return originX; }
+    int originY() { return originY; }
+    /** The Arcadia Studio screen being shown, whether on its own or inside a container screen with item slots. */
+    public static DynamicScreen of(net.minecraft.client.gui.screens.Screen screen) { return screen instanceof DynamicScreen d ? d : screen instanceof SlotScreen s ? s.inner : null; }
+    /** A close_ui action: a screen with item slots closes its container too. */
+    void requestClose() { if (host != null) host.onClose(); else onClose(); }
     public DynamicScreen(Ui ui, String session) { super(Component.literal(ui.title)); this.ui = ui; this.design=ui.copy(); this.session = session; state = new HashMap<>(ui.variables); }
     public Font font() { return font; }
     public String bind(String text) { return Expressions.bind(text,state); }
@@ -53,7 +61,7 @@ public final class DynamicScreen extends Screen {
             int max=e.type.equals("item_list")?Math.max(0,rows(e).size()*e.rowHeight-(int)e.bounds.height):e.type.equals("scroll_panel")?Math.max(0,(int)(ui.elements.stream().filter(c->c.parent.equals(e.id)).mapToDouble(c->c.bounds.y+c.bounds.height).max().orElse(e.bounds.y+e.bounds.height)-e.bounds.y-e.bounds.height)):0;
             if(scroll.containsKey(e.id))scroll.put(e.id,Math.clamp(scroll.get(e.id),0,max));
         }
-        viewScale=ui.responsive?1f:ui.fitToScreen?Math.min(1f,Math.min(width/(ui.size.width+12f),height/(ui.size.height+(ui.showFrame?32f:12f)))):1f;
+        viewScale=host!=null||ui.responsive?1f:ui.fitToScreen?Math.min(1f,Math.min(width/(ui.size.width+12f),height/(ui.size.height+(ui.showFrame?32f:12f)))):1f;
         originX=(int)((width/viewScale-ui.size.width)/2); originY=(int)((height/viewScale-ui.size.height+(ui.showFrame?14:0))/2);
         if (!opened) { opened = true; lastTick = openedAt = System.currentTimeMillis(); fire(null,"open",""); }
     }
@@ -167,8 +175,10 @@ public final class DynamicScreen extends Screen {
     }
     private final Set<Integer> heldKeys = new HashSet<>(); private long lastKey; private boolean keyRepeating;
     @Override public boolean keyReleased(int key,int scan,int modifiers) { heldKeys.remove(key); return super.keyReleased(key,scan,modifiers); }
-    @Override public void onClose() { stopSounds(); if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } super.onClose(); }
-    @Override public void removed() { stopSounds(); if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } }
+    @Override public void onClose() { closing(); super.onClose(); }
+    @Override public void removed() { closing(); }
+    /** The screen's close event and telling the server, once, however the screen goes away. */
+    void closing() { stopSounds(); if (!closed) { closed = true; fire(null,"close",""); if (!remoteClosing) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,"","close","")); } }
     void fire(Element element,String event,String value) {
         var events = element == null ? ui.events : element.events; Event ev = events.get(event); if (ev == null) return;
         if (element != null) PacketDistributor.sendToServer(new Payloads.UiEvent(ui.id,session,element.id,event,value));
@@ -181,6 +191,13 @@ public final class DynamicScreen extends Screen {
             public String value() { return value; }
             public boolean repeat() { return keyRepeating; }
             public String text(String id) { var e = ui.element(id); return e == null ? "" : e.text; }
+            public String query(String operation,String argument) {
+                if (!operation.equals("slot_items")) throw new IllegalArgumentException(operation);
+                var rows = new ArrayList<Object>();
+                if (host != null) for (var stack : host.getMenu().stacksOf(argument))
+                    rows.add(stack.isEmpty() ? null : new com.wysicraft.runtime.model.ItemRows.Row(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),stack.getCount(),stack.getHoverName().getString()));
+                return com.wysicraft.runtime.model.Models.JSON.toJson(rows);
+            }
             public void action(String type,String target,String value) {
                 if (type.startsWith("console_")) { Wysicraft.LOG.info("[JS {}] {}",type.substring(8),value); return; }
                 if (type.equals("set_variable")) { state.put(target,value); return; }
@@ -199,7 +216,7 @@ public final class DynamicScreen extends Screen {
                     case "set_enabled" -> { if (e != null) e.enabled = Boolean.parseBoolean(value); }
                     case "change_texture" -> { if (e != null) e.texture = value; }
                     case "message" -> message(value);
-                    case "close_ui" -> minecraft.execute(DynamicScreen.this::onClose);
+                    case "close_ui" -> minecraft.execute(DynamicScreen.this::requestClose);
                     case "play_sound" -> playSound(value);
                     default -> throw new IllegalArgumentException("Unsupported client script action: " + type);
                 }
@@ -219,7 +236,7 @@ public final class DynamicScreen extends Screen {
             case "toggle_variable" -> state.put(action.target,Boolean.toString(!Boolean.parseBoolean(state.get(action.target))));
             case "message" -> minecraft.player.sendSystemMessage(Component.literal(value));
             case "play_sound" -> playSound(value);
-            case "close_ui" -> onClose();
+            case "close_ui" -> requestClose();
             case "open_ui" -> { /* Server authorizes navigation from the trusted event definition. */ }
             default -> { var handler = ACTIONS.get(action.type); if (handler == null) throw new IllegalArgumentException("Unknown client action"); handler.accept(this,action); }
         }

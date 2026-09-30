@@ -44,6 +44,29 @@ public final class WysicraftApi {
         return json;
     }
     public static void showPlayerInventory(ServerPlayer player,String id) { setItems(player,id,inventoryJson(player)); }
+    /** [{item,count,name}] per cell of a slots control on the player's open screen (null for an empty cell); [] without such a screen or control. */
+    public static String slotsJson(ServerPlayer player, String element) {
+        requireServerThread(player);
+        if (!(player.containerMenu instanceof com.wysicraft.runtime.menu.WysicraftMenu menu) || !Wysicraft.SERVER.hasSession(player, menu.token)) return "[]";
+        var rows = new ArrayList<Object>();
+        for (var stack : menu.stacksOf(element)) rows.add(stack.isEmpty() ? null : slotRow(stack));
+        return com.wysicraft.runtime.model.Models.JSON.toJson(rows);
+    }
+    /** Removes up to count of an item from a slots control on the player's open screen; returns how many were removed. */
+    public static int takeFromSlots(ServerPlayer player, String element, String item, int count) {
+        requireServerThread(player);
+        if (count < 1 || count > 3456) throw new IllegalArgumentException("Count must be 1-3456");
+        if (!(player.containerMenu instanceof com.wysicraft.runtime.menu.WysicraftMenu menu) || !Wysicraft.SERVER.hasSession(player, menu.token)) return 0;
+        var id = net.minecraft.resources.ResourceLocation.tryParse(item);
+        if (id == null || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id)) throw new IllegalArgumentException("Unknown item: " + item);
+        int taken = menu.takeFrom(element, stack -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id), count);
+        if (taken > 0) menu.broadcastChanges();
+        return taken;
+    }
+    private static com.wysicraft.runtime.model.ItemRows.Row slotRow(net.minecraft.world.item.ItemStack stack) {
+        String name = stack.getHoverName().getString(); if (name.length() > 32) name = name.substring(0, 32);
+        return new com.wysicraft.runtime.model.ItemRows.Row(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), name);
+    }
     public static void setVisible(ServerPlayer player, String id, boolean visible) { Wysicraft.SERVER.update(player,"set_visible",id,Boolean.toString(visible)); }
     public static void setEnabled(ServerPlayer player, String id, boolean enabled) { Wysicraft.SERVER.update(player,"set_enabled",id,Boolean.toString(enabled)); }
     public static void setVariable(ServerPlayer player, String name, String value) { Wysicraft.SERVER.update(player,"set_variable",name,value); }

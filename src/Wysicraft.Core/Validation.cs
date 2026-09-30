@@ -26,8 +26,18 @@ public static partial class Validation
     public static List<Issue> Advice(Project project)
     {
         List<Issue> notes = [];
+        // A script naming a picture or sound by an old project ID (after Project settings → Id changed): the file is
+        // now under the new ID, so the script would find nothing.
+        foreach (var (path, source) in Limits.UsedScripts(project))
+            foreach (var old in OldIdMentions(project, source))
+                notes.Add(new("manifest", "", $"{path} names \"{old.Old}\", but that file is now \"{old.Now}\" (the project's ID changed). Change the script to the new name.", Advice: true));
         if (project.Manifest.Target == "minecraft") return notes; // Minecraft has its own, much lower, hard limits
         if (DownloadSize.Advice(project) is Issue size) notes.Add(size);
+        // Kept script state runs a script's top level once: code there that works the screen stops happening per event.
+        if (project.Manifest.Target == "web" && project.Manifest.KeepScriptState)
+            foreach (var (path, source) in Limits.UsedScripts(project))
+                if (ScriptShape.TopLevelCtxLine(source) is int line and > 0)
+                    notes.Add(new("manifest", "", $"{path} line {line} uses ctx or ui outside a function. Scripts keep their variables between events in this project, so that line runs once, on the first event, not on every event. Move it into the event's function, or turn off \"Scripts keep their variables between events\" in Project settings.", Advice: true));
         foreach (var ui in project.Screens.Where(s => s.Elements.Count > Limits.HeavyScreen))
         {
             // By what actually draws text, not by whether Text is set: a panel carries a default Text it never shows.
@@ -37,6 +47,20 @@ public static partial class Validation
             notes.Add(new(ui.Id, "", $"{ui.Elements.Count} controls: drawing this screen costs about {cost:0.0} ms a frame, {Math.Round(100 * cost / 16.7)}% of a 60 fps frame. Controls with text cost roughly 2.6x a plain one.", Advice: true));
         }
         return notes;
+    }
+    static readonly Regex QuotedResource = new("['\"`]([a-z0-9_.-]+):([a-z0-9_./-]+)['\"`]");
+    /// <summary>Quoted "namespace:path" names in a script that aren't the project's (nor Minecraft's) but would be a
+    /// picture or sound of the project under its own ID.</summary>
+    public static IEnumerable<(string Old, string Now)> OldIdMentions(Project project, string source)
+    {
+        string id = project.Manifest.Id; var seen = new HashSet<string>();
+        foreach (Match m in QuotedResource.Matches(source))
+        {
+            string ns = m.Groups[1].Value, rest = m.Groups[2].Value;
+            if (ns == id || ns == "minecraft" || !seen.Add(ns + ":" + rest)) continue;
+            string now = id + ":" + rest;
+            if (SoundAssets.Find(project, now) != null || (TextureAssets.PathOf(project, now) is string file && project.Assets.ContainsKey(file))) yield return (ns + ":" + rest, now);
+        }
     }
     /// <summary>Everything, including what only blocks Minecraft exports. Minecraft exports use this.</summary>
     public static List<Issue> Check(Project project)
@@ -50,6 +74,13 @@ public static partial class Validation
         else if (System.Version.Parse(m.RuntimeVersion) > System.Version.Parse(RuntimeInfo.Version)) Add("manifest", "", "Minimum runtime exceeds " + RuntimeInfo.Version);
         if (!project.Screens.Any(s => s.Id == m.DefaultUi && !s.IsComponent)) Add("manifest", "", "Default UI does not exist");
         if (m.Target is not ("minecraft" or "web" or "both")) Add("manifest", "", "Made for must be minecraft, web or both");
+        if (m.GameVariables.Count > 256) Add("manifest", "", "A game has at most 256 game variables");
+        foreach (var (name, value) in m.GameVariables)
+        {
+            if (!Variable(name)) Add("manifest", "", "Invalid game variable name: " + name);
+            if (value.Length > 4096) Add("manifest", "", $"Game variable {name}'s starting value is over 4096 characters");
+        }
+        foreach (var name in m.SavedVariables.Where(n => !m.GameVariables.ContainsKey(n))) Add("manifest", "", $"Saved between visits names {name}, which isn't a game variable");
         if (project.Screens.Count > limits.Screens) Add("manifest", "", $"At most {limits.Screens} screens");
         CheckInputs(); CheckParticles(); CheckShaders();
         HashSet<string> uis = []; var templates=project.Screens.SelectMany(s=>s.Elements).Where(e=>e.RowTemplate.Length>0).Select(e=>e.RowTemplate).ToHashSet();
@@ -91,9 +122,23 @@ public static partial class Validation
                 if(e.RowTemplate.Length>0 && project.Screens.Any(s=>s.Id==e.RowTemplate && s.IsComponent))Add(ui.Id,e.Id,"Use a row template screen rather than a component source");
                 if(e.Type=="item_list") try { ItemRows.Parse(e.Value); } catch(Exception ex) { Add(ui.Id,e.Id,ex.Message); }
                 if(e.Type=="item_list" && (e.RowTemplate.Length>0 || e.RowElements.Count>0)) try { RowTemplates.Check(RowTemplates.Resolve(project,e)); } catch(Exception ex) { Add(ui.Id,e.Id,ex.Message); }
+                if (e.Type.StartsWith("lb_")) Add(ui.Id, e.Id, "Leaderboard widgets go on leaderboard pages (Advanced → Create leaderboard), not on the game's screens");
+                if (e.Type == "slots")
+                {
+                    if (!Registry.SlotKinds.Contains(e.SlotKind)) Add(ui.Id, e.Id, "Item slots hold player, storage, crafting or result");
+                    if (e.Columns is < 1 or > 9 || e.Rows is < 1 or > 6) Add(ui.Id, e.Id, "Item slots are 1–9 columns by 1–6 rows");
+                    else if (e.SlotKind == "player" && (e.SlotStart < 0 || e.SlotStart + e.Columns * e.Rows > 36)) Add(ui.Id, e.Id, "Player slots are 0–35 (0–8 is the hotbar): start + columns × rows can't pass 36");
+                    else if (e.SlotKind == "crafting" && (e.Columns > 3 || e.Rows > 3)) Add(ui.Id, e.Id, "A crafting grid is at most 3 × 3");
+                    else if (e.SlotKind == "result" && (e.Columns != 1 || e.Rows != 1)) Add(ui.Id, e.Id, "A crafting result is one slot");
+                    if (ContainerTree.Ancestors(ui, e).Any(p => p.Type == "scroll_panel")) Add(ui.Id, e.Id, "Item slots can't be inside a scroll panel");
+                }
                 CheckEvents(ui, e.Id, e.Events, Registry.Controls.GetValueOrDefault(e.Type)?.Events ?? []);
                 CheckNewControls(ui, e);
             }
+            var slotControls = ui.Elements.Where(e => e.Type == "slots").ToList();
+            if (slotControls.Count(e => e.SlotKind == "crafting") > 1 || slotControls.Count(e => e.SlotKind == "result") > 1) Add(ui.Id, "", "A screen has at most one crafting grid and one crafting result");
+            if (slotControls.Any(e => e.SlotKind == "result") && !slotControls.Any(e => e.SlotKind == "crafting")) Add(ui.Id, "", "A crafting result needs a crafting grid on the same screen");
+            if (slotControls.Count > 0 && ui.Responsive) Add(ui.Id, "", "Screens with item slots use a fixed layout: turn off Responsive layout");
             CheckEvents(ui, "", ui.Events, [.. Registry.ScreenEvents, .. Registry.AdvancedScreenEvents]);
             // Tick and Key fire on the player's screen only; nothing is sent to the server for them.
             foreach (var clientOnly in new[] { "tick", "key" })

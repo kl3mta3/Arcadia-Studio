@@ -4,9 +4,11 @@
 
 **Latest:** Properties sections fold and remember; controls take **components** Unity-style (a searchable **+ Add component**, cards with a ✕ for Collider, Rigidbody, Character controller, Top-down mover, Follower and Pickup, with the script's tunable numbers editable on the card); and the MCP panel gains **Ask Assistant (Requires CLI)** — the editor can ask your own command-line AI (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, opencode, Copilot CLI or a custom command, on your subscription, no API key) to do things from Ask Agent, Draw it… and the Input creator. The MCP port and token now stay the same across restarts. See [Advanced tools](wiki/Advanced-Tools.md) and [MCP and AI assistants](wiki/MCP-and-AI-Assistants.md).
 
-**1.2:** Project JARs now bundle the runtime and assigned Standard/KubeJS scripts. No separate Arcadia Studio installation is needed in-game; KubeJS projects still require KubeJS/Rhino. Script dropdowns include editable `[Template]` entries and global command examples. See [1.2 release notes](docs/RELEASE-1.2.md).
+Wysicraft is now **Arcadia Studio** (projects are `.arcadia`; older ones still open) with updates from GitHub Releases. **Publish to Arcadia** (cover, screenshots, YouTube videos, phones and tablets, leaderboards) and **Publish to itch.io** (web version and Windows app, with butler bundled). **Leaderboard pages** designed on the canvas. Real **item slots** in Minecraft (a crafting table stamp). Tap and click to move in web games (`ctx.input.pointer()`), and a Preview with Mute, a foldable console and Fit game to window. Opening a screen a second time in web games is fixed. Web games fill phones and big windows, keep their state when the window is resized, can **save games** (`ctx.save`), can keep **script variables between events** (Project settings), allow 100,000 screen changes per script run, have **game variables** that carry across screens (and can be saved), let client scripts open screens, and run every control's own `tick` (movement components no longer replace each other). Publishing an update asks before replacing details edited on the Arcadia website, and **Load details from Arcadia** copies them into the project.
 
-**Version 1.1:** single-file .wysicraftproj saving, project-scoped screens, Standard Server scripts, Item Lists, installation ZIP/JAR exports and expanded MCP tools. See [1.1 workflow notes](docs/RELEASE-1.1.md).
+Project JARs bundle the runtime and assigned Standard/KubeJS scripts. No separate Arcadia Studio installation is needed in-game; KubeJS projects still require KubeJS/Rhino. Script dropdowns include editable `[Template]` entries and global command examples. See the [project JAR release notes](docs/RELEASE-1.2.md).
+
+Earlier: single-file project saving, project-scoped screens, Standard Server scripts, Item Lists, installation ZIP/JAR exports and expanded MCP tools. See the [workflow notes](docs/RELEASE-1.1.md).
 
 A Windows visual GUI designer and portable NeoForge runtime for Minecraft Java Edition **1.21.1**. Create screens, connect client and server actions, export a `.wysicraft` ZIP, and load it without generating Java screen classes or restarting Minecraft.
 
@@ -36,7 +38,7 @@ cd wysicraft-runtime
 .\gradlew.bat build
 ```
 
-On Unix, use `./gradlew build`. The runtime JAR is `wysicraft-runtime/build/libs/wysicraft-1.1.0.jar`. The desktop executable is `src/Wysicraft.Designer/bin/Debug/net8.0-windows/ArcadiaStudio.exe`; keep its adjacent files when distributing. For a publish directory:
+On Unix, use `./gradlew build`. The runtime JAR is `wysicraft-runtime/build/libs/wysicraft-<version>.jar`. The desktop executable is `src/Wysicraft.Designer/bin/Debug/net8.0-windows/ArcadiaStudio.exe`; keep its adjacent files when distributing. For a publish directory:
 
 ```powershell
 dotnet publish src/Wysicraft.Designer -c Release -r win-x64 --self-contained false -o artifacts/designer
@@ -94,7 +96,7 @@ The preview runs actual JavaScript using Jint in a separate constrained process.
 ## Install and open in Minecraft
 
 1. Install NeoForge **21.1.250** for Minecraft **1.21.1**.
-2. Put `wysicraft-1.1.0.jar` in the instance's `mods/` directory. Multiplayer requires the mod on both client and server.
+2. Put the `wysicraft-<version>.jar` runtime in the instance's `mods/` directory. Multiplayer requires the mod on both client and server.
 3. Put the exported pack in `<game directory>/wysicraft/`. For a dedicated server, this is `<server directory>/wysicraft/`. Install the same pack on clients when using custom textures or external client scripts. UI definitions themselves are sent by the server.
 4. Start the game/server, then run:
 
@@ -139,7 +141,7 @@ See [FORMAT](docs/FORMAT.md), [SCRIPTING](docs/SCRIPTING.md), [RUNTIME_API](docs
 - Runtime text boxes offer end-of-text editing, backspace, paste and submit. Dropdowns cycle through options when clicked. They are functional basic controls, not full desktop widgets.
 - Panels use absolute canvas coordinates and one-level parent relationships. Runtime scroll panels clip and scroll assigned children. Designer preview approximates panels, resource-pack images and item icons; it does not reproduce Minecraft rendering.
 - Property/event panes have a fixed docking layout with splitters. Script editing is plain text with line numbers, without syntax highlighting or debugger.
-- Local UI and per-open server session state are available. Persistent player/global state, live telemetry bindings and a demonstration block are future work.
+- Local UI and per-open server session state are available; web and desktop games also have saved games (`ctx.save`). Persistent player/global state in Minecraft, live telemetry bindings and a demonstration block are future work.
 - Builds and focused format/security checks are automated. A real Minecraft world click-through must still be performed in your installed mod environment; build success does not establish that interactive acceptance result.
 
 Recommended next work: sandboxed JavaScript with enforceable CPU/memory limits, richer text/dropdown widgets, persistent variable scopes, automatic asset synchronization and Create addon integrations.

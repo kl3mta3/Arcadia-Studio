@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>ArcadiaStudio</AssemblyName><Product>Arcadia Studio</Product><Version>1.3.0</Version><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Packaging/Wysicraft.Packaging.csproj" /></ItemGroup><ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>ArcadiaStudio</AssemblyName><Product>Arcadia Studio</Product><Version>1.4.0</Version><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Packaging/Wysicraft.Packaging.csproj" /></ItemGroup><ItemGroup>
   <PackageReference Include="Dirkster.AvalonDock" Version="4.72.1" />
   <PackageReference Include="Dirkster.AvalonDock.Themes.VS2013" Version="4.72.1" />
   <PackageReference Include="Jint" Version="4.16.2" />

@@ -20,7 +20,25 @@ Web and desktop projects can go bigger than Minecraft allows:
 | Controls per screen | 512 | 16,000 |
 | Screens | 128 | 1000 |
 | Shortest Tick interval | 50 ms | 16 ms (one frame) |
-| UI changes per script call | 128 | 10,000 |
+| UI changes per script call | 128 | 100,000 |
+| Script variables between events | Start over every event | Kept, with **Scripts keep their variables between events** (Project settings) |
+| Saved games (`ctx.save`) | None | 512 KB per game |
+
+## Making a game: which parts to use
+
+Before writing your own engine in a script, check whether a part already does the job:
+
+| You need | Use | Where |
+| --- | --- | --- |
+| Enemies, bullets, coins, anything made while playing | **Spawned objects**: `ui.spawn(template, x, y, …)`; each copy runs the template's events as itself | [[Spawned objects|Scripting#spawned-objects-web--desktop]] |
+| Things chasing the player or walking a route | `seek`, `separate` and paths over a tilemap | [[Following a map|Scripting#following-a-map]] |
+| Walls, floors, hitting and overlapping | **Physics** bodies and colliders, solid tiles on a tilemap, collide and trigger events | [Physics](#physics), [Tilemaps](#tilemaps) |
+| Line of sight, "what's in front of me" | `ctx.physics.raycast` and `canSee` | [[Raycasts|Scripting#raycasts-and-line-of-sight]] |
+| A world bigger than the screen | A **Camera**; attach the score and buttons to it | [Camera](#camera) |
+| Idle, run, jump, land | **State graphs** on a sprite | [State graphs](#state-graphs) |
+| Movement, pickups, top-down or platform controls | **Components** such as Character controller, Top-down mover, Follower, Pickup | [Components](#components) |
+| Rooms or levels | One screen each; keep progress in script variables or `ctx.save`, since screen variables start over when a screen opens | [[Where to keep state|Scripting#where-to-keep-state]] |
+| Progress that survives closing the game | `ctx.save` | [[Saved games|Scripting#saved-games-web--desktop]] |
 
 ## The Minecraft check
 
@@ -62,7 +80,7 @@ Under **Advanced · web & desktop** in Properties, every control has a **+ Add c
 | **Collider** | The shape the physics knows about. On its own it is a wall, floor or platform (a static body). | Shape (box, circle or polygon with **Edit collider points…**), **Trigger**, collision **Layer** and **Collides with** |
 | **Rigidbody** | Makes the control move: it falls with the screen's gravity, collides and bounces. | Body (**Dynamic** or **Kinematic**), **Bounce**, **Friction**, the **Bouncy** and **Slippery** presets, and the screen's gravity with a link to **Screen settings** |
 | **Character controller** | A platformer character driven by your `left`, `right` and `jump` inputs (created if missing), with a jump that only works on the ground. | `SPEED`, `JUMP`, `GROUND_GRIP` |
-| **Top-down mover** | Eight-way movement with no gravity. | `SPEED` |
+| **Top-down mover** | Eight-way movement with no gravity. It stops against walls, colliders and solid tiles. | `SPEED` |
 | **Follower** | Moves steadily towards the nearest control with a tag — an enemy, a homing shot, a pet. | `TARGET_TAG`, `SPEED`, `STOP_AT` |
 | **Pickup** | Disappears when something touches it and adds to a screen variable. | `WORTH` |
 | Presets: **Kinematic body**, **Trigger zone**, **Bouncy**, **Slippery** | One-click setups that set the fields above. | — |
@@ -72,6 +90,8 @@ A few things worth knowing:
 - **Nothing is hidden.** A card only sets the fields it shows and, for the movement and gameplay ones, writes an ordinary script into **Scripts** named after the control (`scripts/client/player_controller.js`). **Open script** on the card takes you to it, and you can change anything in it.
 - **The numbers on a card are the script's.** They are the `var SPEED = 140;` lines at the top of the script. Editing one on the card writes it back into the script in place, comment and all; editing the script changes the card. Keep those lines in that form if you want them on the card.
 - **✕ cleans up after itself.** Removing a Rigidbody leaves the control a plain static Collider; removing the Collider clears the body. Removing a script component stops the event running its script and deletes the script — unless you edited it, in which case it is kept and the log tells you. Inputs, tags and screen variables stay, because other things may use them.
+- **Each movement component ticks on its own control.** Character controller, Top-down mover and Follower run their script from the `tick` event of the control they move, so a player and several enemies all move at once, and the screen's own `tick` stays free for your game loop. (Projects from before this are moved over when they open.)
+- **Kinematic bodies with a velocity move and stop at walls.** `ui.setVelocity` on a kinematic body moves it, and it stops against static bodies, colliders and solid tiles. One moved by `ui.setPosition` or an animation goes exactly where it's put.
 - **Gravity is the screen's.** It is set once in **Screen settings** and pulls on every dynamic body on the screen; the Rigidbody card shows the value and links there.
 - **Sprites, images and panels all take the same cards.** The **collider** control in the Advanced toolbox is still there for standalone walls: it is its own Collider card, without a ✕.
 - An AI assistant can add and remove the same components through MCP (`add_component` / `remove_component`).
@@ -137,7 +157,7 @@ The timeline slider previews the animation on the canvas. Everything snaps back 
 - **Presets:** Keyboard, Xbox, PlayStation and Generic gamepad add the usual inputs (left, right, up, down, jump, action, pause…).
 - **Gamepads:** Xbox, PlayStation and generic pads use the same standard button layout; only the names differ. Choose how buttons are labelled with **Show gamepad buttons as**.
 - **Screen events:** the screen's `input_pressed` and `input_released` events run with the input's name as the value.
-- **Scripts:** `ctx.input.isDown('jump')` and `ctx.input.axis('left')` (0–1, how far the stick is pushed that way).
+- **Scripts:** `ctx.input.isDown('jump')` and `ctx.input.axis('left')` (0–1, how far the stick is pushed that way). For tap-to-move, `ctx.input.pointer()` gives `x`, `y` (screen coordinates), `down` (a press on the floor is held) and `presses` (how many there have been), from a finger or the mouse. Presses on buttons and other controls don't count; sprites, images, labels and panels are scenery.
 - **On-screen controls:** give a button or shape a **Presses input** in Properties to make an on-screen control. Pressing it presses the input *as well as* running its own click, hover, enter and exit events.
 
 Clicks, hover and the Key event work exactly as before; inputs only add to them.

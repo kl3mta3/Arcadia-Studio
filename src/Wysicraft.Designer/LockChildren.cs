@@ -41,6 +41,13 @@ public partial class MainWindow
         public bool AutoCheckUpdates { get; set; } = true;
         public string LastUpdateCheck { get; set; } = "";
         public string SkippedUpdate { get; set; } = "";
+        // Preview: sound off, and the console and JavaScript panels minimized, kept from one preview to the next.
+        public bool PreviewMuted { get; set; }
+        public bool PreviewConsoleMinimized { get; set; }
+        // Preview draws the game scaled to fill its window (the game itself is unchanged).
+        public bool PreviewFitGame { get; set; } = true;
+        // itch.io: the key from Sign in to itch.io (or an API key), DPAPI-protected like the Arcadia key.
+        public string ItchKey { get; set; } = "";
     }
     Preferences? preferences;
     internal string? lockChildrenAnswer; // tests set "always"/"never" so no dialog appears

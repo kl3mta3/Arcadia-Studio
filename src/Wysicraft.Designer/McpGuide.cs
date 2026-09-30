@@ -151,13 +151,15 @@ public partial class MainWindow
             - `ctx.ui` — setText, setVisible, setPosition, setSize, setVelocity, getElement (x, y, width, height, vx, vy), play (sprite clips).
             - `ctx.client` — playSound and other client actions; `get_schema.clientActions` lists them.
             - `ctx.physics` — touching(id), isTouching(a, b) for bodies and colliders.
-            - Screen variables persist between handlers; keep game state in one object rather than globals.
+            - Screen variables persist between handlers while the screen is open. Game variables (Project settings, or set_project gameVariables) also carry across screens, and savedVariables come back next visit.
+            - In web & desktop projects with keepScriptState on, a script's top-level variables last between events; otherwise keep state in ctx.state.
+            - Navigation: an open_ui action works on any event (click, tick, collide, trigger_enter). ctx.ui.open('screen') works in client scripts of web & desktop projects only; in Minecraft or "both" projects, use the action.
 
             Scripts are checked when applied: a syntax error fails the whole apply_edits and names the file.
 
             # Things worth knowing
 
-            - The `tick` screen event runs every frame with the elapsed time; that is where a game loop belongs.
+            - The `tick` screen event runs every tickInterval; that is where a game loop belongs. Controls can have their own `tick` too (movement components use it), and all of them run.
             - Sound IDs are `projectid:name` and come from import_asset, sound_effect or compose_music.
             - Keep the game's own sounds as IDs, not file paths, so remaking a sound needs no script change.
             """),

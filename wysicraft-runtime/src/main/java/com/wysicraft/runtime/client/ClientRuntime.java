@@ -23,14 +23,24 @@ public final class ClientRuntime {
             for (var location : TEXTURES.values()) mc.getTextureManager().release(location); TEXTURES.clear(); INFO.clear();
             var ui = Models.JSON.fromJson(com.wysicraft.runtime.network.UiCompression.unpack(packet.data()),Models.Ui.class);
             if (ui == null || !PackRepository.screenId(ui.id) || ui.elements.size() > 512 || ui.schemaVersion != 1) throw new IllegalArgumentException("Invalid UI payload");
-            if (mc.screen instanceof DynamicScreen old) old.remoteClosing = true;
+            var old = DynamicScreen.of(mc.screen); if (old != null) old.remoteClosing = true;
+            // A screen with item slots opens as a container right after this (WysicraftMenu): keep its design for it.
+            if (ui.elements.stream().anyMatch(e -> e.type.equals("slots"))) { synchronized (PENDING) { if (PENDING.size() > 8) PENDING.clear(); PENDING.put(packet.session(), ui); } return; }
             mc.setScreen(new DynamicScreen(ui,packet.session()));
         } catch (Exception ex) { Wysicraft.LOG.warn("Unable to open UI: {}",ex.toString()); if (Minecraft.getInstance().player != null) Minecraft.getInstance().player.sendSystemMessage(Component.literal("Wysicraft: " + ex.getMessage())); }
     }
-    public static void close(Payloads.CloseUi packet) { var mc = Minecraft.getInstance(); if (mc.screen instanceof DynamicScreen screen && screen.session.equals(packet.session())) { screen.remoteClosing = true; mc.setScreen(null); } }
+    private static final Map<String,Models.Ui> PENDING = new LinkedHashMap<>();
+    static Models.Ui takePending(String session) { synchronized (PENDING) { return PENDING.remove(session); } }
+    public static void close(Payloads.CloseUi packet) {
+        var mc = Minecraft.getInstance(); var screen = DynamicScreen.of(mc.screen);
+        if (screen == null || !screen.session.equals(packet.session())) return;
+        screen.remoteClosing = true;
+        // A container closes without telling the server again (the server has already closed it).
+        if (screen.host != null && mc.player != null) mc.player.clientSideCloseContainer(); else mc.setScreen(null);
+    }
     public static void update(Payloads.UpdateUi packet) {
         var mc = Minecraft.getInstance();
-        if (!(mc.screen instanceof DynamicScreen screen) || !screen.session.equals(packet.session())) return;
+        var screen = DynamicScreen.of(mc.screen); if (screen == null || !screen.session.equals(packet.session())) return;
         if (!Set.of("set_text","set_value","set_visible","set_enabled","set_variable","set_item").contains(packet.action())) return;
         var action = new Models.Action(); action.type = packet.action(); action.target = packet.target(); action.value = packet.value();
         screen.execute(action);

@@ -7,6 +7,9 @@ public static class Registry
 {
     public static readonly Dictionary<string, ControlSpec> Controls = new();
     public static readonly HashSet<string> ClientActions = ["set_text", "set_visible", "set_enabled", "set_value", "open_ui", "close_ui", "play_sound", "set_variable", "toggle_variable", "message", "change_texture"];
+    /// <summary>What item slots hold (see Element.SlotKind).</summary>
+    public static readonly string[] SlotKinds = ["player", "storage", "crafting", "result"];
+    public const int SlotCell = 18;
     public static readonly HashSet<string> ServerActions = ["command", "message", "set_variable", "toggle_variable", "open_ui", "close_ui", "server_function", "player_inventory"];
     static Registry()
     {
@@ -26,6 +29,17 @@ public static class Registry
         Register("sprite", "Sprite", ["Texture", "FrameWidth", "FrameHeight", "Clips", "Value"], []);
         Register("shape", "Shape", ["Shape"], ["click"]);
         Register("sound", "Sound", ["Sound", "Autoplay", "Delay", "Volume", "Repeat", "Loop"], []);
+        // Real Minecraft item slots: the screen opens as a container and the server moves the items.
+        Register("slots", "Item Slots", ["SlotKind", "Columns", "Rows", "SlotStart"], []);
+        // Leaderboard page widgets (Project.Leaderboards only): they read the arcade's board on the published page.
+        Register("lb_table", "Leaderboard list", ["Board.Count", "Board.RowHeight", "Board.Header", "Board.Icon", "Board.AltColor", "Board.HighlightColor", "Board.Empty"], [], advanced: true);
+        Register("lb_podium", "Leaderboard podium", ["Board.Empty"], [], advanced: true);
+        Register("lb_rank", "Leaderboard rank box", ["Board.Rank", "Board.Empty"], [], advanced: true);
+        Register("lb_icon", "Rank icon", ["Board.Rank", "Board.Icon"], [], advanced: true);
+        Register("lb_range", "Leaderboard range panel", ["Minimum", "Maximum", "Board.Search", "Board.RowHeight", "Board.Header", "Board.AltColor", "Board.HighlightColor", "Board.Empty"], [], advanced: true);
+        Register("lb_slider", "Leaderboard slider", ["Board.Count", "Board.Visible", "Board.Seconds", "Board.Icon", "Board.Empty"], [], advanced: true);
+        Register("lb_me", "Your rank", ["Board.Around", "Board.RowHeight", "Board.Header", "Board.HighlightColor", "Board.Empty"], [], advanced: true);
+        Register("lb_periods", "Period tabs", ["Board.Periods", "Board.PeriodLabels"], [], advanced: true);
         Register("tilemap", "Tilemap", ["Texture", "TileWidth", "TileHeight", "Columns", "Rows", "Tiles", "Solid"], [], advanced: true);
         Register("particles", "Particles", ["Effect", "Autoplay"], [], advanced: true);
         Register("collider", "Collider", ["Collider"], [], advanced: true);
@@ -34,7 +48,7 @@ public static class Registry
     }
     public static void Register(string type, string name, string[] properties, string[] events, bool advanced = false) => Controls.Add(type, new(type, name, properties, [.. events, "hover", "mouse_enter", "mouse_leave", .. AdvancedElementEvents], advanced));
     // Web and desktop only: physics collisions and inputs.
-    public static readonly string[] AdvancedElementEvents = ["collide", "collide_stay", "collide_end", "trigger_enter", "trigger_stay", "trigger_exit", "state_changed"];
+    public static readonly string[] AdvancedElementEvents = ["tick", "collide", "collide_stay", "collide_end", "trigger_enter", "trigger_stay", "trigger_exit", "state_changed"];
     public static readonly string[] ScreenEvents = ["open", "close", "tick", "key"];
     public static readonly string[] AdvancedScreenEvents = ["input_pressed", "input_released", "animation_end"];
     // Standard gamepad buttons (the same layout for Xbox, PlayStation and generic pads; only the labels differ).

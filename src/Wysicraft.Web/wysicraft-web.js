@@ -405,14 +405,16 @@
 
   // ---- Layout (model/ContainerTree.java, model/ResponsiveLayout.java) ----
   // An ID -> control index, rebuilt when the list of controls changes (spawned objects come and go), so a lookup
-  // doesn't scan every control. The first control with an ID wins, as a scan would.
+  // doesn't scan every control. The first control with an ID wins, as a scan would. The index is kept beside each
+  // screen object, never on it: opening a screen again copies its design, and a copy must not carry a stale index.
+  const elementIndexes = new WeakMap();
   function elementOf(ui, id) {
-    let index = ui._index;
-    if (!index || ui._indexCount !== ui.elements.length) {
-      index = new Map(); for (const e of ui.elements) if (!index.has(e.id)) index.set(e.id, e);
-      ui._index = index; ui._indexCount = ui.elements.length;
+    let cached = elementIndexes.get(ui);
+    if (!cached || cached.count !== ui.elements.length) {
+      const index = new Map(); for (const e of ui.elements) if (!index.has(e.id)) index.set(e.id, e);
+      cached = { index, count: ui.elements.length }; elementIndexes.set(ui, cached);
     }
-    return index.get(id) || null;
+    return cached.index.get(id) || null;
   }
   function ancestors(ui, child) {
     const result = [], seen = new Set([child.id]); let id = child.parent;
@@ -435,12 +437,21 @@
     }
     design.elements.forEach(place); return result;
   }
-  function applyLayout(target, design, width, height) {
+  // laid (optional) is what the last layout gave each control. A control still where layout put it follows the new
+  // layout; one a script, physics or the player has moved or resized keeps that, field by field, and copies spawned
+  // while the game runs (not in the design) are left alone. So resizing the window (a phone's toolbar sliding away,
+  // turning the phone) no longer puts every control back where the editor had it.
+  function applyLayout(target, design, width, height, laid) {
     width = design.responsive ? Math.min(4096, Math.max(16, width)) : design.size.width;
     height = design.responsive ? Math.min(4096, Math.max(16, height)) : design.size.height;
     const bounds = resolveLayout(design, width, height);
     for (const e of target.elements) {
-      e.bounds = Object.assign({}, bounds.get(e.id)); const source = elementOf(design, e.id);
+      const next = bounds.get(e.id); if (!next) continue;
+      const was = laid && laid.get(e.id), fresh = Object.assign({}, next);
+      if (was && e.bounds) for (const k of ['x', 'y', 'width', 'height']) if (e.bounds[k] !== was[k]) fresh[k] = e.bounds[k];
+      if (laid) laid.set(e.id, Object.assign({}, next));
+      if (was && e.bounds && ['x', 'y', 'width', 'height'].every(k => e.bounds[k] === fresh[k])) continue;
+      e.bounds = fresh; const source = elementOf(design, e.id);
       if (source && source.rowElements.length) {
         const layout = { size: { width: source.rowTemplateWidth > 0 ? source.rowTemplateWidth : source.bounds.width, height: source.rowHeight }, elements: source.rowElements };
         const rowBounds = resolveLayout(layout, e.bounds.width, e.rowHeight);
@@ -477,16 +488,27 @@
       this.canvas.setAttribute('role', 'application'); container.appendChild(this.canvas);
       this.g = this.canvas.getContext('2d');
       this.mouse = { x: -1, y: -1, down: false }; this.heldKeys = new Set(); this.lastKey = 0;
+      // The pointer a script sees (ctx.input.pointer()): the latest mouse or finger position, whether a press that did
+      // not land on a control is held, and a count of such presses so a quick tap between two ticks is not missed.
+      this.pointer = { x: -1, y: -1, down: false, presses: 0, id: null };
       this.scroll = new Map(); this.focused = null; this.hovered = null; this.dragging = null; this.lastHover = 0;
       this.messages = []; this.closed = false; this.queue = []; this.busy = false; this.idleWaiters = []; this.navigations = 0;
       this.limits = Object.assign({ scriptOps: 128, tickMin: 50 }, project.limits || {});
       this.scripts = new ScriptRunner();
+      this.saveData = this.loadSave(); this.saveVersion = 1;
+      // Game variables: the whole game's, carried from screen to screen; saved ones start from what was saved.
+      this.gameVars = new Map(Object.entries(project.gameVariables || {}).map(([k, v]) => [k, String(v)]));
+      this.savedVars = new Set((project.savedVariables || []).filter(k => this.gameVars.has(k)));
+      for (const k of this.savedVars) { const v = this.saveData['$var:' + k]; if (typeof v === 'string') this.gameVars.set(k, v); }
       this.bindInput();
       // Sound effects are decoded ahead, so the first play of each one is already on Web Audio. Sounds that Sound
       // controls play (music) are left out: they stream through the control's own audio element, and decoding them as
       // well kept every song whole in memory as raw audio (19 one-minute songs came to 526 MB).
       if (project && project.sounds) { const streamed = this.streamedSounds(); for (const [id, url] of Object.entries(project.sounds)) if (!streamed.has(id)) this.soundBuffer(url); }
       window.addEventListener('resize', () => this.layout());
+      // The game's box can change size without the window doing so (a host page resizing its container, a zoom, going
+      // fullscreen on an element); it is laid out again whenever it does.
+      if (typeof ResizeObserver === 'function') { this.boxSize = ''; new ResizeObserver(() => { const size = container.clientWidth + 'x' + container.clientHeight; if (size !== this.boxSize) { this.boxSize = size; this.layout(); } }).observe(container); }
       this.switchTo((options && options.screen) || project.main || Object.keys(this.screens)[0]);
       this.prof = null; this.physicsCounts = { bodies: 0, pairs: 0 };
       const frame = t => { if (this.prof) this.profiledFrame(t); else { this.tick(); this.render(); } requestAnimationFrame(frame); }; requestAnimationFrame(frame);
@@ -536,7 +558,9 @@
     switchTo(id) {
       const design = this.screens[this.screenId(id)];
       if (!design) { this.log('warn', 'Unknown screen: ' + id); return false; }
+      this.syncGameVars();
       this.design = design; this.ui = clone(design); this.state = Object.assign({}, design.variables);
+      for (const [k, v] of this.gameVars) this.state[k] = v;
       this.scroll.clear(); this.focused = null; this.hovered = null; this.dragging = null; this.closed = false; this.queue.length = 0;
       this.lastTick = performance.now(); this.layout();
       document.title = this.ui.title || this.project.name || document.title;
@@ -562,15 +586,25 @@
       this.canvas.width = Math.max(1, Math.round(W * dpr)); this.canvas.height = Math.max(1, Math.round(H * dpr));
       this.canvas.style.width = W + 'px'; this.canvas.style.height = H + 'px'; this.dpr = dpr;
       if (this.glLayer.ok) this.glLayer.resize(this.canvas.width, this.canvas.height);
-      const ui = this.design, frame = ui.showFrame ? 32 : 12;
+      const ui = this.design, minecraft = this.project.target === 'minecraft';
+      // Room round the screen: its frame and title when it shows one, Minecraft's margin for a Minecraft screen; a web
+      // game uses the whole page.
+      const padX = ui.showFrame || minecraft ? 12 : 0, padY = ui.showFrame ? 32 : minecraft ? 12 : 0;
+      this.padX = padX; this.padY = padY;
+      const fit = Math.min(W / (ui.size.width + padX), H / (ui.size.height + padY));
       // GUI scale like Minecraft's "Auto": the largest whole number that fits the design size.
-      let scale = Math.max(1, Math.floor(Math.min(W / (ui.size.width + 12), H / (ui.size.height + frame))));
+      let scale = Math.max(1, Math.floor(fit));
       if (this.host.guiScale > 0) scale = this.host.guiScale;
-      if (!ui.responsive && ui.fitToScreen) scale = Math.min(scale, Math.min(W / (ui.size.width + 12), H / (ui.size.height + frame)));
+      // Fit to viewport on a web game fills the page: a whole-number scale while that loses under 12% of the room
+      // (the crispest pixels), otherwise exactly the size that fits. A phone is often 1.2-1.8x a game's size, where
+      // whole numbers alone leave it at 1x in a corner of the screen. Pixels stay sharp at any scale.
+      else if (!ui.responsive && ui.fitToScreen && !minecraft) scale = fit >= 1 && Math.floor(fit) / fit >= 0.88 ? Math.floor(fit) : fit;
+      if (!ui.responsive && ui.fitToScreen) scale = Math.min(scale, fit);
       this.scale = Math.max(0.25, scale);
       const gw = W / this.scale, gh = H / this.scale;
-      if (this.viewport) applyLayout(this.ui, this.design, this.viewport.width, this.viewport.height);
-      else applyLayout(this.ui, this.design, Math.floor(gw - 12), Math.floor(gh - frame));
+      if (!this.laid || this.laidUi !== this.ui) { this.laid = new Map(); this.laidUi = this.ui; }
+      if (this.viewport) applyLayout(this.ui, this.design, this.viewport.width, this.viewport.height, this.laid);
+      else applyLayout(this.ui, this.design, Math.floor(gw - padX), Math.floor(gh - padY), this.laid);
       this.originX = Math.floor((gw - this.ui.size.width) / 2); this.originY = Math.floor((gh - this.ui.size.height + (ui.showFrame ? 14 : 0)) / 2);
     }
     // Parent chains are asked for several times per element per frame; they only change when the screen's
@@ -846,6 +880,8 @@
     }
     render() {
       const g = this.g; if (!this.ui) return;
+      // A change of pixel density (a zoom, or moving to another screen) that came without a resize event.
+      if ((window.devicePixelRatio || 1) !== this.dpr) this.layout();
       g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, this.canvas.width, this.canvas.height);
       g.setTransform(this.scale * this.dpr, 0, 0, this.scale * this.dpr, 0, 0); g.imageSmoothingEnabled = false;
       const W = this.canvas.width / (this.scale * this.dpr), H = this.canvas.height / (this.scale * this.dpr);
@@ -916,22 +952,26 @@
     }
     bindInput() {
       const c = this.canvas;
-      c.addEventListener('mousemove', ev => { const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; if (this.dragging) this.slide(this.dragging, p.x); });
+      c.addEventListener('mousemove', ev => { const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; this.pointAt(p); if (this.dragging) this.slide(this.dragging, p.x); });
       c.addEventListener('mouseleave', () => { this.mouse.x = this.mouse.y = -1; });
-      c.addEventListener('mousedown', ev => { c.focus(); if (ev.button !== 0) return; const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; this.click(p.x, p.y); ev.preventDefault(); });
-      window.addEventListener('mouseup', () => { this.dragging = null; if (this.virtualInputs) this.virtualInputs.clear(); });
+      c.addEventListener('mousedown', ev => { c.focus(); if (ev.button !== 0) return; const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; if (!this.controlAt(p.x, p.y)) this.pointerDown(p, 'mouse'); this.click(p.x, p.y); ev.preventDefault(); });
+      window.addEventListener('mouseup', () => { this.dragging = null; if (this.virtualInputs) this.virtualInputs.clear(); if (this.pointer.id === 'mouse') this.pointerUp(); });
       c.addEventListener('touchstart', ev => {
         c.focus();
         for (const t of ev.changedTouches) {
           const p = this.point(t);
           if (this.controlAt(p.x, p.y)) { this.mouse.x = p.x; this.mouse.y = p.y; this.touchTaps.set(t.identifier, true); this.click(p.x, p.y); }
-          else if (this.stick === null) this.stick = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
+          else {
+            this.pointerDown(p, t.identifier); // the newest finger off the controls is the pointer
+            if (this.stick === null) this.stick = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
+          }
         }
         ev.preventDefault();
       }, { passive: false });
       c.addEventListener('touchmove', ev => {
         for (const t of ev.changedTouches) {
           const p = this.point(t);
+          if (this.pointer.id === t.identifier) this.pointAt(p);
           if (this.stick && this.stick.id === t.identifier) { this.stick.x = p.x; this.stick.y = p.y; }
           else if (this.dragging) this.slide(this.dragging, p.x);
         }
@@ -940,6 +980,7 @@
       const lift = ev => {
         for (const t of ev.changedTouches) {
           if (this.stick && this.stick.id === t.identifier) this.stick = null;
+          if (this.pointer.id === t.identifier) this.pointerUp();
           if (this.touchTaps.delete(t.identifier)) { this.dragging = null; if (this.virtualInputs) this.virtualInputs.clear(); }
         }
       };
@@ -951,13 +992,22 @@
       window.addEventListener('blur', () => { this.heldKeys.clear(); if (this.keyNamesDown) this.keyNamesDown.clear(); });
       setTimeout(() => c.focus(), 0);
     }
-    // The topmost control under a point, or null. Used to tell a tap on a button from a drag on the floor.
+    // The control a press lands on, or null when it lands on the floor. Used to tell a tap on a button from a drag on
+    // the floor. Only the topmost thing under the point counts (as for a click), and only if a tap does something to it:
+    // pictures, labels and panels are scenery, so a finger on a sprite floor still steers.
     controlAt(mx, my) {
       if (this.closed || !this.ui) return null;
       for (const e of this.ui.elements.slice().reverse())
-        if (!UNSEEN.has(e.type) && this.visible(e) && this.enabled(e) && this.inside(e, mx, my)) return e;
+        if (!UNSEEN.has(e.type) && this.visible(e) && this.enabled(e) && this.inside(e, mx, my)) return this.tappable(e) ? e : null;
       return null;
     }
+    tappable(e) {
+      return !!e.input || TAPPABLE.has(e.type) || (e.type === 'shape' && !!(e.events && e.events.click));
+    }
+    // Pointer positions go to scripts in screen coordinates (the same as control bounds and ui.setPosition).
+    pointAt(p) { this.pointer.x = Math.round((p.x - this.originX) * 10) / 10; this.pointer.y = Math.round((p.y - this.originY) * 10) / 10; }
+    pointerDown(p, id) { this.pointAt(p); this.pointer.down = true; this.pointer.id = id; this.pointer.presses++; }
+    pointerUp() { this.pointer.down = false; this.pointer.id = null; }
     click(mx, my) {
       if (this.closed) { if (!this.host.onClose) { this.messages = []; this.open(this.ui.id); } return; }
       this.focused = null;
@@ -1024,9 +1074,26 @@
       this.lastKey = now; this.fire(null, 'key', name, repeat);
     }
     tick() {
+      this.syncGameVars();
       this.simulate(performance.now());
-      if (!this.ui || this.closed || this.ui.tickInterval < this.limits.tickMin || !this.ui.events.tick) return;
-      const now = performance.now(); if (now - this.lastTick >= this.ui.tickInterval) { this.lastTick = now; this.fire(null, 'tick', ''); }
+      if (!this.ui || this.closed || this.ui.tickInterval < this.limits.tickMin) return;
+      const tickers = this.tickers(); if (!this.ui.events.tick && !tickers.length) return;
+      const now = performance.now();
+      if (now - this.lastTick >= this.ui.tickInterval) {
+        this.lastTick = now;
+        // The screen's own tick, then each control's (a movement component's script sits on the control it moves, so
+        // several of them tick side by side), in draw order.
+        if (this.ui.events.tick) this.fire(null, 'tick', '');
+        for (const e of tickers) this.fire(e, 'tick', '');
+      }
+    }
+    // Controls with a tick event of their own. Spawned copies are left out: hundreds of them would each be a script
+    // run a tick; give copies behaviour with seek, paths and the template's other events instead.
+    tickers() {
+      const els = this.ui.elements;
+      if (this._tickers && this._tickersUi === this.ui && this._tickersCount === els.length) return this._tickers;
+      this._tickersUi = this.ui; this._tickersCount = els.length;
+      return this._tickers = els.filter(e => e.events && e.events.tick && !e._instanceOf && !e._memberOf);
     }
 
     // ---- Events ----
@@ -1037,7 +1104,7 @@
       if (!this.ui) return;
       const ev = (element ? element.events : this.ui.events)[event];
       if (!ev) { this.hook('onEvent', { screen: this.ui.id, element: element ? element.id : '', event, value: String(value ?? ''), assigned: false }); return; }
-      if (event === 'tick') { if (this.queue.some(q => q.event === 'tick')) return; }
+      if (event === 'tick') { if (this.queue.some(q => q.event === 'tick' && q.element === element)) return; }
       else if ((this.busy || this.queue.length) && (event === 'key' || event === 'hover' || event === 'collide_stay' || event === 'trigger_stay')) return;
       if (this.queue.length >= 32) { this.log('warn', 'Too many events waiting; some were skipped.'); return; }
       this.queue.push({ ui: this.ui, element, event, value: String(value ?? ''), repeat: !!repeat });
@@ -1131,9 +1198,14 @@
       this.scripts.prepare();
       const started = this.prof ? performance.now() : 0;
       const delta = this.scriptDelta();
-      const result = await this.scripts.run(Object.assign(delta, { source, sourceKey: this.sourceKey(handler, source), fn: handler.function || '', isServer, element: element ? element.id : '', value: String(value ?? ''), repeat: !!repeat, player, maxOps: this.limits.scriptOps, spawnSeq: this.instanceSeq, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, touching: this.touchingMap ? this.touchingMap() : {} }));
+      // The saved data goes across when the script side hasn't got this version (a new worker, or a change from outside).
+      const saveGen = this.scripts.generation + ':' + this.saveVersion;
+      if (this.saveSent !== saveGen) { delta.save = this.saveData; this.saveSent = saveGen; }
+      const result = await this.scripts.run(Object.assign(delta, { source, sourceKey: this.sourceKey(handler, source), fn: handler.function || '', isServer, element: element ? element.id : '', value: String(value ?? ''), repeat: !!repeat, player, maxOps: this.limits.scriptOps,
+        keep: !!this.project.keepScriptState && this.project.target === 'web', target: this.project.target || 'both', spawnSeq: this.instanceSeq, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, pointer: { x: this.pointer.x, y: this.pointer.y, down: this.pointer.down, presses: this.pointer.presses }, touching: this.touchingMap ? this.touchingMap() : {} }));
       for (const line of result.logs || []) this.log(line.level, '[' + handler.script + '] ' + line.text);
       if (result.error) { this.log('error', 'Script ' + name + ': ' + result.error); return; }
+      if (result.save) { this.saveData = result.save; this.storeSave(); }
       if (started) queueMicrotask(() => this.profileScript(performance.now() - started, result.ops.length));
       for (const [type, target, v] of result.ops) {
         if (this.ui !== screen) break;
@@ -1216,6 +1288,9 @@
         setEnabled: (id, v) => { const e = elementOf(self.ui, id); if (e) e.enabled = !!v; },
         message: t => self.message(t), fire: (id, event, value) => { const e = id ? elementOf(self.ui, id) : null; self.enqueue(e, event, value ?? ''); },
         idle: () => self.idle(),
+        // The game's saved data (what ctx.save holds), and a way to wipe it, for host pages and testing.
+        getSave: () => Object.assign({}, self.saveData),
+        clearSave: () => { self.saveData = {}; self.saveVersion++; self.storeSave(); },
         snapshot: () => ({ screen: self.ui.id, variables: Object.assign({}, self.state), elements: clone(self.ui.elements) }),
         // Like a player doing it: checkboxes, text boxes, sliders and dropdowns take the value first.
         testEvent: (id, event, value) => {
@@ -1309,6 +1384,39 @@
   }
 
   Object.assign(App.prototype, {
+    // ---- Saved data (ctx.save) ----
+    // Kept in the browser's storage under the game's ID, or by the host page when it provides save.load/save.store
+    // (host.js), so a site can keep saves its own way. Text values only; anything unreadable counts as nothing saved.
+    loadSave() {
+      try {
+        const store = this.host.save;
+        const text = store && typeof store.load === 'function' ? store.load(this.project.id) : window.localStorage.getItem('wysicraft-save:' + this.project.id);
+        const data = typeof text === 'string' ? JSON.parse(text) : (text && typeof text === 'object' ? text : {});
+        const clean = {}; for (const k in data) if (typeof data[k] === 'string') clean[k] = data[k];
+        return clean;
+      } catch (ex) { return {}; }
+    },
+    // Game variables follow the screen's copy: whatever changed them (an action, a script, the page), their new value
+    // is what the next screen gets, and a saved one is written to the saved data.
+    syncGameVars() {
+      if (!this.state || !this.gameVars.size) return;
+      let changed = null;
+      for (const [k, old] of this.gameVars) {
+        const v = this.state[k]; if (v === undefined || v === old) continue;
+        this.gameVars.set(k, String(v));
+        if (this.savedVars.has(k) && this.saveData['$var:' + k] !== String(v)) (changed = changed || Object.assign({}, this.saveData))['$var:' + k] = String(v);
+      }
+      // A saved one whose saved copy went (ctx.save.clear) or fell behind is written again.
+      for (const k of this.savedVars) if (this.saveData['$var:' + k] !== this.gameVars.get(k) && (!changed || changed['$var:' + k] !== this.gameVars.get(k))) (changed = changed || Object.assign({}, this.saveData))['$var:' + k] = this.gameVars.get(k);
+      if (changed) { this.saveData = changed; this.saveVersion++; this.storeSave(); }
+    },
+    storeSave() {
+      try {
+        const store = this.host.save, text = JSON.stringify(this.saveData);
+        if (store && typeof store.store === 'function') store.store(this.project.id, text);
+        else window.localStorage.setItem('wysicraft-save:' + this.project.id, text);
+      } catch (ex) { this.log('warn', 'The game could not be saved: ' + (ex && ex.message ? ex.message : ex)); }
+    },
     resetGame() {
       // Music carries on across screens: a looping sound still playing continues, from where it is, into a new screen
       // that autoplays the same sound on a looping Sound control, instead of stopping and starting again.
@@ -1329,6 +1437,7 @@
       this.separateDefaults = new Map(); this.instances = new Map(); this.instanceSeq = 1; this.instanceTime = performance.now(); this.instancesVersion = 0; this.instanceCapWarned = false;
       this.spriteClock = new Map(); this.graphStates = new Map(); this.velocity = new Map(); this.contacts = new Set(); this.overlaps = new Set(); this.stayTimes = new Map(); this.playing = new Map();
       this.virtualInputs = new Set(); this.inputsDown = new Set(); this.inputAxes = {}; this.stick = null; this.physicsTime = performance.now(); this.children = null;
+      if (this.pointer) { this.pointer.down = false; this.pointer.id = null; }
       for (const a of this.ui.animations || []) if (a.autoplay) this.playing.set(a.id, { anim: a, start: performance.now() });
     },
     // Sprites: the clip in value plays from when it was chosen; frames count left to right, top to bottom.
@@ -1742,7 +1851,13 @@
     stepPhysics(now) {
       const bodies = this.ui.elements.filter(e => (e.body || e.type === 'collider') && e.visible);
       this.physicsCounts.bodies = bodies.length; if (!bodies.length) this.physicsCounts.pairs = 0;
-      const active = bodies.some(b => b.body === 'dynamic' || b.trigger);
+      // A placed kinematic body with a velocity (ui.setVelocity: the Top-down mover, the Follower) moves by it and stops
+      // against walls: static bodies, colliders and solid tiles. One moved by an animation or setPosition has no
+      // velocity and goes where it's put, as before. Spawned copies move in stepInstances instead.
+      const driven = new Set();
+      for (const b of bodies) if (b.body === 'kinematic' && !this.instances.has(b.id)) { const v = this.velocity.get(b.id); if (v && (v.x || v.y)) driven.add(b); }
+      const wall = e => e.body === 'static' || (!e.body && e.type === 'collider');
+      const active = driven.size > 0 || bodies.some(b => b.body === 'dynamic' || b.trigger);
       let elapsed = active ? Math.min(0.1, (now - this.physicsTime) / 1000) : 0; this.physicsTime = now;
       if (active && elapsed <= 0) return; // no time passed: keep the current contacts rather than ending them all
       if (!active && !this.contacts.size && !this.overlaps.size) return;
@@ -1751,7 +1866,10 @@
       const moves = e => e.body === 'dynamic' || e.body === 'kinematic';
       while (elapsed > 0) {
         const step = Math.min(dt, elapsed); elapsed -= step;
-        for (const b of bodies) if (b.body === 'dynamic') { const v = this.velocity.get(b.id) || { x: 0, y: 0 }; v.y += gravity * step; this.velocity.set(b.id, v); this.moveElement(b, v.x * step, v.y * step); }
+        for (const b of bodies) {
+          if (b.body === 'dynamic') { const v = this.velocity.get(b.id) || { x: 0, y: 0 }; v.y += gravity * step; this.velocity.set(b.id, v); this.moveElement(b, v.x * step, v.y * step); }
+          else if (driven.has(b)) { const v = this.velocity.get(b.id); if (v) this.moveElement(b, v.x * step, v.y * step); }
+        }
         // Each body's shape is built once per step instead of once per pairing (it's rebuilt after a hit moves
         // anything), and pairs whose outlines don't overlap skip the full separating-axis test.
         const shapes = bodies.map(() => null);
@@ -1768,7 +1886,8 @@
             if (!overlapping.has(pair) && collide(sa, sb)) overlapping.add(pair);
             return;
           }
-          const ad = a.body === 'dynamic', bd = b.body === 'dynamic'; if (!ad && !bd) return;
+          // Who gets pushed out: dynamic bodies, and a driven kinematic body against a wall.
+          const ad = a.body === 'dynamic' || (driven.has(a) && wall(b)), bd = b.body === 'dynamic' || (driven.has(b) && wall(a)); if (!ad && !bd) return;
           const sa = shapeAt(i), sb = shapeAt(j);
           if (sa.box[0] > sb.box[2] || sb.box[0] > sa.box[2] || sa.box[1] > sb.box[3] || sb.box[1] > sa.box[3]) return;
           const hit = collide(sa, sb); if (!hit) return;
@@ -1790,7 +1909,7 @@
         };
         if (bodies.length <= BROADPHASE_MIN) { for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) test(i, j); this.physicsCounts.pairs = bodies.length * (bodies.length - 1) / 2; }
         else { const near = this.nearPairs(bodies, shapeAt); for (let k = 0; k < near.length; k += 2) test(near[k], near[k + 1]); this.physicsCounts.pairs = near.length / 2; }
-        for (const map of maps) for (const b of bodies) if (b.body === 'dynamic' && this.tileCollide(b, map)) touching.add(b.id < map.id ? b.id + '|' + map.id : map.id + '|' + b.id);
+        for (const map of maps) for (const b of bodies) if ((b.body === 'dynamic' || driven.has(b)) && this.tileCollide(b, map)) touching.add(b.id < map.id ? b.id + '|' + map.id : map.id + '|' + b.id);
       }
       this.contacts = this.contactChanges(this.contacts, touching, 'collide', 'collide_end', 'collide_stay', now);
       this.overlaps = this.contactChanges(this.overlaps, overlapping, 'trigger_enter', 'trigger_exit', 'trigger_stay', now);
@@ -2088,7 +2207,7 @@
       return best ? { x: map.bounds.x + (best[0] + 0.5) * tw, y: map.bounds.y + (best[1] + 0.5) * th } : null;
     },
     // The control list changed: indexes and caches built from it start again.
-    elementsChanged() { this.ui._index = null; this.children = null; this._parentsOf = null; this.instancesVersion++; },
+    elementsChanged() { elementIndexes.delete(this.ui); this.children = null; this._parentsOf = null; this.instancesVersion++; },
     // Each frame: lifetimes count down, seekers turn toward their target, and copies that aren't dynamic bodies move by
     // their velocity (dynamic ones are moved by the physics step, with gravity and collisions).
     stepInstances(now) {
@@ -2234,6 +2353,8 @@
 
   // Controls with no picture: never hovered or clicked.
   const UNSEEN = new Set(['collider', 'camera', 'sound', 'particles']);
+  // Controls a tap works (see click); anything else under a finger is scenery.
+  const TAPPABLE = new Set(['button', 'textbox', 'checkbox', 'slider', 'dropdown', 'item_list']);
   // Screen pixels of thumb travel for a full push on the touch stick.
   const STICK_REACH = 34;
   const MAX_PARTICLES = 2000, MAX_PARTICLES_GL = 50000;
@@ -2463,7 +2584,35 @@
       }
       return grids[id];
     };
-    const emit = (type, target, v) => { if (ops.length >= r.maxOps) throw new Error('Script output exceeds ' + r.maxOps + ' operations'); if (type === 'set_variable') vars[target] = String(v); ops.push([type, String(target === undefined ? '' : target), String(v === undefined ? '' : v)]); };
+    const emit = (type, target, v) => {
+      if (ops.length >= r.maxOps) throw new Error('This run asked for more than ' + r.maxOps + ' screen changes (' + (r.target === 'web' ? 'the limit for one script run' : "Minecraft's limit for one script run") +
+        '), so none of them were applied. Spread the work over several ticks, or let bodies, paths and animations move things.');
+      if (type === 'set_variable') vars[target] = String(v); ops.push([type, String(target === undefined ? '' : target), String(v === undefined ? '' : v)]);
+    };
+    // Saved data (web and desktop): text by key, kept in the browser for this game until the game clears it. Writes
+    // are made to a copy, which replaces the saved data only if the run succeeds.
+    // (Declared here: the worker is built from this function's own source.)
+    const SAVE_LIMIT = 512 * 1024, saveSize = o => { let n = 0; for (const k in o) n += k.length + String(o[k]).length; return n; };
+    if (r.save) { mirror.save = Object.assign({}, r.save); mirror.saveBytes = saveSize(mirror.save); mirror.saveKnown = true; }
+    if (!mirror.save) { mirror.save = {}; mirror.saveBytes = 0; }
+    let saved = null, savedBytes = mirror.saveBytes;
+    // A script side that never received the saved data (a request replayed after the worker failed to start) may not
+    // write: its empty copy would replace what the player has saved.
+    const writable = () => { if (!mirror.saveKnown) throw new Error('Saved data is not ready yet; try again'); return saved || (saved = Object.assign({}, mirror.save)); };
+    const saveKey = k => { k = String(k); if (!k || k.length > 100) throw new Error('A save key is 1-100 characters'); return k; };
+    const save = Object.freeze({
+      get: k => { const v = (saved || mirror.save)[saveKey(k)]; return v === undefined ? '' : v; },
+      has: k => Object.prototype.hasOwnProperty.call(saved || mirror.save, saveKey(k)),
+      keys: () => Object.keys(saved || mirror.save).filter(k => k.slice(0, 5) !== '$var:'), // saved game variables are kept here too
+      set: (k, v) => {
+        k = saveKey(k); v = String(v === undefined || v === null ? '' : v); const s = writable();
+        const after = savedBytes - (k in s ? k.length + s[k].length : 0) + k.length + v.length;
+        if (after > SAVE_LIMIT) throw new Error('Saved data is limited to ' + (SAVE_LIMIT / 1024) + ' KB per game; this would make it ' + Math.ceil(after / 1024) + ' KB');
+        s[k] = v; savedBytes = after;
+      },
+      remove: k => { k = saveKey(k); const s = writable(); if (k in s) { savedBytes -= k.length + s[k].length; delete s[k]; } },
+      clear: () => { writable(); saved = {}; savedBytes = 0; }
+    });
     const unsupported = () => { throw new Error('Use a built-in Server event action for navigation or server commands'); };
     const setItem = (id, resource) => { if (typeof resource !== 'string' || !/^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(resource)) throw new Error('setItem requires a namespaced item ID, e.g. minecraft:diamond'); emit('set_item', id, resource); };
     const getVariable = n => (n in vars ? vars[n] : (r.vars[n] === undefined ? '' : r.vars[n]));
@@ -2496,7 +2645,10 @@
       tileSize: id => { const t = grid(id); return t ? { columns: t.m.columns, rows: t.m.rows, tileWidth: t.m.tileWidth, tileHeight: t.m.tileHeight } : null; },
       hasTag: (id, tag) => { const b = r.bodies && r.bodies[id]; return !!(b && b.tags && b.tags.indexOf(String(tag)) >= 0); },
       getElement: id => { const b = (r.bodies && r.bodies[id]) || {}; return Object.freeze({ id, text: r.texts[id] === undefined ? '' : r.texts[id], x: b.x, y: b.y, width: b.width, height: b.height, vx: b.vx, vy: b.vy, visible: b.visible, frame: b.frame || 0, clip: b.clip || '', clipStep: b.clipStep || 0, clipDone: !!b.clipDone, state: b.state || '', tags: (b.tags || []).slice(), setText: v => emit('set_text', id, v), setItem: v => setItem(id, v) }); },
-      close: () => emit('close_ui', '', ''), open: r.isServer ? (id => emit('open_ui', '', id)) : unsupported,
+      // Opening a screen: server scripts everywhere, and client scripts in web & desktop projects (in Minecraft a
+      // client can't be trusted to navigate, so those use an open_ui action).
+      close: () => emit('close_ui', '', ''),
+      open: r.isServer || r.target === 'web' ? (id => emit('open_ui', '', String(id))) : (() => { throw new Error('ctx.ui.open works in client scripts of web & desktop projects only. In a project made for Minecraft, open screens with an open_ui action (on any event, including trigger_enter) or from a server script.'); }),
       play: (id, clip) => emit('set_value', id, clip),
       animate: (name) => emit('play_animation', name, ''), stopAnimation: (name) => emit('stop_animation', name, ''),
       emit: (id) => emit('emit_particles', id, ''), stopEmit: (id, clear) => emit('stop_particles', id, clear ? 'clear' : ''),
@@ -2531,10 +2683,13 @@
     const ctx = Object.freeze({
       ui, elementId: r.element, value: r.value, repeat: r.repeat, other: r.other || '',
       state: Object.freeze({ get: getVariable, set: ui.setVariable }), getVariable, setVariable: ui.setVariable,
-      message: v => emit('message', '', v),
+      message: v => emit('message', '', v), save,
       // playSound(id, volume): volume 0-1 is optional (web and desktop; Minecraft plays at its own volume).
       client: Object.freeze({ sendMessage: v => emit('message', '', v), playSound: (v, volume) => emit('play_sound', volume === undefined ? '' : String(Math.min(1, Math.max(0, Number(volume) || 0))), v) }),
-      input: Object.freeze({ isDown: name => !!(r.inputs && r.inputs[name]), axis: name => (r.axes && r.axes[name]) || 0, isTouch: () => !!r.touch }),
+      // pointer(): { x, y, down, presses } in screen coordinates. down while a press that missed the controls is held;
+      // presses counts those presses, so a tap between two ticks still shows as a change.
+      input: Object.freeze({ isDown: name => !!(r.inputs && r.inputs[name]), axis: name => (r.axes && r.axes[name]) || 0, isTouch: () => !!r.touch,
+        pointer: () => Object.freeze(Object.assign({ x: -1, y: -1, down: false, presses: 0 }, r.pointer)) }),
       // What a control is touching when the event started: solid contacts and trigger overlaps.
       physics: Object.freeze({
         touching: id => ((r.touching && r.touching[id]) || []).slice(),
@@ -2558,24 +2713,54 @@
     let error = '';
     try {
       const fn = r.fn && /^[A-Za-z_$][\w$]*$/.test(r.fn) ? r.fn : '';
-      // Compiled once per source and function, then reused: running it still starts the script from the top, as
-      // before, but a 70 KB script is no longer parsed again on every tick.
       if (!mirror.compiled) { mirror.compiled = new Map(); mirror.sources = new Map(); }
-      const key = r.sourceKey ? r.sourceKey + '|' + fn : '';
-      let run = key ? mirror.compiled.get(key) : null;
-      if (!run) {
+      const sourceOf = () => {
         let source = r.source;
         if (r.sourceKey) { if (source === undefined) source = mirror.sources.get(r.sourceKey); else mirror.sources.set(r.sourceKey, source); }
         if (source === undefined) throw new Error('Script source missing; it will be sent again');
-        run = new Function('ctx', 'ui', 'console', source + '\n;return ' + (fn ? 'typeof ' + fn + ' === "function" ? ' + fn + ' : undefined' : 'undefined') + ';');
-        if (key) { if (mirror.compiled.size > 128) mirror.compiled.clear(); mirror.compiled.set(key, run); }
+        return source;
+      };
+      if (r.keep && r.sourceKey && fn) {
+        // Kept script state (web and desktop games with it on): each script runs from the top once, and after that
+        // only the event's function is called, so top-level variables last from one event to the next, across
+        // screens, until the game starts over or the script is edited. ctx, ui and console always mean the current
+        // event's, at the top level too. Client and server scripts keep separate copies.
+        if (!mirror.modules) mirror.modules = new Map();
+        const side = r.isServer ? 'server|' : 'client|', mkey = side + r.sourceKey;
+        let mod = mirror.modules.get(mkey);
+        if (!mod) {
+          // An edited script starts over: the copy made from its old source goes.
+          const script = side + r.sourceKey.slice(0, r.sourceKey.lastIndexOf('#') + 1);
+          for (const k of [...mirror.modules.keys()]) if (k.startsWith(script)) mirror.modules.delete(k);
+          const now = { ctx, ui, console: scriptConsole };
+          const live = name => new Proxy({}, { get: (_, p) => now[name][p], has: (_, p) => p in now[name] });
+          const lookup = new Function('ctx', 'ui', 'console', sourceOf() + '\n;return function (n) { return eval("typeof " + n + " === \\"function\\" ? " + n + " : undefined"); };')(live('ctx'), live('ui'), live('console'));
+          mod = { now, lookup, fns: new Map() };
+          mirror.modules.set(mkey, mod);
+        }
+        mod.now.ctx = ctx; mod.now.ui = ui; mod.now.console = scriptConsole;
+        let callback = mod.fns.get(fn);
+        if (!callback) { callback = mod.lookup(fn); if (callback) mod.fns.set(fn, callback); }
+        if (!callback) throw new Error('Function not found: ' + fn);
+        callback(ctx);
+      } else {
+        // Compiled once per source and function, then reused: running it still starts the script from the top, as
+        // before, but a 70 KB script is no longer parsed again on every tick.
+        const key = r.sourceKey ? r.sourceKey + '|' + fn : '';
+        let run = key ? mirror.compiled.get(key) : null;
+        if (!run) {
+          run = new Function('ctx', 'ui', 'console', sourceOf() + '\n;return ' + (fn ? 'typeof ' + fn + ' === "function" ? ' + fn + ' : undefined' : 'undefined') + ';');
+          if (key) { if (mirror.compiled.size > 128) mirror.compiled.clear(); mirror.compiled.set(key, run); }
+        }
+        const callback = run(ctx, ui, scriptConsole);
+        if (fn) { if (!callback) throw new Error('Function not found: ' + fn); callback(ctx); }
       }
-      const callback = run(ctx, ui, scriptConsole);
-      if (fn) { if (!callback) throw new Error('Function not found: ' + fn); callback(ctx); }
     } catch (ex) { error = ex && ex.message ? ex.message : String(ex); }
     // Variables the script set are now known to the mirror too, so the page need not send them back.
     if (!error) for (const k in vars) mirror.vars[k] = vars[k];
-    return { ops: error ? [] : ops, logs, error };
+    // So is the saved data, which goes back to the page to be stored.
+    if (!error && saved) { mirror.save = saved; mirror.saveBytes = savedBytes; }
+    return { ops: error ? [] : ops, logs, error, save: !error && saved ? saved : undefined };
   }
   function workerSetup() {
     const post = self.postMessage.bind(self);

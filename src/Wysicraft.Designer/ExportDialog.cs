@@ -23,8 +23,11 @@ public partial class MainWindow
         new("windows_app", "Windows app (.zip) — runs on Windows 10/11", "A small program (under 1 MB plus your images) that shows the project in its own window using Microsoft Edge WebView2, which comes with Windows. Unzip and run the .exe."),
         new("electron", "Electron apps — Windows, macOS and Linux", "Full desktop apps built on Electron (about 100 MB each). Electron is downloaded from its official GitHub releases the first time, checked against its published checksums, and kept for next time. Unsigned: on macOS, run  xattr -cr YourApp.app  once (or sign it on a Mac); on Linux, extract the .tar.gz and run the program."),
     ];
+    // Self-checks run from a build folder outside the install point this at the app host.
+    internal static string? AppHostOverride;
     string AppHostExe()
     {
+        if (AppHostOverride != null) return AppHostOverride;
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory != null; directory = directory.Parent)
             foreach (var relative in new[] { "Runtime", "artifacts/apphost" })
             { string path = Path.Combine(directory.FullName, relative, "WysicraftAppHost.exe"); if (File.Exists(path)) return path; }

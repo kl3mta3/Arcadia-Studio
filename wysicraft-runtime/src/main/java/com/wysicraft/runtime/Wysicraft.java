@@ -31,6 +31,8 @@ public final class Wysicraft {
     static { var builder = new ModConfigSpec.Builder(); RUN_AS_SERVER = builder.comment("Dangerous: execute trusted pack commands as the server. Default false preserves player permissions.").define("runCommandsAsServer",false); CONFIG = builder.build(); }
     public Wysicraft(IEventBus bus, ModContainer container) {
         container.registerConfig(ModConfig.Type.SERVER,CONFIG);
+        com.wysicraft.runtime.menu.WysicraftMenu.MENUS.register(bus);
+        if (net.neoforged.fml.loading.FMLEnvironment.dist == net.neoforged.api.distmarker.Dist.CLIENT) com.wysicraft.runtime.client.SlotScreen.register(bus);
         bus.addListener(this::payloads);
         NeoForge.EVENT_BUS.addListener(this::commands);
         NeoForge.EVENT_BUS.addListener((ServerStartedEvent event) -> SERVER.reload(event.getServer()));

@@ -9,3 +9,7 @@ artifacts/
 tests/
 *.user
 *.log
+docs/
+tools/
+wiki/
+installer/

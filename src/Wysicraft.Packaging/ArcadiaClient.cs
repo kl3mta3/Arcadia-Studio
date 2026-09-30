@@ -70,6 +70,13 @@ public sealed class ArcadiaGame
     public ArcadiaSubmission? Latest { get; set; }
     public ArcadiaLimit Limits { get; set; } = new();
     public List<ArcadiaSubmission> Submissions { get; set; } = [];
+    /// <summary>The game's details as they are on Arcadia now, and when and by whom (creator, mod) they were last
+    /// edited on the website. Some arcades send these inside Details instead; ArcadeDetails reads either.</summary>
+    public ArcadiaGameDetails? Arcade { get; set; }
+    public long? EditedAt { get; set; }
+    public string? EditedBy { get; set; }
+    public ArcadiaDetails? Details { get; set; }
+    public ArcadiaGameDetails? ArcadeDetails => Arcade ?? Details?.Arcade;
 }
 public sealed class ArcadiaLive { public string Version { get; set; } = ""; public int Number { get; set; } }
 public sealed class ArcadiaSubmission
@@ -90,6 +97,8 @@ public sealed class ArcadiaUpload
 {
     public ArcadiaGameRef Game { get; set; } = new();
     public ArcadiaSubmission Submission { get; set; } = new();
+    /// <summary>Whose details were used: "app", or "arcade" with the fields it Kept.</summary>
+    public ArcadiaDetails? Details { get; set; }
 }
 public sealed class ArcadiaGameRef { public string Id { get; set; } = ""; public string Title { get; set; } = ""; public string Url { get; set; } = ""; }
 public sealed class ArcadiaCheck
@@ -98,6 +107,8 @@ public sealed class ArcadiaCheck
     public bool WouldHold { get; set; }
     public bool Refused { get; set; }
     public List<ArcadiaFinding> Findings { get; set; } = [];
+    /// <summary>On an update: whether the details clash with ones edited on Arcadia since the last publish.</summary>
+    public ArcadiaDetails? Details { get; set; }
 }
 
 /// <summary>Talks to an Arcadia server's publishing API (docs/ARCADIA.md). Always HTTPS, except to this computer
@@ -185,10 +196,12 @@ public sealed class ArcadiaClient
         catch (ArcadiaException ex) when (ex.Status == 422) { return new ArcadiaCheck { Ok = false, Refused = true, Findings = ex.Findings }; }
     }
 
-    /// <summary>Uploads a package: a new game when gameId is empty, otherwise a new version of that game.</summary>
-    public async Task<ArcadiaUpload> UploadAsync(string key, string? gameId, byte[] zip, IProgress<double>? progress = null, CancellationToken ct = default)
+    /// <summary>Uploads a package: a new game when gameId is empty, otherwise a new version of that game. overwrite
+    /// matters only when the check found a clash with details edited on Arcadia: true sends this package's details in
+    /// their place, false (or null) keeps Arcadia's. The game's files are updated either way.</summary>
+    public async Task<ArcadiaUpload> UploadAsync(string key, string? gameId, byte[] zip, IProgress<double>? progress = null, CancellationToken ct = default, bool? overwrite = null)
     {
-        string path = string.IsNullOrEmpty(gameId) ? "api/publish/games" : "api/publish/games/" + Uri.EscapeDataString(gameId);
+        string path = string.IsNullOrEmpty(gameId) ? "api/publish/games" : "api/publish/games/" + Uri.EscapeDataString(gameId) + (overwrite is bool o ? "?overwrite=" + (o ? "true" : "false") : "");
         return Parse<ArcadiaUpload>(await SendAsync(HttpMethod.Post, path, key, Zip(zip, progress), Long, null, ct));
     }
 
@@ -206,6 +219,21 @@ public sealed class ArcadiaClient
         string? name = null;
         var bytes = await SendBytesAsync(path, key, r => name = r.Content.Headers.ContentDisposition?.FileNameStar ?? r.Content.Headers.ContentDisposition?.FileName?.Trim('"'), ct);
         return (bytes, string.IsNullOrWhiteSpace(name) ? gameId + ".zip" : Path.GetFileName(name));
+    }
+
+    /// <summary>A picture of a game on this arcade (a cover or screenshot URL from its details). Only this arcade's own
+    /// address is fetched, so the key never goes anywhere else.</summary>
+    public async Task<byte[]> MediaAsync(string key, string url, CancellationToken ct = default)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Arcade.Scheme || !string.Equals(uri.Host, Arcade.Host, StringComparison.OrdinalIgnoreCase) || uri.Port != Arcade.Port)
+            throw new ArcadiaException(0, "media", "A picture on Arcadia has an address outside the arcade, so it wasn't downloaded: " + url);
+        using var request = Request(HttpMethod.Get, uri.PathAndQuery.TrimStart('/'), key, null);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(Long);
+        using var response = await http.SendAsync(request, timeout.Token);
+        if (!response.IsSuccessStatusCode) throw new ArcadiaException((int)response.StatusCode, "media", "Arcadia didn't send a picture (" + (int)response.StatusCode + "): " + url);
+        var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+        if (bytes.Length > 8 * 1024 * 1024) throw new ArcadiaException(0, "media", "A picture on Arcadia is larger than expected: " + url);
+        return bytes;
     }
 
     // ---- Plumbing ----

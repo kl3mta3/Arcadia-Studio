@@ -195,7 +195,7 @@ public partial class MainWindow
         try {
         if(mcpHost==null) throw new InvalidOperationException("MCP server is stopped.");
         switch(operation) {
-            case "get_project": return Json.Write(new { revision=Revision(),project=new { project.Manifest,project.Screens,project.Scripts,assets=project.Assets.Select(p=>new { path=p.Key,bytes=p.Value.Length }) },activeScreen=ui.Id,selection=selected.ToArray(),dirty });
+            case "get_project": return Json.Write(new { revision=Revision(),project=new { project.Manifest,project.Screens,project.Leaderboards,project.Scripts,assets=project.Assets.Select(p=>new { path=p.Key,bytes=p.Value.Length }) },activeScreen=ui.Id,selection=selected.ToArray(),dirty });
             case "get_schema": return McpSchema();
             case "pending_requests": return PendingRequestsJson();
             case "answer_request": return AnswerRequest(payload);
@@ -205,7 +205,7 @@ public partial class MainWindow
                 CheckRevision(expected);
                 var updated=ProjectEdits.Apply(project,edits ?? []);
                 var scriptErrors=McpValidation(updated); if(scriptErrors.Count>0) throw new InvalidDataException(string.Join("\n",scriptErrors));
-                Change(); project=updated; ui=project.Screens.FirstOrDefault(s=>s.Id==ui.Id) ?? project.Screens[0];
+                Change(); project=updated; ui=ResolveUi(ui);
                 selected.RemoveWhere(id=>!ui.Elements.Any(e=>e.Id==id)); RefreshAll();
                 Log("MCP applied "+edits!.Count+" edits (one Undo).");
                 return Json.Write(new { revision=Revision(),applied=edits.Count });

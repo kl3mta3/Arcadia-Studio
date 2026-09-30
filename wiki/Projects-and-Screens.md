@@ -52,7 +52,7 @@ Component sources (see [[Reusable components|Reusable-Components]]) aren't liste
 | **Responsive layout** | In Minecraft, controls move by their anchors when the game window is a different size. See [[Anchors and responsive layouts|Anchors-and-Responsive-Layouts]]. |
 | **Show frame / title** | Draws Minecraft's opaque screen frame and title behind your controls. Off by default. |
 | **Dim game behind UI** | Darkens the world behind the screen. Off by default. |
-| **Fit to viewport** | For non-responsive screens, scales the whole screen down if it's larger than the game window. |
+| **Fit to viewport** | For non-responsive screens, scales the whole screen down if it's larger than the game window. In a web game it also grows it to fill the page (a whole-number scale when that wastes under 12%, otherwise exactly). Minecraft screens only shrink. |
 | **Tick interval (ms)** | How often the screen's `tick` event runs while it's open: 50–60000 milliseconds, or 0 for off. See [[Timers and keys|Events-and-Actions#timers-and-keys]]. |
 | **Gravity** (web & desktop) | Pull on dynamic physics bodies, in pixels per second². See [[Advanced tools|Advanced-Tools]]. |
 | **Key repeat (ms)** | How often a held key sends the `key` event again: 50–2000 milliseconds, or 0 so a held key sends it only once. Default 150. |
@@ -70,7 +70,8 @@ Each project automatically gets two commands:
 Other ways in:
 
 - `/wysicraft open <screen>` or `/wysicraft open <project>:<screen>` opens a specific screen. `/wui` is a short alias.
-- An `open_ui` action or `ui.open()` in a server script navigates between screens. See [[Events and actions|Events-and-Actions]].
+- An `open_ui` action (on any event) or `ui.open()` in a script navigates between screens. Client scripts can use `ui.open()` in web & desktop projects; in Minecraft only server scripts can. See [[Events and actions|Events-and-Actions]].
+- **Game variables** (Project settings) carry from screen to screen, for a score a Game over screen shows; saved ones come back next visit. See [[Where to keep state|Scripting#where-to-keep-state]].
 - Mods and KubeJS can open screens; see [[Addon API|Addon-API]].
 
 Two projects can both have a screen called `main`. Internally, screens are addressed as `project_id:screen_id`.

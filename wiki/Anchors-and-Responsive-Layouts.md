@@ -35,7 +35,7 @@ The editor uses the same layout rules as Minecraft, so what you see while resizi
 2. The screen's Width and Height become its **design size**. In Minecraft, the screen is laid out at the available GUI size (minus a small margin for the frame), and every control moves by its anchor.
 3. Try it without launching the game: in [[Preview|Preview]], type a width and height under **Layout size (GUI pixels)** and click **Apply size**.
 
-Without Responsive layout, a screen keeps its fixed size. **Fit to viewport** then scales it down if the window is too small.
+Without Responsive layout, a screen keeps its fixed size. **Fit to viewport** then scales it down if the window is too small. In a web game (web page, desktop app, Arcadia, itch.io) it also grows the screen to fill the page: a whole-number scale (2x, 3x…) while that leaves less than 12% of the room unused, otherwise exactly the size that fits, so a phone isn't left showing the game at 1x in a corner. Pixel art stays sharp either way. A web game without a frame uses the whole page, with no margin. In Minecraft it only ever shrinks: menus follow the player's GUI Scale.
 
 ## A good starting recipe
 

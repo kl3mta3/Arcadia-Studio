@@ -117,6 +117,37 @@ public partial class MainWindow
             case "Shape":
                 Choice(Properties, "Shape", e.Shape, Pairs(Shapes.Names), v => e.Shape = v, "Stretch the control to make ovals and rectangles.");
                 return true;
+            case var board when board.StartsWith("Board."):
+                return BoardField(e, board[6..]);
+            case "Minimum" or "Maximum" when e.Type == "lb_range":
+                CommitField(name == "Minimum" ? "From rank" : "To rank", ((int)(name == "Minimum" ? e.Minimum : e.Maximum)).ToString(System.Globalization.CultureInfo.InvariantCulture), v =>
+                {
+                    if (!int.TryParse(v.Trim(), out int n) || n < 1) throw new InvalidOperationException("Ranks start at 1.");
+                    Change(); if (name == "Minimum") e.Minimum = n; else e.Maximum = n; Draw(); RefreshInspector();
+                }, "The ranks the panel starts with; players can change them on the page (up to 100 at a time).");
+                return true;
+            case "SlotKind" when e.Type == "slots":
+                Choice(Properties, "Holds", e.SlotKind, [("player", "Player inventory"), ("storage", "Storage (given back on close)"), ("crafting", "Crafting grid"), ("result", "Crafting result")],
+                    v => { e.SlotKind = v; if (v == "crafting") { e.Columns = Math.Min(e.Columns, 3); e.Rows = Math.Min(e.Rows, 3); } if (v == "result") { e.Columns = 1; e.Rows = 1; } FitSlots(e); },
+                    "Real Minecraft slots: the server moves the items. Player shows part of the player's inventory; storage and crafting give left-over items back when the screen closes.");
+                Properties.Children.Add(new TextBlock { Text = "Minecraft only. The screen opens as an inventory screen, so dragging, shift-clicking and splitting stacks work as in the game.", TextWrapping = TextWrapping.Wrap, Opacity = 0.65, FontSize = 11, Margin = new Thickness(4, 0, 0, 4) });
+                return true;
+            case "Columns" or "Rows" when e.Type == "slots":
+                if (e.SlotKind == "result") return true;
+                CommitField(name, (name == "Columns" ? e.Columns : e.Rows).ToString(), v =>
+                {
+                    if (!int.TryParse(v, out int n) || n < 1 || n > (name == "Columns" ? 9 : 6)) throw new InvalidOperationException(name == "Columns" ? "Columns are 1–9." : "Rows are 1–6.");
+                    Change(); if (name == "Columns") e.Columns = n; else e.Rows = n; FitSlots(e); Draw(); RefreshInspector();
+                }, "The grid of slots; the control sizes itself to 18 GUI pixels a slot.");
+                return true;
+            case "SlotStart" when e.Type == "slots":
+                if (e.SlotKind != "player") return true;
+                CommitField("First slot", e.SlotStart.ToString(), v =>
+                {
+                    if (!int.TryParse(v, out int n) || n < 0 || n + e.Columns * e.Rows > 36) throw new InvalidOperationException("Player slots are 0–35 (0–8 is the hotbar), and the grid has to fit.");
+                    Change(); e.SlotStart = n; Draw(); RefreshInspector();
+                }, "Which inventory slot the grid starts at: 0–8 is the hotbar, 9–35 the rest. The main inventory is 9 × 3 from 9; the hotbar is 9 × 1 from 0.");
+                return true;
             case "Layer":
                 LayerFields(Properties, e);
                 return true;

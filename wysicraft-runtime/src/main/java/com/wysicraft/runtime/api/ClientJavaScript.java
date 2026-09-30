@@ -45,7 +45,8 @@ public final class ClientJavaScript implements Scripts.Provider {
                     case "value": return host.value();
                     case "repeat": return host.repeat() ? "true" : "false";
                     case "is_server": return side == Scripts.Side.SERVER ? "true" : "false";
-                    case "player_name", "player_uuid", "player_position", "player_inventory", "player_permission":
+                    case "slot_items": return host.query(op,target);   // both sides: what a slots control holds right now
+                    case "player_name", "player_uuid", "player_position", "player_inventory", "player_permission", "slot_take":
                         if (side != Scripts.Side.SERVER) throw new IllegalArgumentException("Player data requires a Server script");
                         return host.query(op,target);
                 }
@@ -88,7 +89,8 @@ public final class ClientJavaScript implements Scripts.Provider {
             changeTexture:(id,v)=>emit('change_texture',id,v),
             getVariable:n=>b('get_variable',n), setVariable:(n,v)=>emit('set_variable',n,v),
             getElement:id=>Object.freeze({id:id,text:b('get_text',id),setText:v=>emit('set_text',id,v),setItem:v=>setItem(id,v)}),
-            close:()=>emit('close_ui','',''), open:isServer?(id=>emit('open_ui','',id)):unsupported
+            close:()=>emit('close_ui','',''), open:isServer?(id=>emit('open_ui','',id)):unsupported,
+            getSlots:id=>JSON.parse(b('slot_items',String(id)))
           });
           this.ui=ui;
           this.ctx=Object.freeze({ui:ui,elementId:b('element'),value:b('value'),repeat:b('repeat')==='true',
@@ -96,7 +98,9 @@ public final class ClientJavaScript implements Scripts.Provider {
             getVariable:ui.getVariable,setVariable:ui.setVariable,
             message:v=>emit('message','',v),
             client:Object.freeze({sendMessage:v=>emit('message','',v),playSound:v=>emit('play_sound','',v)}),
-            player:isServer?Object.freeze({getName:()=>b('player_name'),getUuid:()=>b('player_uuid'),getPosition:()=>JSON.parse(b('player_position')),getInventory:()=>JSON.parse(b('player_inventory')),hasPermission:level=>b('player_permission',String(level))==='true'}):undefined,
+            player:isServer?Object.freeze({getName:()=>b('player_name'),getUuid:()=>b('player_uuid'),getPosition:()=>JSON.parse(b('player_position')),getInventory:()=>JSON.parse(b('player_inventory')),hasPermission:level=>b('player_permission',String(level))==='true',
+              getSlots:id=>JSON.parse(b('slot_items',String(id))),
+              takeFromSlot:(id,item,count)=>Number(b('slot_take',String(id)+' '+String(item)+' '+String(count===undefined?1:count)))}):undefined,
             server:Object.freeze({runCommand:isServer?(command=>emit('command','',command)):unsupported,sendMessage:isServer?(text=>emit('message','',text)):unsupported})
           });
           function logger(level) { return function() { var parts=[]; for(var i=0;i<arguments.length;i++) parts.push(typeof arguments[i]==='string'?arguments[i]:JSON.stringify(arguments[i])); emit('console_'+level,'',parts.join(' ')); }; }

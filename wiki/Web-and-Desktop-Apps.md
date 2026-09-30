@@ -31,6 +31,7 @@ The folder export includes `host.js`. It's plain JavaScript that you edit, and r
 | `onSound(sound)` | A `play_sound` action runs. |
 | `onMessage(text)` | A `message` action or `ctx.message` runs. Return `false` to hide the built-in message line. |
 | `onClose(screen)` | The screen is closed. Desktop apps close their window here. |
+| `save: { load(gameId), store(gameId, text) }` | Not a hook but a place: where saved games (`ctx.save`) are kept. Without it they go in the browser's storage under the game's ID. `load` returns the saved text or `null`. |
 
 `info.app`, which is also `window.Wysicraft.app`, lets your code change the UI, for example after fetching data:
 
@@ -40,7 +41,7 @@ onCommand(command, info) {
 }
 ```
 
-`app` has `open(screen)`, `close()`, `setText(id, text)`, `setValue(id, value)`, `setVisible(id, bool)`, `setEnabled(id, bool)`, `getVariable(name)`, `setVariable(name, value)`, `message(text)` and `fire(elementId, eventName, value)`. host.js also sets `closeOnEscape`, `guiScale` (the size, like Minecraft's GUI scale), `fontFamily`, and the `player` details that server scripts see.
+`app` also has `getSave()` and `clearSave()` for the game's saved data. `app` has `open(screen)`, `close()`, `setText(id, text)`, `setValue(id, value)`, `setVisible(id, bool)`, `setEnabled(id, bool)`, `getVariable(name)`, `setVariable(name, value)`, `message(text)` and `fire(elementId, eventName, value)`. host.js also sets `closeOnEscape`, `guiScale` (the size, like Minecraft's GUI scale), `fontFamily`, and the `player` details that server scripts see.
 
 ## Windows app
 

@@ -25,7 +25,7 @@ Every panel can be rearranged:
 - **Close button:** hides the panel. Bring it back from **View → Panels**.
 - **View → Reset panel layout** restores the default arrangement. It never changes your project or script text.
 
-Your arrangement is saved when you close Arcadia Studio and restored next time. It's a per-user preference, separate from projects. (Version 1.2 starts once with a fresh default layout, with a shorter Output panel and wider left panels.)
+Your arrangement is saved when you close Arcadia Studio and restored next time. It's a per-user preference, separate from projects.
 
 ## Toolbar
 
@@ -42,10 +42,11 @@ The text on the right shows the zoom, for example `Zoom 100% • 1 GUI pixel = 2
 
 ## Menus
 
-- **File:** New project, Open project or pack…, Recover unsaved project…, Save, Save as…, Export…, Export for KubeJS…, Exit.
+- **File:** New project, Open project or pack…, Recover unsaved project…, Save, Save as…, Export…, Export for KubeJS…, [[Publish to Arcadia…|Publishing-to-Arcadia]], [[Publish to itch.io…|Publishing-to-itch.io]], Exit.
 - **Edit:** Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select all, Group, Ungroup, Isolate group, Attach to panel, Detach from panel, Lock / unlock selection, Rename…, Bring to front, Bring forward, Send backward, Send to back, and the **Arrange** submenu.
 - **View:** Panels, Reset panel layout, zoom commands, Show grid, Snap to grid, Keyboard shortcuts….
 - **Project:** Preview, Test in Minecraft, Validate, Screen settings, Project settings…, Import texture…, MCP server (AI assistants)….
+- **Advanced** (web and desktop projects): Inputs (keys and gamepads)…, Input creator…, Animations…, State graphs…, Shaders…, Particle maker…, Particles…, Collider editor and Tile painter for the selection, Collision layers…, **Create leaderboard**, **Open leaderboard…** and **Import leaderboard…** ([[Leaderboard pages|Leaderboard-Pages]]), and Show / hide the Advanced toolbox.
 - **Help:** User manual (F1, opens the offline manual installed with Arcadia Studio), Script API and snippets, Keyboard shortcuts…, About Arcadia Studio.
 
 All of these can be given your own shortcuts. See [[Keyboard shortcuts|Keyboard-Shortcuts]].

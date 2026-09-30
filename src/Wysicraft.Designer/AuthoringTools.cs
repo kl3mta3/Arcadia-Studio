@@ -21,7 +21,7 @@ public partial class MainWindow
         "ctx.ui.setItems('list_id', ctx.player.getInventory());", "console.log('Debug message');",
         "ctx.ui.play('sprite_id', 'run'); // sprite clip", "ctx.ui.setValue('sound_id', 'play'); // Sound control: play or stop", "ctx.client.playSound('myproject:click');", "ctx.repeat // true while a key is held down",
         "ctx.ui.animate('animation_id'); // web & desktop", "ctx.ui.stopAnimation('animation_id'); // web & desktop", "ctx.ui.setVelocity('body_id', 0, -200); // web & desktop physics", "ctx.ui.setPosition('body_id', 40, 20); // web & desktop", "ctx.ui.setSize('camera1', 240, 135); // web & desktop: resize (a smaller camera zooms in)", "ctx.ui.changeTexture('image_id', 'myproject:textures/gui/image/other.png');",
-        "ctx.input.isDown('jump'); // web & desktop inputs", "ctx.input.axis('left'); // 0-1, web & desktop", "ctx.ui.getElement('body_id').vx; // x, y, width, height, vx, vy (web & desktop)",
+        "ctx.input.isDown('jump'); // web & desktop inputs", "ctx.input.axis('left'); // 0-1, web & desktop", "ctx.input.pointer(); // {x, y, down, presses}: latest finger/mouse press on the floor (web & desktop)", "ctx.ui.getElement('body_id').vx; // x, y, width, height, vx, vy (web & desktop)",
         "ctx.physics.touching('player'); // IDs it's touching or overlapping (web & desktop)", "ctx.physics.isTouching('player', 'goal'); // web & desktop"
     ];
     void ShowScriptApi() {

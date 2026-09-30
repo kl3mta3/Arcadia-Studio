@@ -21,7 +21,7 @@ Two screen events make games, clocks and animations possible without any hover t
 - **`tick`** runs on the player's screen every few milliseconds while the screen is open. Set how often with **Tick interval (ms)** in Screen settings (50–60000; 0 turns it off). If a run is still going when the next one is due, the next one waits.
 - **`key`** runs on the player's screen for each key pressed while no text box is being typed in. A script receives the key's name as `ctx.value`: `a`–`z`, `0`–`9` (number row and keypad), `space`, `enter`, `tab`, `backspace`, `left`, `right`, `up`, `down`, `f1`–`f12`. Escape is never sent; it always closes the screen. Holding a key repeats it every **Key repeat (ms)** (Screen settings, 150 by default; 0 means a held key sends one event), and a script can tell a held key from a fresh press with `ctx.repeat`. Presses never pile up: a key arriving while the previous event is still running is dropped, so holding a key can't queue a backlog of moves.
 
-Both work in Preview too. They can only use Client actions or a client script, because they fire far too often for the server. For server work, have the script show a button the player clicks, or use a control event. Screens using them need Arcadia Studio runtime 1.6.0 or newer, which the editor bundles.
+Both work in Preview too. They can only use Client actions or a client script, because they fire far too often for the server. For server work, have the script show a button the player clicks, or use a control event. Export the project again after updating Arcadia Studio so the game gets the runtime the editor bundles.
 
 ## Sounds on events
 

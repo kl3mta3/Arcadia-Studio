@@ -16,7 +16,7 @@ public static class Json
         Project copy;
         try { copy = Clone(project); } finally { project.Assets = assets; }
         copy.Assets = new Dictionary<string, byte[]>(assets);
-        copy.Publishing.Screenshot = project.Publishing.Screenshot;
+        copy.Publishing.KeepImages(project.Publishing);
         return copy;
     }
 }
@@ -36,6 +36,16 @@ public sealed class Manifest
     // Where the project is meant to run: "minecraft", "web" (web and desktop apps) or "both". Minecraft limits and
     // web-only (advanced) tools are checked against this.
     public string Target { get; set; } = "both";
+    // Web and desktop games only: scripts keep their top-level variables from one event to the next (each script runs
+    // from the top once, then only the event's function is called). Off for projects made before it existed, whose
+    // scripts may do per-event work at the top level; on for new projects. Minecraft (and "both") always run each
+    // event from the top.
+    public bool KeepScriptState { get; set; }
+    // Web and desktop games: variables of the whole game rather than one screen. They start with these values, keep
+    // their value when another screen opens (a Game over screen can show ${score}), and work like screen variables
+    // everywhere else. The ones named in SavedVariables are also kept between visits, with the game's saved data.
+    public Dictionary<string, string> GameVariables { get; set; } = [];
+    public List<string> SavedVariables { get; set; } = [];
     // Advanced (web and desktop): named inputs, each pressed by keys and/or gamepad buttons.
     public List<GameInput> Inputs { get; set; } = [];
     // Advanced (web and desktop): what the 16 collision layers are called, in order. Blank entries show as their
@@ -148,9 +158,13 @@ public sealed class Project
     // Publishing to Arcadia: kept in the project file (publishing.json) so the next publish is one click, and never
     // written into packs or exports.
     public PublishSettings Publishing { get; set; } = new();
+    // Leaderboard pages for Arcadia (Advanced → Create leaderboard): designed on the canvas like screens, but never
+    // part of the game. Kept in the project file as leaderboards/<id>.lb and turned into leaderboard.html only when
+    // the game is packed for Arcadia (or exported as a page).
+    public List<UiDefinition> Leaderboards { get; set; } = [];
 }
 /// <summary>What the Publish to Arcadia dialog remembers for a project: the game's details, its leaderboard, its
-/// screenshot, and the permanent game ID on each arcade it went to.</summary>
+/// cover, screenshots and video links, and the permanent game ID on each arcade it went to.</summary>
 public sealed class PublishSettings
 {
     public string Title { get; set; } = "";
@@ -162,12 +176,83 @@ public sealed class PublishSettings
     public string AspectRatio { get; set; } = "";
     public bool Leaderboard { get; set; }
     public PublishScores Scores { get; set; } = new();
-    // By arcade host ("arcadia.lastweeksproject.com"): the game this project became there.
+    // By arcade host ("arcadia.arcadiastudio.games"): the game this project became there.
     public Dictionary<string, ArcadeGame> Arcades { get; set; } = [];
-    // "png", "jpg" or "webp"; the bytes live beside publishing.json in the project file.
-    public string ScreenshotType { get; set; } = "";
-    [System.Text.Json.Serialization.JsonIgnore] public byte[] Screenshot { get; set; } = [];
-    [System.Text.Json.Serialization.JsonIgnore] public bool IsEmpty => Title.Length == 0 && Description.Length == 0 && Genre.Count == 0 && Version.Length == 0 && Controls.Length == 0 && AspectRatio.Length == 0 && !Leaderboard && Arcades.Count == 0 && Screenshot.Length == 0;
+    // True when the game plays on phones and tablets (touch controls, fits a small screen): game.json "mobile".
+    public bool Mobile { get; set; }
+    // The cover: the game's card and page picture. "png", "jpg" or "webp"; the bytes live beside publishing.json in the
+    // project file (publishing/cover.png).
+    public string CoverType { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public byte[] Cover { get; set; } = [];
+    // Projects saved before the cover had its name kept it as "screenshotType" (publishing/screenshot.png).
+    [System.Text.Json.Serialization.JsonPropertyName("screenshotType"), System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyScreenshotType { get => null; set { if (!string.IsNullOrEmpty(value) && CoverType.Length == 0) CoverType = value; } }
+    // The gallery on the game's page, in order (up to 8): publishing/screenshots/1.png … in the project file.
+    public List<PublishImage> Screenshots { get; set; } = [];
+    // Up to 3 YouTube links, shown on the game's page before the screenshots. Never uploaded as files.
+    public List<string> Videos { get; set; } = [];
+    // The leaderboard page: "" picks the project's first leaderboard (or the arcade's standard board if it has none),
+    // "standard" is the arcade's own board, "board:<id>" one of the project's leaderboards, and "file" a page imported
+    // as it is (LeaderboardHtml, kept as publishing/leaderboard.html in the project file).
+    // Publishing to itch.io (File → Publish to itch.io): which game, what to upload, and where.
+    public ItchSettings Itch { get; set; } = new();
+    public string LeaderboardPage { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public byte[] LeaderboardHtml { get; set; } = [];
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsEmpty => Title.Length == 0 && Description.Length == 0 && Genre.Count == 0 && Version.Length == 0 && Controls.Length == 0 && AspectRatio.Length == 0 && !Leaderboard && Arcades.Count == 0 && Cover.Length == 0 && Screenshots.Count == 0 && Videos.Count == 0 && !Mobile && LeaderboardPage.Length == 0 && LeaderboardHtml.Length == 0 && Itch.IsEmpty;
+    /// <summary>The picture bytes, which JSON copies leave out, from the settings this is a copy of. The bytes are never
+    /// changed in place, so they are shared rather than copied.</summary>
+    public void KeepImages(PublishSettings from)
+    {
+        Cover = from.Cover; LeaderboardHtml = from.LeaderboardHtml;
+        for (int i = 0; i < Screenshots.Count && i < from.Screenshots.Count; i++) Screenshots[i].Bytes = from.Screenshots[i].Bytes;
+    }
+}
+/// <summary>What a leaderboard widget shows and how. Its text comes from the control's Text (a template with {rank},
+/// {name}, {score}, {runs}, {playerNo}, {when}, {stat.key}, {medal}, and on any label {title}, {label}, {players},
+/// {period}; "|" splits a row into columns), and its look from the control's own colours, font and picture.</summary>
+public sealed class BoardWidget
+{
+    public int Count { get; set; } = 10;          // rows shown (tables, the slider): up to 100
+    public int RowHeight { get; set; } = 16;
+    public int Rank { get; set; } = 1;            // rank boxes and rank icons: 1, 2 or 3
+    public string Icon { get; set; } = "crown";   // crown, medal, trophy, star
+    public int Around { get; set; } = 2;          // "Your rank": players shown above and below
+    public double Seconds { get; set; } = 3;      // the slider moves on this often (0: only by hand)
+    public int Visible { get; set; } = 3;         // the slider's cards in view at once
+    public bool Search { get; set; }              // the range panel's "find a player" box
+    public string Header { get; set; } = "";      // a line above a list
+    public string Empty { get; set; } = "No scores yet.";
+    public string AltColor { get; set; } = "";    // every other row (#RRGGBB, or #AARRGGBB)
+    public string HighlightColor { get; set; } = "#33F4C744"; // the viewer's own row
+    public string Periods { get; set; } = "all,week,day";
+    public string PeriodLabels { get; set; } = "All time|This week|Today";
+}
+/// <summary>What Publish to itch.io remembers for a project. itch.io's own page (title, description, price, pictures)
+/// is edited on itch.io; this is only which game the builds go to and how.</summary>
+public sealed class ItchSettings
+{
+    public string Target { get; set; } = "";            // "user/game", as butler takes it
+    public long GameId { get; set; }
+    public string GameTitle { get; set; } = "";
+    public string GameUrl { get; set; } = "";
+    public bool Web { get; set; } = true;               // the web version, playable in the browser
+    public bool Windows { get; set; }                   // the Windows app
+    public string WebChannel { get; set; } = "html5";
+    public string WindowsChannel { get; set; } = "windows";
+    public string LastVersion { get; set; } = "";
+    public bool Hidden { get; set; }                    // a new channel starts hidden
+    public bool IfChanged { get; set; } = true;         // skip a push that changes nothing
+    // The once-only step on itch.io for a browser game: the page set to HTML and the upload played in the browser.
+    public bool BrowserStepDone { get; set; }
+    // The person said no to also publishing on Arcadia; not asked again for this project.
+    public bool NoArcadiaNudge { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsEmpty => Target.Length == 0 && LastVersion.Length == 0 && !NoArcadiaNudge && !BrowserStepDone && Web && !Windows && WebChannel == "html5" && WindowsChannel == "windows" && !Hidden && IfChanged;
+}
+/// <summary>A screenshot for the game's page: its type ("png", "jpg" or "webp") and bytes.</summary>
+public sealed class PublishImage
+{
+    public string Type { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public byte[] Bytes { get; set; } = [];
 }
 public sealed class ArcadeGame
 {
@@ -210,10 +295,15 @@ public sealed class PublishStat
     public string Aggregate { get; set; } = "max";      // max, min, sum
     public string Variable { get; set; } = "";
     public string Path { get; set; } = "";
+    // False for a stat that doesn't grow with play time (accuracy %, a character number): game.json "check": false,
+    // so Arcadia doesn't compare it with how long the run was.
+    public bool Check { get; set; } = true;
 }
 public sealed class UiDefinition
 {
     public bool IsComponent { get; set; }
+    // A leaderboard page (Project.Leaderboards), not a screen of the game.
+    public bool IsLeaderboard { get; set; }
     public List<ComponentInstance> ComponentInstances { get; set; } = [];
     // Milliseconds between the screen's Tick events while it is open; 0 turns the timer off.
     public int TickInterval { get; set; }
@@ -383,6 +473,14 @@ public sealed class Element
     public int TileHeight { get; set; } = 16;
     public int Columns { get; set; } = 20;
     public int Rows { get; set; } = 12;
+    // A leaderboard widget's settings (only on leaderboard pages; null everywhere else, and left out of the JSON).
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public BoardWidget? Board { get; set; }
+    // Item slots (Minecraft): real slots the server moves items between. SlotKind is player (part of the player's
+    // inventory, from SlotStart: 0-8 the hotbar, 9-35 the rest), storage (temporary; given back on close), crafting (a
+    // grid of up to 3 × 3 using the game's recipes) or result (the grid's output). Columns × Rows is the grid.
+    public string SlotKind { get; set; } = "player";
+    public int SlotStart { get; set; }
     public string Tiles { get; set; } = "";
     public string Solid { get; set; } = "";
     // Names a script can look controls up by: ctx.ui.findByTag("enemy"). A control may carry several. Tags are data,

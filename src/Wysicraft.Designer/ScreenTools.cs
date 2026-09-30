@@ -11,10 +11,17 @@ public partial class MainWindow
     // Shared by the dropdown, component source editing and Back to screen so every path refreshes the same editor state.
     void ShowScreen(UiDefinition screen) {
         EndCanvasGesture();ui=screen;selected.Clear();
-        refreshing=true;Screens.SelectedItem=ui.IsComponent?null:ui.Id;refreshing=false;
+        refreshing=true;Screens.SelectedItem=ui.IsComponent||ui.IsLeaderboard?null:ui.Id;refreshing=false;
         RefreshSourceContext();RefreshComponents();Draw();RefreshInspector();
     }
-    void RefreshSourceContext(){ComponentSourceBar.Visibility=ui.IsComponent?Visibility.Visible:Visibility.Collapsed;ComponentSourceLabel.Text="Editing component: "+ui.Title;DeleteScreenButton.IsEnabled=!ui.IsComponent&&project.Screens.Count(s=>!s.IsComponent)>1;}
+    void RefreshSourceContext(){
+        ComponentSourceBar.Visibility=ui.IsComponent||ui.IsLeaderboard?Visibility.Visible:Visibility.Collapsed;
+        ComponentSourceLabel.Text=ui.IsLeaderboard?"Editing leaderboard page: "+ui.Id:"Editing component: "+ui.Title;
+        DeleteScreenButton.IsEnabled=!ui.IsComponent&&!ui.IsLeaderboard&&project.Screens.Count(s=>!s.IsComponent)>1;
+        RefreshBoardBar();
+        // The toolbox follows what's open: a leaderboard page has its own.
+        if(toolboxTarget!=ToolboxKey()){toolboxTarget=ToolboxKey();RebuildToolbox();}
+    }
     void DeleteScreenClick(object sender,RoutedEventArgs e)=>Guard(DeleteCurrentScreen);
     void DeleteCurrentScreen() {
         if(ui.IsComponent)throw new InvalidOperationException("Use Delete source in the Components panel.");
