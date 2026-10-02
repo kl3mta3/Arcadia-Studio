@@ -41,6 +41,8 @@ public sealed class Manifest
     // scripts may do per-event work at the top level; on for new projects. Minecraft (and "both") always run each
     // event from the top.
     public bool KeepScriptState { get; set; }
+    // Web and desktop games: pictures are scaled smoothly, for illustrated art, instead of with hard pixel edges.
+    public bool SmoothImages { get; set; }
     // Web and desktop games: variables of the whole game rather than one screen. They start with these values, keep
     // their value when another screen opens (a Game over screen can show ${score}), and work like screen variables
     // everywhere else. The ones named in SavedVariables are also kept between visits, with the game's saved data.
@@ -133,7 +135,7 @@ public sealed class ParticleEffect
     /// <summary>How far from the middle particles start, in pixels: 0 is a point, more is a ring or a patch.</summary>
     public double Radius { get; set; }
 }
-/// <summary>Animates one property ("x", "y", "width", "height", "opacity") of one element through keyframes.</summary>
+/// <summary>Animates one property ("x", "y", "width", "height", "opacity", "rotation", "scale") of one element through keyframes.</summary>
 public sealed class AnimationTrack
 {
     public string Target { get; set; } = "";
@@ -411,6 +413,12 @@ public sealed class Element
     public string BorderColor { get; set; } = "#697382";
     public double BorderWidth { get; set; }
     public double Opacity { get; set; } = 1;
+    // Web & desktop: turned about the control's centre (degrees, clockwise) and resized about it (1 = its own size).
+    // A panel carries everything attached inside it. Physics bodies and colliders are not turned.
+    public double Rotation { get; set; }
+    public double Scale { get; set; } = 1;
+    // Web & desktop: the text breaks into lines at the control's width (and at \n) instead of being cut off.
+    public bool Wrap { get; set; }
     public double FontScale { get; set; } = 1;
     public string Font { get; set; } = "minecraft:default";
     public bool Bold { get; set; }

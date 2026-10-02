@@ -106,12 +106,24 @@ public static class ArcadiaPackage
         return match.Groups[1].Value + (long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) + 1).ToString(CultureInfo.InvariantCulture) + match.Groups[3].Value;
     }
 
-    /// <summary>Names a score can be read from: every screen variable, and every ctx.state name the scripts set.</summary>
+    // State saved by a computed name, and the lists of names such a script keeps, as Arcadia's scan reads them:
+    //   var VARS = ['mode', 'score', 'lines'];  ...  ctx.state.set(VARS[i], s[VARS[i]]);
+    static readonly Regex StateByName = new(@"\.state\.(?:get|set)\(\s*[^'""\s)]");
+    static readonly Regex NameList = new(@"\[\s*((?:['""][A-Za-z_$][\w$]*['""]\s*,\s*)+['""][A-Za-z_$][\w$]*['""])\s*\]", RegexOptions.ECMAScript);
+    static readonly Regex NameInList = new(@"['""]([A-Za-z_$][\w$]*)['""]", RegexOptions.ECMAScript);
+
+    /// <summary>Names a score can be read from: every screen variable, and every ctx.state name the scripts set, whether
+    /// written out (ctx.state.set('score', …)) or kept in a list of names the script saves in a loop.</summary>
     public static List<string> StateNames(Project project)
     {
         var names = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var screen in project.Screens) foreach (var name in screen.Variables.Keys) names.Add(name);
-        foreach (var code in project.Scripts.Values) foreach (Match m in StateSet.Matches(code)) names.Add(m.Groups[1].Value);
+        foreach (var code in project.Scripts.Values)
+        {
+            foreach (Match m in StateSet.Matches(code)) names.Add(m.Groups[1].Value);
+            if (!StateByName.IsMatch(code)) continue;
+            foreach (Match list in NameList.Matches(code)) foreach (Match n in NameInList.Matches(list.Groups[1].Value)) names.Add(n.Groups[1].Value);
+        }
         return names.ToList();
     }
 
@@ -133,8 +145,9 @@ public static class ArcadiaPackage
         if (videos.Count > 0) game["videos"] = new JsonArray(videos.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray());
         // Only when it's true: left out, the arcade tells phone players the game may need a keyboard.
         if (s.Mobile) game["mobile"] = true;
+        // A leaderboard page only goes with a leaderboard: with "scores": false it's left out (so is its file).
         var page = LeaderboardPageOf(project, s);
-        if (page.Board != null || page.Html != null) game["leaderboardPage"] = Leaderboards.PageName;
+        if (s.Leaderboard && (page.Board != null || page.Html != null)) game["leaderboardPage"] = Leaderboards.PageName;
         string aspect = s.AspectRatio.Trim().Length > 0 ? s.AspectRatio.Trim() : AspectRatio(project);
         game["aspectRatio"] = double.TryParse(aspect, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) ? JsonValue.Create(number) : JsonValue.Create(aspect);
         game["wysicraft"] = new JsonObject { ["version"] = wysicraftVersion, ["projectId"] = project.Manifest.Id };
@@ -166,6 +179,8 @@ public static class ArcadiaPackage
             };
             game["scores"] = scores;
         }
+        // "No leaderboard, on purpose". Left out instead, the arcade's own scan may set a board up by itself.
+        else game["scores"] = false;
         return game.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -180,7 +195,8 @@ public static class ArcadiaPackage
         for (int i = 0; i < names.Count; i++) if (s.Screenshots[i].Bytes.Length > 0) files[names[i]] = s.Screenshots[i].Bytes;
         // The leaderboard page: made from the project's leaderboard now, or the imported page as it is.
         var page = LeaderboardPageOf(project, s);
-        if (page.Board != null) foreach (var (path, bytes) in Leaderboards.Page(project, page.Board)) files[path] = bytes;
+        if (!s.Leaderboard) { }
+        else if (page.Board != null) foreach (var (path, bytes) in Leaderboards.Page(project, page.Board)) files[path] = bytes;
         else if (page.Html != null) files[Leaderboards.PageName] = page.Html;
         return files;
     }
@@ -319,7 +335,7 @@ public static class ArcadiaPackage
         var board = LeaderboardPageOf(project, s);
         if (board.Chosen && board.Board == null && board.Html == null)
             Add("block", "leaderboard-page", s.LeaderboardPage == "file" ? "The imported leaderboard page is missing: import it again or choose another." : $"The leaderboard page \"{s.LeaderboardPage[6..]}\" isn't in the project anymore: choose another.");
-        if ((board.Board != null || board.Html != null) && !s.Leaderboard) Add("warn", "leaderboard-page", "There's a leaderboard page but Keep a leaderboard is off, so the page would have nothing to show.");
+        if ((board.Board != null || board.Html != null) && !s.Leaderboard) Add("warn", "leaderboard-page", "There's a leaderboard page but Keep a leaderboard is off, so the page isn't sent: the game is published with no leaderboard.");
         if (board.Board != null) foreach (var problem in Leaderboards.Problems(project, board.Board)) Add("warn", "leaderboard-page", "Leaderboard page: " + problem);
         if (files.TryGetValue(Leaderboards.PageName, out var pageBytes) && OutsideHosts(Encoding.UTF8.GetString(pageBytes)) is { Count: > 0 } hosts)
             Add("block", "leaderboard-page", $"The leaderboard page loads files from {string.Join(", ", hosts)}. A leaderboard page may only load from the game itself, the arcade, and font services (Google Fonts, Bunny Fonts, Adobe Fonts, Font Awesome's CSS): put anything else in the page.", Leaderboards.PageName);

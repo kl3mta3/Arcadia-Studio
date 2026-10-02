@@ -127,15 +127,6 @@ public partial class MainWindow
         agentRequests.Add(ask);
 
         var (failed, text) = await Call("pending_requests", new { });
-        if (samplingState != "live") throw new Exception("A client advertising sampling should put the editor in the live state, got: " + samplingState);
-        if (!CanAskDirectly) throw new Exception("CanAskDirectly should be true for a client that advertises sampling");
-        // This smoke client advertises sampling but does not answer one, so the ask must fail softly and leave the
-        // request queued -- exactly what a client without sampling would do.
-        RememberSession(null);
-        if (!CanAskDirectly) throw new Exception("A null session should be ignored, not clear the live one");
-        var direct = await AskDirectlyAsync("ping", 16);
-        if (direct != null) throw new Exception("A client that cannot really sample should give back nothing");
-        if (samplingState != "queue") throw new Exception("A failed ask should fall back to the queue, got: " + samplingState);
         if (failed) throw new Exception("pending_requests failed: " + text);
         foreach (var expected in new[] { ask.Id, "pause the game", "\"menu\"", "paused", "inputsmoke" })
             if (!text.Contains(expected)) throw new Exception($"pending_requests left out {expected}: " + text[..Math.Min(400, text.Length)]);

@@ -31,6 +31,7 @@ Every section (Identity, Layout, Appearance and so on) folds: click its heading 
 | **Border color / Width (px)** | Outline, 0–32 px. 0 hides it. |
 | **Corners → Radius** | Rounds the fill, border and skin, up to half the control's smaller side. |
 | **Opacity** | 0 (invisible) to 1 (solid). |
+| **Rotation (°)**, **Scale** | Web & desktop: turn the control clockwise and resize it, about its centre. A panel takes everything attached inside it along. See [[Illustrated art|Advanced-Tools#illustrated-art-cards-and-text]]. |
 | **Color swatches** | One-click fill colors under Fill color (they also remove any skin). |
 | **Skin image → Choose PNG…** | Uses an image instead of the fill color. Works on buttons, panels, labels and other boxed controls; choosing one turns **Fill enabled** on, because the skin is drawn as the fill. **Use color only** removes it. |
 | **Texture** (Image, Texture Region) | Which image to show. |
@@ -42,6 +43,7 @@ Every section (Identity, Layout, Appearance and so on) folds: click its heading 
 | **Typeface** | Pick from the list. Minecraft has three: `minecraft:default` (the default), `minecraft:uniform` and `minecraft:alt`. Web and desktop apps can also use a built-in family or your own font — see **Typefaces** below. |
 | **Size scale** | 1 is normal, up to 8. |
 | **Bold, Italic, Underline** | Styles. |
+| **Wrap text** | Web & desktop, labels and buttons: the text breaks into lines at the control's width (and at a typed `\n`) instead of being cut off. |
 | **Alignment** | Left, center or right: how the text sits inside the control. |
 | **Text shadow** | On/off, with **Shadow color**, opacity, **Offset X / Y (px)** and **Blur (px)**. Minecraft approximates blur, so soft shadows look slightly different in-game. |
 

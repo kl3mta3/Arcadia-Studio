@@ -57,7 +57,7 @@ When you **export to Minecraft** or **Test in Minecraft** and something is in th
 
 At the bottom of the **Toolbox**, click **▸ Advanced · web & desktop** to open it (a short note explains it the first time). It holds the **Box**, **Circle** and **Polygon collider** (invisible walls, floors and bumpers for physics), the **Camera**, **Particles** and the **Tilemap**.
 
-The **Advanced** menu has **Inputs**, **Input creator**, **Animations**, **State graphs**, **Shaders**, **Particle maker**, **Particles**, the **Collider editor**, the **Tile painter** and **Collision layers**.
+The **Advanced** menu has **Inputs**, **Input creator**, **Animations**, **State graphs**, **Shaders**, **Particle maker**, **Particles**, the **Collider editor**, the **Tile painter** and **Collision layers**, and the speech tools: **Create audio from text**, **Create text from audio** and **Speech settings** (see [[Speech and video|Speech-and-Video]]).
 
 Advanced items show in Properties under **Advanced · web & desktop**.
 
@@ -82,12 +82,14 @@ Under **Advanced · web & desktop** in Properties, every control has a **+ Add c
 | **Character controller** | A platformer character driven by your `left`, `right` and `jump` inputs (created if missing), with a jump that only works on the ground. | `SPEED`, `JUMP`, `GROUND_GRIP` |
 | **Top-down mover** | Eight-way movement with no gravity. It stops against walls, colliders and solid tiles. | `SPEED` |
 | **Follower** | Moves steadily towards the nearest control with a tag — an enemy, a homing shot, a pet. | `TARGET_TAG`, `SPEED`, `STOP_AT` |
-| **Pickup** | Disappears when something touches it and adds to a screen variable. | `WORTH` |
+| **Pickup** | Disappears when something touches it and adds to a screen variable, and can play a sound and burst particles where it was. | `WORTH`, and the optional **Sound** (a project sound, or **Import…**) and **Particles** (a project effect or a built-in template such as Sparkle or Confetti, **Edit…** in the Particle maker, or **Import…**) |
 | Presets: **Kinematic body**, **Trigger zone**, **Bouncy**, **Slippery** | One-click setups that set the fields above. | — |
 
 A few things worth knowing:
 
 - **Nothing is hidden.** A card only sets the fields it shows and, for the movement and gameplay ones, writes an ordinary script into **Scripts** named after the control (`scripts/client/player_controller.js`). **Open script** on the card takes you to it, and you can change anything in it.
+- **A Pickup's sound and particles need no code.** Choose them on its card and it plays the sound and bursts the effect where it was picked up. **(none)** turns either off. A template becomes an effect of your own, ready to change in the Particle maker. They're the `SOUND` and `PARTICLES` lines at the top of its script, so a script can still set them. A Pickup added before these existed gets them when you first choose one (unless its script was changed by hand: then the card says what to add).
+- **Effects travel between projects.** **Export…** in the Particle maker saves an effect as a `.particles.json` file; **Import…** on a Pickup takes that, or effects chosen from another project file.
 - **The numbers on a card are the script's.** They are the `var SPEED = 140;` lines at the top of the script. Editing one on the card writes it back into the script in place, comment and all; editing the script changes the card. Keep those lines in that form if you want them on the card.
 - **✕ cleans up after itself.** Removing a Rigidbody leaves the control a plain static Collider; removing the Collider clears the body. Removing a script component stops the event running its script and deletes the script — unless you edited it, in which case it is kept and the log tells you. Inputs, tags and screen variables stay, because other things may use them.
 - **Each movement component ticks on its own control.** Character controller, Top-down mover and Follower run their script from the `tick` event of the control they move, so a player and several enemies all move at once, and the screen's own `tick` stays free for your game loop. (Projects from before this are moved over when they open.)
@@ -142,7 +144,7 @@ Select a polygon collider (or a body with a polygon collider) and double-click i
 **Advanced → Animations** (also in Screen settings) makes keyframe animations for the current screen:
 
 1. **+ New animation**, then give it an ID, a length in milliseconds, and optionally **Loop** and **Autoplay** (starts when the screen opens).
-2. **+ Track** picks a control and a property: `x`, `y`, `width`, `height` or `opacity`.
+2. **+ Track** picks a control and a property: `x`, `y`, `width`, `height`, `opacity`, `rotation` or `scale`.
 3. Add keyframes: a time, a value and an easing (linear, ease in, ease out, ease in-out or step). **Add keyframe from canvas** copies the control's current value.
 
 The timeline slider previews the animation on the canvas. Everything snaps back when the window closes. **Preview** plays it for real.
@@ -247,6 +249,33 @@ They combine like any condition: `clipDone && hp > 0`. An empty condition is alw
 - **Events:** the sprite gets `state_changed` with the new state's name.
 - **Scripts:** `ctx.ui.getElement('hero').state` reads the current state; `ctx.ui.setState('graph_id', 'hurt')` forces one.
 - **Limits:** 64 graphs a screen, 64 states each, 16 ways out of a state.
+
+## Illustrated art, cards and text
+
+For a game drawn with illustrations instead of pixel art, such as a card game, a board game or a visual novel.
+
+| What | Where | What it does |
+| --- | --- | --- |
+| **Smooth pictures** | Project settings | Pictures are scaled smoothly instead of with hard pixel edges. One setting for the whole project; leave it off for pixel art, which should stay crisp. |
+| **Rotation (°)** | Properties → Appearance | Turns the control clockwise about its centre. |
+| **Scale** | Properties → Appearance | Resizes it about its centre: 1 is its own size, 2 is double. |
+| **Wrap text** | Properties → Font (labels and buttons) | The text breaks into lines at the control's width, and wherever you type `\n`, instead of being cut off. Lines that don't fit in the control's height are left out, so make it tall enough. |
+
+**Drawing big and showing small.** With Smooth pictures on, a picture shown smaller than it was drawn is averaged down, so hard pixel edges turn smooth. That makes the pixel editor usable for art that doesn't look pixelated: draw a sprite at 4 to 8 times the size it will be shown (a 64-pixel character on a 256 or 512 canvas) and set the control to the small size. The editor's **Soft brush** adds shading and glows, and **Smooth** takes the stair-steps off hard shapes; see [[Pixel art and sprites|Pixel-Art-and-Sprites]]. Measured with a hard-edged 512-pixel disc shown at 64: every edge pixel came out blended, against none with Smooth pictures off. Going much bigger buys little and costs memory: a picture takes 4 bytes a pixel once loaded, so 512 × 512 is 1 MB and 4096 × 4096 is 64 MB.
+
+**A panel carries what is attached inside it.** Build a card as a panel with a picture and labels attached inside, then turn or scale the panel: the whole card follows, and clicks land where the card is drawn. The canvas shows it the way the game draws it.
+
+**From scripts:**
+
+- `ui.setRotation(id, degrees)`, `ui.setScale(id, scale)` and `ui.setOpacity(id, 0-1)`; `ctx.ui.getElement(id)` reads them back.
+- `ui.bringToFront(id)`, `ui.sendToBack(id)`, `ui.moveAbove(id, other)` and `ui.moveBelow(id, other)` change the draw order (later is on top). A panel takes what is attached inside it along. Bring the card under the pointer to the front so its neighbours don't hide it.
+- [Animations](#animations) can run `rotation` and `scale`, for a card dealt with a turn or a button that grows when pressed.
+
+**What isn't turned.** A control's bounds, physics body and collider stay as they are, so a turned sprite still collides as its unturned box. Tilemaps, particle emitters, cameras and colliders are never turned.
+
+**Cost.** A turned control is drawn the slower way unless it is a plain picture or sprite with no parent, and with Smooth pictures on every picture and sprite is (that way shrinks them properly). Dozens of cards cost nothing you'd notice; 2,000 turned panels each with a label inside measured 12 ms a frame.
+
+Minecraft can't run any of this: a project also made for Minecraft lists each use in the Minecraft check.
 
 ## Shaders (web)
 

@@ -54,7 +54,8 @@ function engineStart(ctx) {
 - `ctx.value`: the event's input (text box text, slider value, row index, the key name for a screen `key` event, and so on).
 - Scripts run separately from the page with the same **2-second limit** as in Minecraft, so a script stuck in a loop is stopped instead of freezing Preview or the app.
 - Sprites: `ui.play(id, 'run')` switches clip. Sound controls: `ui.setValue(id, 'play')` or `'stop'`.
-- Web and desktop ([[advanced tools|Advanced-Tools]]): `ui.animate(id)`, `ui.stopAnimation(id)`, `ui.setVelocity(id, vx, vy)`, `ui.setPosition(id, x, y)`, `ctx.input.isDown(name)`, `ctx.input.axis(name)`, `ctx.input.pointer()` (`x`, `y`, `down`, `presses`: the latest finger or mouse press on the floor, for tap-to-move), `ctx.physics.touching(id)` (IDs it touches or overlaps), `ctx.physics.isTouching(a, b)`, and `ctx.ui.getElement(id)` with `x`, `y`, `width`, `height`, `vx`, `vy`.
+- Web and desktop ([[advanced tools|Advanced-Tools]]): `ui.animate(id)`, `ui.stopAnimation(id)`, `ui.setVelocity(id, vx, vy)`, `ui.setPosition(id, x, y)`, `ctx.input.isDown(name)`, `ctx.input.axis(name)`, `ctx.input.pointer()` (`x`, `y`, `down`, `presses`: the latest finger or mouse press on the floor, for tap-to-move), `ctx.physics.touching(id)` (IDs it touches or overlaps), `ctx.physics.isTouching(a, b)`, and `ctx.ui.getElement(id)` with `x`, `y`, `width`, `height`, `vx`, `vy`, `rotation`, `scale` and `opacity`.
+- Web and desktop, for illustrated games: `ui.setRotation(id, degrees)`, `ui.setScale(id, scale)` and `ui.setOpacity(id, 0-1)` turn, resize and fade a control, and `ui.bringToFront(id)`, `ui.sendToBack(id)`, `ui.moveAbove(id, other)` and `ui.moveBelow(id, other)` change what is drawn on top. See [[Illustrated art|Advanced-Tools#illustrated-art-cards-and-text]].
 - `ctx.repeat`: `true` when a screen `key` event comes from a key being held down, `false` for a fresh press. Use it to ignore held keys for one-shot actions such as jump or drop.
 - `ctx.state.get(name)` / `ctx.state.set(name, value)`: screen variables (strings). They start over when the screen opens. Where else to keep things is under [Where to keep state](#where-to-keep-state).
 - `ctx.save`: saved games that survive closing the game (web and desktop); see [Saved games](#saved-games-web--desktop).
@@ -77,6 +78,8 @@ function engineStart(ctx) {
 | `open(screenId)` | **Server only:** open a screen (this project, or `project:screen`) |
 
 Client scripts also have `ctx.client.playSound(id)` and `ctx.client.sendMessage(text)`.
+
+Web and desktop only: `ctx.ui.burst(effect, id)` bursts a particle effect where a control is (or `ctx.ui.burst(effect, x, y)` at a point), with no Particles control needed. It's what a Pickup's **Particles** setting uses.
 
 Web and desktop only: `ctx.client.playSound(id, volume)` plays one sound effect at a volume from 0 to 1, and `ui.setVolume(id, volume)` sets a Sound control's volume, at once if it is playing. Together they make a volume menu: keep the player's levels in a screen variable and pass them along. Minecraft ignores the volume and has no `setVolume`, so check `if (ctx.ui.setVolume)` in a project that also targets Minecraft.
 

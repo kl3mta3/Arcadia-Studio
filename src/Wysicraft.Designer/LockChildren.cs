@@ -48,8 +48,24 @@ public partial class MainWindow
         public bool PreviewFitGame { get; set; } = true;
         // itch.io: the key from Sign in to itch.io (or an API key), DPAPI-protected like the Arcadia key.
         public string ItchKey { get; set; } = "";
+        // Speech: the assistant's voice (a Kokoro voice ID or a mix like "af_heart*0.6+am_michael*0.4"; empty until chosen
+        // in the first-time voice picker), its speed and volume, the full-precision voice model when installed, the
+        // Whisper model and language, the microphone (-1 = Windows' default) and whether tutorials read their steps aloud.
+        public string SpeechVoice { get; set; } = "";
+        public double SpeechSpeed { get; set; } = 1;
+        public double SpeechVolume { get; set; } = 1;
+        public bool SpeechFullModel { get; set; }
+        public string WhisperModel { get; set; } = "tiny";
+        public string WhisperLanguage { get; set; } = "auto";
+        public int Microphone { get; set; } = -1;
+        public bool ReadTutorialsAloud { get; set; } = true;
+        // Recordings: where they go (empty = Videos\Arcadia Studio), frames per second, and the app's sound included.
+        public string RecordingFolder { get; set; } = "";
+        public int RecordingFps { get; set; } = 30;
+        public bool RecordingSound { get; set; } = true;
     }
-    Preferences? preferences;
+    // One set of preferences for every editor window (the leaderboard creator is a second one).
+    static Preferences? preferences;
     internal string? lockChildrenAnswer; // tests set "always"/"never" so no dialog appears
     Preferences Prefs()
     {

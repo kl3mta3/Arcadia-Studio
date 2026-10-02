@@ -73,12 +73,10 @@ public partial class MainWindow
     };
     static object? PixelGrid(PixelImage image) => PixelCommands.Describe(image) is var (rows, palette) ? new { rows, palette, note = "One character per pixel; '.' is transparent." } : null;
 
-    internal Task<string> McpPixelArt(string expected, List<PixelCommand> commands, string image, string newName, int width, int height, int frames, int frameWidth, int frameHeight, double animateFps, bool replace, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
+    /// <summary>The picture pixel_art makes: what it starts from (a project image, or a new one) with the commands run on
+    /// it. Nothing is saved.</summary>
+    (PixelDocument Doc, string? Path, string Name, bool FromLayers) PreparePixelArt(List<PixelCommand> commands, string image, string newName, int width, int height, int frames, int frameWidth, int frameHeight, bool replace)
     {
-        try
-        {
-            if (mcpHost == null) throw new InvalidOperationException("MCP server is stopped.");
-            CheckRevision(expected);
             PixelDocument doc; string? path = null; string name; bool fromLayers = false;
             if (image.Length > 0)
             {
@@ -101,6 +99,12 @@ public partial class MainWindow
                 doc = new PixelDocument(width, height, Math.Clamp(frames, 1, PixelArt.MaxFrames)); doc.Layers.Add(doc.NewLayer("Layer 1")); name = newName;
             }
             PixelCommands.Apply(doc, commands ?? []);
+            return (doc, path, name, fromLayers);
+    }
+
+    /// <summary>Saves what pixel_art made and says what it saved.</summary>
+    string SaveMcpPixelArt(PixelDocument doc, string? path, string name, bool fromLayers, string image, string newName, double animateFps)
+    {
             bool plain = doc.FrameCount == 1 && doc.Layers is [{ IsGroup: false, Visible: true, Locked: false, Opacity: 1 }];
             var sheet = PixelArt.Pack(doc.ComposeAll());
             string saved = SavePixelArt(new PixelEditor.SaveRequest(sheet, doc.Width, doc.Height, doc.FrameCount, PixelEditor.SafeName(name), path == null || newName.Length > 0, path, plain ? null : doc.Save(), animateFps > 0 && doc.FrameCount > 1 ? Math.Clamp(animateFps, 0.5, 20) : null), null);
@@ -111,9 +115,109 @@ public partial class MainWindow
                 preview = PixelPreview(sheet), frame0 = PixelGrid(doc.Compose(0)),
                 note = doc.FrameCount > 1 ? (animateFps > 0 ? "Saved as an animated image: it plays by itself wherever it is used (e.g. an image control)." : "The frames are saved side by side as a sprite sheet; use sprite_sheet with frameWidth/frameHeight to play them (or pass animateFps to make an animated image that plays by itself).") : "Saved as one Undo step."
             });
+    }
+
+    internal Task<string> McpPixelArt(string expected, List<PixelCommand> commands, string image, string newName, int width, int height, int frames, int frameWidth, int frameHeight, double animateFps, bool replace, bool live, int delayMs, bool keepOpen, CancellationToken cancellationToken)
+    {
+        if (live) return McpPixelArtLive(expected, commands, image, newName, width, height, frames, frameWidth, frameHeight, animateFps, replace, delayMs, keepOpen, cancellationToken);
+        return Dispatcher.InvokeAsync(() =>
+        {
+            try
+            {
+                if (mcpHost == null) throw new InvalidOperationException("MCP server is stopped.");
+                CheckRevision(expected);
+                var (doc, path, name, fromLayers) = PreparePixelArt(commands, image, newName, width, height, frames, frameWidth, frameHeight, replace);
+                return SaveMcpPixelArt(doc, path, name, fromLayers, image, newName, animateFps);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
+        }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
+    }
+
+    /// <summary>pixel_art with live:true: the same picture, drawn where the person can watch, in the real pixel editor.
+    /// It opens on the image (or a blank one), and every pixel that changes is drawn one at a time with the pencil (or
+    /// rubbed out with the eraser), the darkest colours first, the way an outline goes down before the fill. Each new frame
+    /// starts as a duplicate of the one before it, so only what moves is redrawn. Then it's saved to the project exactly
+    /// as the instant path saves it, and the editor closes.</summary>
+    async Task<string> McpPixelArtLive(string expected, List<PixelCommand> commands, string image, string newName, int width, int height, int frames, int frameWidth, int frameHeight, double animateFps, bool replace, int delayMs, bool keepOpen, CancellationToken cancellationToken)
+    {
+        PixelEditor? pixelEditor = null;
+        try
+        {
+            int delay = Math.Clamp(delayMs <= 0 ? 100 : delayMs, 10, 2000);
+            var (doc, path, name, fromLayers, editor) = await Dispatcher.InvokeAsync(() =>
+            {
+                if (mcpHost == null) throw new InvalidOperationException("MCP server is stopped.");
+                CheckRevision(expected);
+                var made = PreparePixelArt(commands, image, newName, width, height, frames, frameWidth, frameHeight, replace);
+                int pixels = 0;
+                for (int f = 0; f < made.Doc.FrameCount; f++) pixels += made.Doc.Compose(f).Pixels.Count(p => (p >> 24) != 0);
+                if ((long)pixels * delay > 600_000) throw new InvalidDataException($"Drawing {pixels} pixels {delay} ms apart would take over ten minutes: use a smaller delayMs, or draw it without live.");
+                var opened = made.Path != null
+                    ? OpenPixelEditor(png: project.Assets[made.Path], assetPath: made.Path, frameWidth: made.Doc.Width, frameHeight: made.Doc.Height)
+                    : OpenPixelEditor(newWidth: made.Doc.Width, newHeight: made.Doc.Height);
+                opened.Activate();
+                return (made.Doc, made.Path, made.Name, made.FromLayers, opened);
+            }).Task;
+            pixelEditor = editor;
+            await Task.Delay(700, cancellationToken);
+            int drawn = 0;
+            for (int f = 0; f < doc.FrameCount; f++)
+            {
+                var target = doc.Compose(f);
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (f >= editor.TestDoc.FrameCount) { editor.TestFrame(f - 1); editor.TestDuplicateFrame(); }
+                    editor.TestFrame(f); editor.TestBlend(false);
+                });
+                if (f > 0) await Task.Delay(delay * 6, cancellationToken);
+                var shown = await Dispatcher.InvokeAsync(() => editor.TestShown(f)).Task;
+                // What changes, grouped by colour (rubbing out first, then the darkest colours), each group top to bottom.
+                var changes = new List<(int X, int Y, uint Color)>();
+                for (int y = 0; y < target.Height; y++) for (int x = 0; x < target.Width; x++) { uint want = target.Get(x, y), have = shown.Get(x, y); if ((want >> 24) == 0) want = 0; if ((have >> 24) == 0) have = 0; if (want != have) changes.Add((x, y, want)); }
+                static double Lightness(uint c) => (c >> 24) == 0 ? -1 : 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+                foreach (var group in changes.GroupBy(c => c.Color).OrderBy(g => Lightness(g.Key)))
+                {
+                    bool erase = (group.Key >> 24) == 0;
+                    await Dispatcher.InvokeAsync(() => { editor.TestTool(erase ? "Eraser" : "Pencil"); if (!erase) editor.TestColors(group.Key, 0); });
+                    foreach (var (x, y, _) in group)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        bool open = await Dispatcher.InvokeAsync(() => { if (!editor.IsVisible) return false; editor.TestStroke(false, (x, y)); return true; }).Task;
+                        if (!open) throw new InvalidOperationException("The pixel editor was closed before the drawing was finished, so nothing was saved.");
+                        drawn++;
+                        await Task.Delay(delay, cancellationToken);
+                    }
+                }
+            }
+            await Task.Delay(500, cancellationToken);
+            // An animation is shown playing in the Preview box for a few seconds before it's saved.
+            if (doc.FrameCount > 1)
+            {
+                await Dispatcher.InvokeAsync(() => editor.TestPlay(true));
+                await Task.Delay(4000, cancellationToken);
+            }
+            // Saved exactly as the instant path saves it (layers, frames, animation), then shown as saved in the editor.
+            string result = await Dispatcher.InvokeAsync(() =>
+            {
+                CheckRevision(expected);
+                string saved = SaveMcpPixelArt(doc, path, name, fromLayers, image, newName, animateFps);
+                var json = System.Text.Json.Nodes.JsonNode.Parse(saved)!;
+                editor.ShowSaved(json["image"]!.GetValue<string>(), Path.GetFileNameWithoutExtension(json["image"]!.GetValue<string>()));
+                json["drawnLive"] = new System.Text.Json.Nodes.JsonObject { ["pixels"] = drawn, ["delayMs"] = delay };
+                return json.ToJsonString();
+            }).Task;
+            // Left open (keepOpen) while the assistant talks about it, still playing; tutorial close_editors closes it.
+            if (keepOpen) return result;
+            await Task.Delay(1500, cancellationToken);
+            await Dispatcher.InvokeAsync(() => { if (editor.IsVisible) editor.TestDiscard(); });
+            return result;
         }
-        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
-    }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException or OperationCanceledException)
+        {
+            if (pixelEditor != null) await Dispatcher.InvokeAsync(() => { if (pixelEditor.IsVisible) pixelEditor.TestDiscard(); });
+            throw new ModelContextProtocol.McpException(ex is OperationCanceledException ? "Stopped." : ex.Message);
+        }
+    }
 
     internal Task<string> McpReadPixelArt(string image, int frame, string layer, int frameWidth, int frameHeight, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
     {
@@ -206,9 +310,9 @@ public partial class MainWindow
 
 public sealed partial class DesignerMcpTools
 {
-    [McpServerTool(Name = "pixel_art"), Description("Draw pixel art (with transparency, layers, groups and frames) and save it as a project image, like the pixel editor. Edit an existing image (image = asset path, texture ID or file name; its saved layers are used when they still match) or make a new one (width, height, frames, newName). commands run in order; each has op plus fields: grid (rows of characters + palette of one-character keys to colors, drawn from x,y; best for drawing), pixels (points [[x,y]], color), line/rect/ellipse (x,y,x2,y2, color, filled, size), fill (x,y, color, tolerance 0-255), clear (optional x,y,width,height), flip (direction horizontal|vertical), shift (dx,dy; a group moves every layer in it), add_layer / add_group (name, parent group), set_layer (layer, name, opacity 0-1, visible, locked), move_layer (layer, direction up|down|into|out), merge_down, delete_layer, add_frame (at, copyOf), delete_frame (frame), move_frame (frame, at), resize (width, height). Drawing uses layer (name; empty = top layer) and frame (0-based); colors are #RRGGBB, #AARRGGBB or transparent; blend:true mixes see-through colors. Frames are saved side by side as a sprite sheet (for sprite_sheet), or with animateFps > 0 as an animated image that plays by itself in any image control. One Undo step. A newName that already exists is refused (it would otherwise be edited at its old size and frame count); pass replace:true to draw over it at the new size. Returns the texture ID, layers, an enlarged preview PNG path and frame 0 as a text grid.")]
-    public Task<string> DrawPixelArt(string expectedRevision, List<PixelCommand> commands, string image = "", string newName = "", int width = 0, int height = 0, int frames = 1, int frameWidth = 0, int frameHeight = 0, double animateFps = 0, bool replace = false, CancellationToken cancellationToken = default)
-        => editor.McpPixelArt(expectedRevision, commands, image, newName, width, height, frames, frameWidth, frameHeight, animateFps, replace, cancellationToken);
+    [McpServerTool(Name = "pixel_art"), Description("Draw pixel art (with transparency, layers, groups and frames) and save it as a project image, like the pixel editor. Edit an existing image (image = asset path, texture ID or file name) or make a new one (width, height, frames, newName; a newName that already exists is refused unless replace:true). commands run in order; each has op plus fields: grid (rows of characters + palette of one-character keys to colors, drawn from x,y; best for drawing), pixels (points [[x,y]], color), line/rect/ellipse (x,y,x2,y2, color, filled, size), brush (a soft round brush through points [[x,y],...] or from x,y to x2,y2; color laid over what's there, size 1-64, hardness 0-1, default 0.5; transparent erases softly), smooth (softens jagged edges of the layer, or of the box x,y,width,height; size = passes 1-8), fill (x,y, color, tolerance 0-255), clear (optional x,y,width,height), flip (direction horizontal|vertical), shift (dx,dy; a group moves every layer in it), add_layer / add_group (name, parent group), set_layer (layer, name, opacity 0-1, visible, locked), move_layer (layer, direction up|down|into|out), merge_down, delete_layer, add_frame (at, copyOf), delete_frame (frame), move_frame (frame, at), resize (width, height). Drawing uses layer (name; empty = top layer) and frame (0-based); colors are #RRGGBB, #AARRGGBB or transparent; blend:true mixes see-through colors. Frames are saved side by side as a sprite sheet (for sprite_sheet), or with animateFps > 0 as an animated image. One Undo step. Returns the texture ID, layers, an enlarged preview PNG path and frame 0 as a text grid. live:true draws it in the pixel editor while the person watches (delayMs, keepOpen); the call takes as long as the drawing. Live drawing and animation, with examples: guide(topic:\"art\").")]
+    public Task<string> DrawPixelArt(string expectedRevision, List<PixelCommand> commands, string image = "", string newName = "", int width = 0, int height = 0, int frames = 1, int frameWidth = 0, int frameHeight = 0, double animateFps = 0, bool replace = false, bool live = false, int delayMs = 0, bool keepOpen = false, CancellationToken cancellationToken = default)
+        => editor.McpPixelArt(expectedRevision, commands, image, newName, width, height, frames, frameWidth, frameHeight, animateFps, replace, live, delayMs, keepOpen, cancellationToken);
     [McpServerTool(Name = "read_pixel_art", ReadOnly = true), Description("Look at an image: its size, frames, layers and groups, one frame (all visible layers, or one layer or group) as a text grid (one character per pixel, '.' = transparent, with its palette) and an enlarged preview PNG path. image = asset path, texture ID (Minecraft textures too) or file name. For a sprite sheet without saved layers give frameWidth and frameHeight.")]
     public Task<string> ReadPixelArt(string image, int frame = 0, string layer = "", int frameWidth = 0, int frameHeight = 0, CancellationToken cancellationToken = default)
         => editor.McpReadPixelArt(image, frame, layer, frameWidth, frameHeight, cancellationToken);

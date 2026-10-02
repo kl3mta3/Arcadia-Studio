@@ -21,8 +21,10 @@ Open it from any of these:
 
 | Tool | Key | What it does |
 | --- | --- | --- |
-| Pencil | B | Draws pixels. Brush size 1–8 (`[` and `]`). |
+| Pencil | B | Draws pixels. Brush size 1–64 (`[` and `]`). |
+| Soft brush | A | A round brush whose edge fades out. It lays the color over what's there instead of replacing it, so strokes shade and blend. **Soft edge** sets how much of the brush fades: 0% is a clean round brush with a smooth outline, 100% fades all the way from the middle. With the transparent color it erases softly. |
 | Eraser | E | Makes pixels transparent. |
+| Smooth | U | Drag along a jagged edge to soften it. Flat areas don't change, and see-through edges keep their color. |
 | Fill | G | Fills the touching area of the same color (with **Tolerance**, colors close to it too). |
 | Line | L | Drag to draw a straight line. |
 | Rectangle | R | Drag to draw a rectangle. Shift keeps it square. |
@@ -60,7 +62,7 @@ You draw on the selected layer. With a group selected, drawing tools ask you to 
 - The wand looks at the selected layer's own pixels (for a group, at what you see).
 - Drag with **Move** (V), or press the arrow keys (Shift for 10 pixels), to move the selected pixels. They float above the layer until you put them down with **Enter**, deselect, or pick another tool.
 - **Ctrl+C**, **Ctrl+X** and **Ctrl+V** copy, cut and paste. Pasting goes onto the selected layer, ready to move. You can also paste pictures copied from other programs.
-- **Delete** erases the selection. **Flip ↔ / ↕** and **Clear** work on the selection, or on the whole layer when nothing is selected.
+- **Delete** erases the selection. **Flip ↔ / ↕**, **Clear** and **Smooth edges** work on the selection, or on the whole layer when nothing is selected. **Smooth edges** softens every jagged edge at once; press it again for more.
 
 ### Frames and animation
 

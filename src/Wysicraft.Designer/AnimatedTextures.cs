@@ -41,12 +41,6 @@ public partial class MainWindow
         image.Source=Frame(a.Frames[0].Index);
         if(a.Frames.Count>1)image.BeginAnimation(Image.SourceProperty,animation);
     }
-    // Preview: swap an Image's texture only when it actually changed, so a running animation isn't restarted every refresh.
-    internal void UpdateImageTexture(Image image,string resource)
-    {
-        if(Equals(image.Tag,resource))return;
-        if(TryTexture(resource,out var png))SetImageTexture(image,resource,png);
-    }
     // A brush for skins; animated textures show one frame at a time.
     ImageBrush TextureBrush(string resource,byte[] png)
     {

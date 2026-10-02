@@ -92,6 +92,9 @@ sealed class SoundEffectMaker : Window
         UpdateTitle(); settle.Stop(); settle.Start();
     }
     void Play() { fx.Check(); audio.StopAll(); audio.Play(fx.Render(AudioOut.Rate)); }
+    /// <summary>For an assistant showing the person a sound it made: play it, and whether they've changed anything since.</summary>
+    internal void PlayNow() => Play();
+    internal bool Untouched => !dirty;
     void Build()
     {
         loading = true; knobs.Children.Clear(); nameBox.Text = fx.Name;

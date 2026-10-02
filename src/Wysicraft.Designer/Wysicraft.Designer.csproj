@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>ArcadiaStudio</AssemblyName><Product>Arcadia Studio</Product><Version>1.4.0</Version><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Packaging/Wysicraft.Packaging.csproj" /></ItemGroup><ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>ArcadiaStudio</AssemblyName><Product>Arcadia Studio</Product><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><SatelliteResourceLanguages>en</SatelliteResourceLanguages></PropertyGroup><ItemGroup><ProjectReference Include="../Wysicraft.Packaging/Wysicraft.Packaging.csproj" /></ItemGroup><ItemGroup>
   <PackageReference Include="Dirkster.AvalonDock" Version="4.72.1" />
   <PackageReference Include="Dirkster.AvalonDock.Themes.VS2013" Version="4.72.1" />
   <PackageReference Include="Jint" Version="4.16.2" />
@@ -6,8 +6,16 @@
   <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   <PackageReference Include="NAudio" Version="2.2.1" />
   <PackageReference Include="NVorbis" Version="0.10.5" />
+  <!-- Speech: Kokoro (text to speech) and Whisper (speech to text), all C#/ONNX and whisper.cpp; no Python. The models and
+       voices come with the app in Speech/ (scripts/Get-MediaTools.ps1), so KokoroSharp's own copying of its voices is off. -->
+  <PackageReference Include="KokoroSharp.CPU" Version="0.8.4" />
+  <PackageReference Include="KokoroSharp" Version="0.8.4" ExcludeAssets="build;buildTransitive;contentFiles" />
+  <PackageReference Include="Whisper.net" Version="1.9.1" />
+  <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
   <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   <None Include="SoundFonts\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  <!-- Arcadia's own leaderboard scan (the arcade server's lib/scoringscan.js, unchanged), run by ScoringScan.cs. -->
+  <EmbeddedResource Include="ScoringScan\scoringscan.js" LogicalName="scoringscan.js" />
 </ItemGroup><PropertyGroup><ApplicationIcon>../../assets/branding/arcadia-studio.ico</ApplicationIcon></PropertyGroup><ItemGroup><Resource Include="../../assets/branding/arcadia-studio.ico" Link="Assets/ArcadiaStudio.ico" /></ItemGroup></Project>
 
 

@@ -64,7 +64,18 @@ sealed class ParticleMaker : Window
         var saveButton = new Button { Content = "Save", Margin = new Thickness(10, 0, 4, 0), Padding = new Thickness(10, 2, 10, 2) };
         saveButton.Click += (_, _) => Guard(() => Save(false));
         var saveNew = new Button { Content = "Save as new", Padding = new Thickness(10, 2, 10, 2) }; saveNew.Click += (_, _) => Guard(() => Save(true));
-        bottom.Children.Add(saveButton); bottom.Children.Add(saveNew); bottom.Children.Add(status);
+        // Export: the effect as a file, for Import… in another project.
+        var export = new Button { Content = "Export…", Margin = new Thickness(4, 0, 0, 0), Padding = new Thickness(10, 2, 10, 2), ToolTip = "Save this effect as a file, to Import… into another project (on a Pickup, or a Particles control)." };
+        export.Click += (_, _) => Guard(() =>
+        {
+            string name = nameBox.Text.Trim().Length > 0 ? nameBox.Text.Trim() : fx.Id;
+            var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Particle effect (*.particles.json)|*.particles.json", FileName = name + ".particles.json" };
+            if (dialog.ShowDialog(this) != true) return;
+            var copy = Wysicraft.Models.Json.Clone(fx); copy.Id = name;
+            System.IO.File.WriteAllText(dialog.FileName, Wysicraft.Models.Json.Write(copy));
+            status.Text = "Exported " + System.IO.Path.GetFileName(dialog.FileName) + ".";
+        });
+        bottom.Children.Add(saveButton); bottom.Children.Add(saveNew); bottom.Children.Add(export); bottom.Children.Add(status);
         root.Children.Add(bottom);
 
         var centre = new DockPanel(); root.Children.Add(centre);
@@ -94,6 +105,9 @@ sealed class ParticleMaker : Window
     }
 
     // ---- the preview, running the shared simulation ----
+    /// <summary>For an assistant showing the person an effect it made: fire it, and whether they've changed anything since.</summary>
+    internal void FireNow() => Fire();
+    internal bool Untouched => !dirty;
     void Fire() => Fire(stage.ActualWidth > 0 ? stage.ActualWidth / 2 : 400, stage.ActualHeight > 0 ? stage.ActualHeight / 2 : 150);
     void Fire(double x, double y)
     {
@@ -313,24 +327,6 @@ sealed class ParticleMaker : Window
         return row;
     }
 
-    UIElement Swatch(string current, Action<string> set)
-    {
-        var box = new Border { Width = 40, Height = 18, CornerRadius = new CornerRadius(2), BorderThickness = new Thickness(1), BorderBrush = Brushes.Gray, HorizontalAlignment = HorizontalAlignment.Left, Cursor = Cursors.Hand };
-        void Show(string hex) { box.Background = ColorPicker.TryColor(hex, out var c) ? new SolidColorBrush(c) : Brushes.Black; }
-        Show(current);
-        box.MouseLeftButtonDown += (_, _) =>
-        {
-            Push();
-            var picker = new ColorPicker(this, current, hex =>
-            {
-                // The runtime's particle colours are solid; an alpha picked here would be ignored, so it is dropped.
-                if (!ColorPicker.TryColor(hex, out var c)) return;
-                current = $"#{c.R:X2}{c.G:X2}{c.B:X2}"; set(current); Show(current); Changed(false);
-            });
-            picker.ShowDialog();
-        };
-        return box;
-    }
     void Knob(string label, double min, double max, double value, Action<double> set, Func<double, string> show, double tick = 0)
     {
         var text = new TextBlock { Text = show(value), Width = 96, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };

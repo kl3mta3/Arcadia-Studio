@@ -46,7 +46,7 @@ The text on the right shows the zoom, for example `Zoom 100% • 1 GUI pixel = 2
 - **Edit:** Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select all, Group, Ungroup, Isolate group, Attach to panel, Detach from panel, Lock / unlock selection, Rename…, Bring to front, Bring forward, Send backward, Send to back, and the **Arrange** submenu.
 - **View:** Panels, Reset panel layout, zoom commands, Show grid, Snap to grid, Keyboard shortcuts….
 - **Project:** Preview, Test in Minecraft, Validate, Screen settings, Project settings…, Import texture…, MCP server (AI assistants)….
-- **Advanced** (web and desktop projects): Inputs (keys and gamepads)…, Input creator…, Animations…, State graphs…, Shaders…, Particle maker…, Particles…, Collider editor and Tile painter for the selection, Collision layers…, **Create leaderboard**, **Open leaderboard…** and **Import leaderboard…** ([[Leaderboard pages|Leaderboard-Pages]]), and Show / hide the Advanced toolbox.
+- **Advanced** (web and desktop projects): Inputs (keys and gamepads)…, Input creator…, Animations…, State graphs…, Shaders…, Particle maker…, Particles…, Collider editor and Tile painter for the selection, Collision layers…, **Create leaderboard**, **Open leaderboard…** and **Import leaderboard…** ([[Leaderboard pages|Leaderboard-Pages]]), **Create audio from text…**, **Create text from audio…** and **Speech settings…** ([[Speech and video|Speech-and-Video]]), and Show / hide the Advanced toolbox.
 - **Help:** User manual (F1, opens the offline manual installed with Arcadia Studio), Script API and snippets, Keyboard shortcuts…, About Arcadia Studio.
 
 All of these can be given your own shortcuts. See [[Keyboard shortcuts|Keyboard-Shortcuts]].

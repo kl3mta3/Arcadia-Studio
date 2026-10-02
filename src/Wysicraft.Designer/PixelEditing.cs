@@ -32,7 +32,7 @@ public partial class MainWindow
 
     /// <summary>Opens the pixel editor. With a PNG, it's cut into frames of the given size (0: one picture); a project
     /// asset path means saving updates that image. <paramref name="saved"/> gets the asset path and frame layout.</summary>
-    void OpenPixelEditor(Window? owner = null, byte[]? png = null, string? assetPath = null, int frameWidth = 0, int frameHeight = 0, int newWidth = 32, int newHeight = 32, Action<string, int, int, int>? saved = null, bool canPlace = true)
+    PixelEditor OpenPixelEditor(Window? owner = null, byte[]? png = null, string? assetPath = null, int frameWidth = 0, int frameHeight = 0, int newWidth = 32, int newHeight = 32, Action<string, int, int, int>? saved = null, bool canPlace = true)
     {
         List<PixelImage> frames;
         if (png != null)
@@ -65,6 +65,7 @@ public partial class MainWindow
         // From the main window it opens beside it; opened from another editor's own dialog (the sprite sheet editor) it stays in front of that.
         if (owner != null && owner != this) { artEditorsOpen++; try { editor.ShowDialog(); } finally { artEditorsOpen--; } }
         else OpenBeside(editor);
+        return editor;
     }
     string SavePixelArt(PixelEditor.SaveRequest request, Action<string, int, int, int>? saved)
     {

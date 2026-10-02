@@ -12,7 +12,9 @@ public sealed record Limits(int ScreenSize, int Elements, int Screens, int MinTi
     /// 21 ms for a 60 KiB script that was re-parsed every event. Requires runtime 1.7.0.</summary>
     public static readonly Limits Minecraft = new(4096, 512, 128, 50, 128, 256 * 1024);
     /// <summary>Nothing in the web runtime caps a script: it is compiled with `new Function` like any other source.
-    /// A megabyte is a stop for a runaway generator, not a budget anyone should have to author against.
+    /// Four megabytes is a stop for a runaway generator, not a budget anyone should have to author against (the largest
+    /// script in a real game so far is 388 KiB). It stays under the 5,000,000 characters past which the arcade's
+    /// leaderboard scan stops reading a file.
     ///
     /// Elements is measured, not chosen: drawing plain controls costs about 0.63 ms per thousand and stays linear to
     /// 16,000 (10.7 ms, two thirds of a 60 fps frame), then collapses to 37 ms at 24,000. Controls with text cost
@@ -23,7 +25,7 @@ public sealed record Limits(int ScreenSize, int Elements, int Screens, int MinTi
     /// (10,000 took 4-7.5 ms, 100,000 took 38-71 ms). There is no ceiling where it breaks; the cap only stops a
     /// runaway loop. A script run every frame at 60 fps should stay near 10,000-20,000; a one-off event (building a
     /// level) can use the rest.</summary>
-    public static readonly Limits Web = new(16384, 16000, 1000, 16, 100000, 1024 * 1024);
+    public static readonly Limits Web = new(16384, 16000, 1000, 16, 100000, 4 * 1024 * 1024);
     /// <summary>Where a screen starts costing a real share of a frame to draw: 4,000 controls is 2.4 ms of plain
     /// panels, or 6.2 ms once they have text on them. Advice, not an error.</summary>
     public const int HeavyScreen = 4000;
@@ -54,6 +56,7 @@ public static class Compatibility
             if (SoundAssets.Find(p, sound) is string file && !file.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)) Add(screen, element, $"plays {System.IO.Path.GetFileName(file)} (Minecraft only plays .ogg sounds)");
         if (p.Manifest.Inputs.Count > 0) Add("", "", $"{p.Manifest.Inputs.Count} input(s) in the Inputs window");
         if (p.Manifest.GameVariables.Count > 0) Add("", "", $"{p.Manifest.GameVariables.Count} game variable(s) in Project settings (Minecraft screens keep only their own variables)");
+        if (p.Manifest.SmoothImages) Add("", "", "Smooth pictures in Project settings (Minecraft draws pictures with hard pixel edges)");
         foreach (var (path, source) in Limits.UsedScripts(p))
         {
             if (Limits.SizeOf(source) > m.ScriptBytes) Add("", "", $"script {path} is {Limits.SizeOf(source) / 1024} KiB (Minecraft allows {m.ScriptBytes / 1024} KiB)");
@@ -78,6 +81,8 @@ public static class Compatibility
                 if (e.Font.Length > 0 && !Fonts.IsMinecraft(e.Font))
                     Add(ui.Id, e.Id, Fonts.IsBuiltin(e.Font) ? $"font \"{e.Font}\" (Minecraft has only {string.Join(", ", Fonts.Minecraft)})" : $"imported font \"{e.Font}\"");
                 if (e.Body.Length > 0) Add(ui.Id, e.Id, e.Body + " physics body");
+                if (e.Rotation != 0 || e.Scale != 1) Add(ui.Id, e.Id, e.Rotation != 0 && e.Scale != 1 ? "rotation and scale" : e.Rotation != 0 ? "rotation" : "scale");
+                if (e.Wrap) Add(ui.Id, e.Id, "wrapped text (Minecraft draws one line)");
                 if (e.Input.Length > 0) Add(ui.Id, e.Id, $"presses input \"{e.Input}\"");
                 if (e.Bounds.Width > m.ScreenSize || e.Bounds.Height > m.ScreenSize) Add(ui.Id, e.Id, $"size {e.Bounds.Width:0} × {e.Bounds.Height:0} (Minecraft allows up to {m.ScreenSize})");
                 foreach (var name in e.Events.Keys.Where(Registry.AdvancedElementEvents.Contains)) Add(ui.Id, e.Id, $"{name} event");

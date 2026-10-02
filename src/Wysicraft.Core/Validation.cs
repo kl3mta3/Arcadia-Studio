@@ -110,6 +110,7 @@ public static partial class Validation
                 if (!double.IsFinite(e.Bounds.X + e.Bounds.Y + e.Bounds.Width + e.Bounds.Height) || e.Bounds.Width < 1 || e.Bounds.Height < 1 || e.Bounds.Width > limits.ScreenSize || e.Bounds.Height > limits.ScreenSize) Add(ui.Id, e.Id, "Invalid bounds");
                 if(e.HorizontalAnchor is not ("left" or "center" or "right" or "stretch") || e.VerticalAnchor is not ("top" or "center" or "bottom" or "stretch") || !double.IsFinite(e.MinWidth+e.MinHeight+e.RowTemplateWidth) || e.MinWidth < 1 || e.MinWidth > limits.ScreenSize || e.MinHeight < 1 || e.MinHeight > limits.ScreenSize || e.RowTemplateWidth < 0 || e.RowTemplateWidth > limits.ScreenSize) Add(ui.Id,e.Id,"Invalid anchors or minimum size");
                 if (e.Opacity < 0 || e.Opacity > 1 || e.FontScale <= 0 || e.FontScale > 8 || e.Maximum <= e.Minimum) Add(ui.Id, e.Id, "Invalid appearance or value range");
+                if (!double.IsFinite(e.Rotation) || !double.IsFinite(e.Scale) || e.Scale < 0.01 || e.Scale > 100) Add(ui.Id, e.Id, "Rotation must be a number, and scale 0.01 to 100");
                 if (!Resource(e.Font) || !double.IsFinite(e.CornerRadius) || e.CornerRadius < 0 || e.CornerRadius > 128) Add(ui.Id, e.Id, "Invalid font resource or corner radius (0–128)");
                 else if (Fonts.Problem(project, e.Font) is string fontProblem) Add(ui.Id, e.Id, fontProblem);
                 if (!double.IsFinite(e.BorderWidth + e.ShadowOpacity + e.ShadowOffsetX + e.ShadowOffsetY + e.ShadowBlur) || e.BorderWidth is < 0 or > 32 || e.ShadowOpacity is < 0 or > 1 || Math.Abs(e.ShadowOffsetX) > 64 || Math.Abs(e.ShadowOffsetY) > 64 || e.ShadowBlur is < 0 or > 16) Add(ui.Id, e.Id, "Invalid border/shadow settings");
@@ -189,7 +190,7 @@ public static partial class Validation
                 foreach (var t in a.Tracks)
                 {
                     if (!ui.Elements.Any(e => e.Id == t.Target)) Add(ui.Id, "", $"Animation {a.Id}: missing control {t.Target}");
-                    if (t.Property is not ("x" or "y" or "width" or "height" or "opacity")) Add(ui.Id, "", $"Animation {a.Id}: can't animate {t.Property}");
+                    if (t.Property is not ("x" or "y" or "width" or "height" or "opacity" or "rotation" or "scale")) Add(ui.Id, "", $"Animation {a.Id}: can't animate {t.Property}");
                     if (t.Keys.Count > 1024 || t.Keys.Any(k => k.Time < 0 || k.Time > a.Duration || !double.IsFinite(k.Value) || k.Ease is not ("linear" or "ease_in" or "ease_out" or "ease_in_out" or "step"))) Add(ui.Id, "", $"Animation {a.Id}: keyframes must be inside the animation, with a known easing");
                 }
             }

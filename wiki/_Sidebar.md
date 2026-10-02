@@ -18,6 +18,7 @@
 - [[Assets and items|Assets-and-Items]]
 - [[Pixel art and sprites|Pixel-Art-and-Sprites]]
 - [[Music and sound effects|Music-and-Sound-Effects]]
+- [[Speech and video|Speech-and-Video]]
 - [[Item lists|Item-Lists-and-Row-Templates]]
 
 **Behavior**

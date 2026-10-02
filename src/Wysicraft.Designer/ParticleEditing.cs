@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using Wysicraft.Core;
 using Wysicraft.Models;
+using Wysicraft.Packaging;
 using Validation = Wysicraft.Core.Validation;
 namespace Wysicraft.Designer;
 
@@ -12,12 +13,95 @@ namespace Wysicraft.Designer;
 public partial class MainWindow
 {
     /// <summary>Opens the maker on an existing effect, or on a preset when there is nothing to open.</summary>
-    internal void OpenParticleMaker(string? effectId = null)
+    internal ParticleMaker OpenParticleMaker(string? effectId = null)
     {
         var existing = effectId != null ? project.Manifest.Particles.FirstOrDefault(p => p.Id == effectId) : null;
         var effect = existing != null ? Json.Clone(existing) : Particles.Preset("sparks");
         var maker = new ParticleMaker(this, effect, existing?.Id, SaveParticleEffect, ProjectPictures, ImportOnePicture);
         OpenBeside(maker);
+        return maker;
+    }
+
+    /// <summary>A particle effect chooser: (none), the project's effects, the built-in templates (choosing one adds it to
+    /// the project), Edit… (the Particle maker) and Import… (an exported effect, or effects from another project).</summary>
+    void ParticlePicker(Panel panel, string label, string current, Action<string> apply, string? tip = null)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2), ToolTip = tip };
+        row.Children.Add(new TextBlock { Text = label, Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center });
+        var import = new Button { Content = "Import…", Margin = new Thickness(4, 0, 0, 0), ToolTip = "An effect exported from the Particle maker (.particles.json), or effects from another Arcadia Studio project." };
+        var edit = new Button { Content = "Edit…", Margin = new Thickness(4, 0, 0, 0), ToolTip = "Open the chosen effect in the Particle maker (or make a new one)." };
+        // On their own line under the list: Properties is narrow, and beside it they left the list no room for a name.
+        var below = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, 3) };
+        edit.Padding = import.Padding = new Thickness(8, 0, 8, 0); below.Children.Add(edit); below.Children.Add(import);
+        const string None = "(none)", Template = "  (template)";
+        var items = new List<string> { None };
+        items.AddRange(project.Manifest.Particles.Select(p => p.Id));
+        items.AddRange(Particles.Presets.Where(p => p != "random" && project.Manifest.Particles.All(x => x.Id != p)).Select(p => p + Template));
+        var box = new ComboBox { ItemsSource = items, SelectedItem = current.Length == 0 ? None : items.Contains(current) ? current : null };
+        if (box.SelectedItem == null && current.Length > 0) { items.Insert(1, current); box.ItemsSource = null; box.ItemsSource = items; box.SelectedItem = current; }
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedItem is not string chosen) return;
+            string value = chosen == None ? "" : chosen;
+            if (value.EndsWith(Template, StringComparison.Ordinal))
+            {
+                // A template becomes an effect of the project's own, ready to change in the Particle maker.
+                string preset = value[..^Template.Length];
+                try { var fx = Particles.Preset(preset); fx.Id = preset; value = SaveParticleEffect(new ParticleMaker.SaveRequest(fx, true, null)); }
+                catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException) { Log(ex.Message); return; }
+            }
+            if (value == current) return;
+            Change(); apply(value); current = value;
+        };
+        edit.Click += (_, _) => Guard(() => OpenParticleMaker(current.Length > 0 ? current : null));
+        import.Click += (_, _) => Guard(() => { var added = ImportParticleEffects(); if (added.Count > 0) { Change(); apply(added[0]); current = added[0]; } });
+        row.Children.Add(box); panel.Children.Add(row); panel.Children.Add(below);
+    }
+
+    /// <summary>Imports particle effects: a .particles.json from the Particle maker's Export… (one effect or a list), or
+    /// effects chosen from another project file. Returns their names in this project.</summary>
+    internal List<string> ImportParticleEffects()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Particle effects or projects|*.json;*.arcadia;*.wysicraftproj|Particle effects (*.particles.json)|*.json|Arcadia Studio projects|*.arcadia;*.wysicraftproj", Title = "Import particle effects" };
+        if (dialog.ShowDialog(this) != true) return [];
+        List<ParticleEffect> found;
+        string file = dialog.FileName;
+        if (file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            string text = File.ReadAllText(file).TrimStart();
+            try { found = text.StartsWith('[') ? Json.Read<List<ParticleEffect>>(text) : [Json.Read<ParticleEffect>(text)]; }
+            catch (System.Text.Json.JsonException ex) { throw new InvalidDataException(Path.GetFileName(file) + " isn't a particle effect: " + ex.Message); }
+        }
+        else
+        {
+            var other = ProjectStore.Load(file);
+            if (other.Manifest.Particles.Count == 0) throw new InvalidOperationException(Path.GetFileName(file) + " has no particle effects.");
+            found = other.Manifest.Particles.Count == 1 ? other.Manifest.Particles : PickParticleEffects(other.Manifest.Particles, Path.GetFileName(file));
+        }
+        var added = new List<string>();
+        foreach (var fx in found)
+        {
+            if (string.IsNullOrWhiteSpace(fx.Id)) fx.Id = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(file));
+            if (fx.Shape == "texture" && fx.Texture.Length > 0 && !ProjectPictures().Contains(fx.Texture))
+            { Log($"{fx.Id} used the picture {fx.Texture}, which isn't in this project: it's drawn as circles until you choose a picture in the Particle maker."); fx.Shape = "circle"; }
+            added.Add(SaveParticleEffect(new ParticleMaker.SaveRequest(fx, true, null)));
+        }
+        if (added.Count > 0) Log("Imported particle effect" + (added.Count > 1 ? "s " : " ") + string.Join(", ", added) + ".");
+        return added;
+    }
+    List<ParticleEffect> PickParticleEffects(List<ParticleEffect> effects, string from)
+    {
+        var window = new Window { Owner = this, Title = "Import particle effects from " + from, Width = 380, Height = 360, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
+        var root = new DockPanel { Margin = new Thickness(12) }; window.Content = root;
+        var head = new TextBlock { Text = "Choose the effects to bring into this project:", Margin = new Thickness(0, 0, 0, 6) }; DockPanel.SetDock(head, Dock.Top); root.Children.Add(head);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) }; DockPanel.SetDock(buttons, Dock.Bottom); root.Children.Add(buttons);
+        var ok = new Button { Content = "Import", IsDefault = true, Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, Padding = new Thickness(12, 3, 12, 3) };
+        buttons.Children.Add(ok); buttons.Children.Add(cancel);
+        var list = new ListBox { SelectionMode = SelectionMode.Multiple, ItemsSource = effects.Select(x => x.Id).ToList() };
+        root.Children.Add(list);
+        ok.Click += (_, _) => window.DialogResult = list.SelectedItems.Count > 0;
+        return window.ShowDialog() == true ? effects.Where(x => list.SelectedItems.Contains(x.Id)).ToList() : [];
     }
 
     /// <summary>Puts the effect on the manifest and returns the name it ended up with. "Save as new" never replaces

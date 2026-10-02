@@ -299,17 +299,20 @@ public partial class MainWindow
         B("Preview", "Open the page with sample players (F5).", PreviewLeaderboard);
         B("Export page…", "Write leaderboard.html and its pictures into a folder.", ExportLeaderboardPage);
         B("Save as .lb…", "Save this leaderboard as a file of its own, with its pictures, to use in another project.", SaveLeaderboardFile);
-        B("Delete", "Remove this leaderboard from the project (Undo brings it back).", DeleteLeaderboard);
+        if (!creatorMode) B("Delete", "Remove this leaderboard from the project (Undo brings it back).", DeleteLeaderboard);
         Properties.Children.Add(buttons);
     }
 
     // ---- Creating, opening, importing, exporting ----
     /// <summary>The screen or leaderboard the editor shows, found again in the project (after Undo, or an assistant's edit).</summary>
     UiDefinition ResolveUi(UiDefinition old) =>
+        // The leaderboard creator only ever shows its own page (found by its place in the list, in case it was renamed).
+        creatorMode && creatorBoardIndex < project.Leaderboards.Count ? project.Leaderboards[creatorBoardIndex] :
         (old.IsLeaderboard ? project.Leaderboards.FirstOrDefault(b => b.Id == old.Id) : project.Screens.FirstOrDefault(s => s.Id == old.Id))
         ?? project.Screens.FirstOrDefault(s => s.Id == componentReturnScreen && !s.IsComponent) ?? project.Screens.FirstOrDefault(s => !s.IsComponent) ?? project.Screens[0];
 
-    internal UiDefinition CreateLeaderboard()
+    /// <param name="open">Show it on the canvas (false when the leaderboard creator is about to open on it).</param>
+    internal UiDefinition CreateLeaderboard(bool open = true)
     {
         SaveScriptText(); Change();
         string id = project.Leaderboards.Any(b => b.Id == "leaderboard") ? ElementIds.Next("leaderboard", project.Leaderboards.Select(b => b.Id)) : "leaderboard";
@@ -317,7 +320,7 @@ public partial class MainWindow
         string game = project.Publishing.Title.Length > 0 ? project.Publishing.Title : project.Manifest.Name;
         board.Title = (game.Length > 0 ? game + " " : "") + "leaderboard";
         project.Leaderboards.Add(board);
-        OpenLeaderboard(board);
+        if (open) OpenLeaderboard(board); else RefreshAll();
         Log("Created the leaderboard page " + id + ". Change anything on it; Preview (F5) shows it with sample players. Publish to Arcadia uses it for the game's leaderboard.");
         return board;
     }

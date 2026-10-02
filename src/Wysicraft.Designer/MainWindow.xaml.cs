@@ -94,8 +94,13 @@ public partial class MainWindow : Window {
 	private string? editingScript;
 
 
-	public MainWindow()
+	public MainWindow() : this(false) { }
+
+	/// <summary>The editor. With leaderboardCreator it's the leaderboard creator: a window of its own that edits one
+	/// leaderboard page on a copy of the project (LeaderboardCreator.cs).</summary>
+	internal MainWindow(bool leaderboardCreator)
 	{
+		creatorMode = leaderboardCreator;
 		InitializeComponent();
 		ui = project.Screens[0];
 		history = new History<Project>(() => project, delegate(Project value)
@@ -108,7 +113,7 @@ public partial class MainWindow : Window {
 		BuildMenus();
         InitializeAssetBrowsers(); InitializeComponents();
 		InitializeDocking(); InitializeZoom(); InitializeOutsideMarquee();
-		InitializeRecovery();
+		if (!creatorMode) InitializeRecovery();
 		ScriptEditor.PreviewKeyDown += delegate(object _, KeyEventArgs e)
 		{
 			if (e.Key == Key.Space && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
@@ -258,6 +263,8 @@ public partial class MainWindow : Window {
 		base.Closing += delegate(object? _, CancelEventArgs e)
 		{
 			if (!CloseSideEditors()) { e.Cancel = true; return; }
+			// The leaderboard creator never asks about saving: closing it hands the page back to the project.
+			if (creatorMode) { SaveScriptText(); return; }
 			if (!crashRecovery && !closingForUpdate)
 			{
 				SaveScriptText();
@@ -477,26 +484,6 @@ public partial class MainWindow : Window {
 	}
 
 
-	private void ExportPack()
-	{
-		SaveScriptText();
-		if (!MinecraftExportAllowed("Exporting for Minecraft")) return;
-		Validate();
-		if (Wysicraft.Core.Validation.Check(project).Count <= 0)
-		{
-			SaveFileDialog saveFileDialog = new SaveFileDialog
-			{
-				Filter = "Minecraft pack|*.wysicraft",
-				FileName = project.Manifest.Id + ".wysicraft"
-			};
-			if (saveFileDialog.ShowDialog() == true)
-			{
-				ProjectStore.Export(project, saveFileDialog.FileName);
-				Log("Exported " + saveFileDialog.FileName);
-			}
-		}
-	}
-
 
 	private void ExportKube()
 	{
@@ -556,7 +543,7 @@ public partial class MainWindow : Window {
         RefreshAssetBrowser(); RefreshComponents();
 		Draw();
 		RefreshInspector();
-		base.Title = project.Manifest.Name + " — Arcadia Studio";
+		base.Title = creatorMode ? "Leaderboard creator — " + (ui.Title.Length > 0 ? ui.Title : ui.Id) : project.Manifest.Name + " — Arcadia Studio";
 	}
 
 
@@ -643,6 +630,8 @@ public partial class MainWindow : Window {
 		// mislead about where the map is and what a click lands on.
 		foreach (var map in ui.Elements) Tilemaps.Fit(map);
         Surface.Children.Clear(); handlePlacers.Clear();
+		// Pictures as the game scales them: hard pixel edges, or smoothly when the project asks for smooth pictures.
+		RenderOptions.SetBitmapScalingMode(Surface, project.Manifest.SmoothImages && project.Manifest.Target != "minecraft" ? BitmapScalingMode.HighQuality : BitmapScalingMode.NearestNeighbor);
 		Surface.Width = (double)ui.Size.Width * 2.0;
 		Surface.Height = (double)ui.Size.Height * 2.0;
 		if (grid)
@@ -685,6 +674,25 @@ public partial class MainWindow : Window {
 				rect.Intersect(new Rect(item.Bounds.X * 2.0, item.Bounds.Y * 2.0, item.Bounds.Width * 2.0, item.Bounds.Height * 2.0));
 			}
 			border.Clip = new RectangleGeometry(rect.IsEmpty ? default(Rect) : new Rect(rect.X - e.Bounds.X * 2.0, rect.Y - e.Bounds.Y * 2.0, rect.Width, rect.Height));
+			// Rotation and scale (web & desktop), as the game draws them: the control about its own centre, and inside a
+			// turned panel along with it. The clip is the panels' area, which the control's own turn must not carry off.
+			if (CanvasTransform(e, out Transform? ownTurn) is Transform turn)
+			{
+				border.RenderTransform = turn;
+				if (ownTurn != null)
+				{
+					// The control's own box turns with it; the area of the panels it is attached inside does not.
+					var box = new RectangleGeometry(new Rect(0.0, 0.0, e.Bounds.Width * 2.0, e.Bounds.Height * 2.0));
+					Rect? area = null;
+					foreach (Element panel in ContainerTree.Ancestors(ui, e))
+					{
+						var within = new Rect((panel.Bounds.X - e.Bounds.X) * 2.0, (panel.Bounds.Y - e.Bounds.Y) * 2.0, panel.Bounds.Width * 2.0, panel.Bounds.Height * 2.0);
+						if (area is Rect so) { so.Intersect(within); area = so; } else area = within;
+					}
+					if (area is not Rect inside) border.Clip = box;
+					else if (ownTurn.Value.HasInverse) { var back = ownTurn.Value; back.Invert(); border.Clip = new CombinedGeometry(GeometryCombineMode.Intersect, box, new RectangleGeometry(inside.IsEmpty ? default(Rect) : inside) { Transform = new MatrixTransform(back) }); }
+				}
+			}
 			// Filled when it's actually opened: building a full menu for every control on every redraw was the bulk of a redraw.
 			ContextMenu menu = new ContextMenu();
 			border.ContextMenu = menu;
@@ -947,7 +955,7 @@ public partial class MainWindow : Window {
 						bool flag4 = ((text2 == "Width" || text2 == "Height") ? true : false);
 						flag3 = flag4 && num < 1.0;
 					}
-					flag2 = flag3 || (name == "Opacity" && (num < 0.0 || num > 1.0)) || (name == "FontScale" && (num <= 0.0 || num > 8.0));
+					flag2 = flag3 || (name == "Opacity" && (num < 0.0 || num > 1.0)) || (name == "FontScale" && (num <= 0.0 || num > 8.0)) || (name == "Scale" && (num < 0.01 || num > 100.0));
 				}
 				if (flag2)
 				{
@@ -1371,6 +1379,12 @@ public partial class MainWindow : Window {
 		targetRow.Children.Add(target); stackPanel.Children.Add(targetRow);
 		stackPanel.Children.Add(new TextBlock { Text = "Web & desktop projects can use the Advanced toolbox and bigger screens. Minecraft exports list anything Minecraft can't run.", TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 0, 0, 8) });
 		// Kept script state: only for web & desktop, where a game is one player in one browser.
+		// Smooth pictures: for illustrated art. Web & desktop only: Minecraft always draws hard pixel edges.
+		var smooth = new CheckBox { Content = "Smooth pictures (for illustrated art, not pixel art)", IsChecked = clone.SmoothImages, Margin = new Thickness(0, 2, 0, 8),
+			ToolTip = "Pictures are scaled smoothly instead of with hard pixel edges. Leave it off for pixel art, which should stay crisp. Web & desktop only." };
+		smooth.Checked += (_, _) => clone.SmoothImages = true; smooth.Unchecked += (_, _) => clone.SmoothImages = false;
+		target.SelectionChanged += (_, _) => smooth.IsEnabled = clone.Target != "minecraft"; smooth.IsEnabled = clone.Target != "minecraft";
+		stackPanel.Children.Add(smooth);
 		var keep = new CheckBox { Content = "Scripts keep their variables between events", IsChecked = clone.KeepScriptState, Margin = new Thickness(0, 2, 0, 2),
 			ToolTip = "Each script runs from the top once; after that only the event's function is called, so top-level variables (let score = 0) last until the game starts over. Web & desktop only: Minecraft runs every event from the top." };
 		keep.Checked += (_, _) => clone.KeepScriptState = true; keep.Unchecked += (_, _) => clone.KeepScriptState = false;
@@ -1639,7 +1653,7 @@ public partial class MainWindow : Window {
 		default:
 			frameworkElement = new TextBlock
 			{
-				Text = ((e.Type == "item") ? ("◇ " + e.Item) : e.Text),
+				Text = ((e.Type == "item") ? ("◇ " + e.Item) : e.Wrap ? WrappedText(e.Text) : e.Text), TextWrapping = e.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
 				Foreground = Brush(e.Foreground),
 				Background = ((e.Type == "label") ? Brushes.Transparent : Brush(e.Background)),
 				VerticalAlignment = VerticalAlignment.Center,

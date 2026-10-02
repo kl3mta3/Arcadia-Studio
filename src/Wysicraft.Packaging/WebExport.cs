@@ -97,7 +97,7 @@ public static class WebExport
                     if (script.Length > 0 && !scripts.ContainsKey(script) && project.Scripts.TryGetValue(script, out var code) && script.StartsWith("scripts/") && script.EndsWith(".js") && Limits.SizeOf(code) <= Limits.For(project).ScriptBytes)
                         scripts[script] = code;
         }
-        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, keepScriptState = manifest.Target == "web" && manifest.KeepScriptState, gameVariables = manifest.GameVariables, savedVariables = manifest.SavedVariables, screens, components, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
+        var data = new { id = manifest.Id, name = manifest.Name, version = manifest.Version, main = manifest.DefaultUi, target = manifest.Target, keepScriptState = manifest.Target == "web" && manifest.KeepScriptState, smoothImages = manifest.Target != "minecraft" && manifest.SmoothImages, gameVariables = manifest.GameVariables, savedVariables = manifest.SavedVariables, screens, components, scripts, assets, animations, sounds, inputs, particles, shaders, fonts, collisionMatrix, limits };
         // JSON inside a <script>: escape "</" so a string can never end the script block.
         string projectJs = "window.WYSICRAFT_PROJECT = " + JsonSerializer.Serialize(data).Replace("</", "<\\/") + ";\n";
         string hostJs = options.HostScript ?? HostTemplate(options.Desktop);

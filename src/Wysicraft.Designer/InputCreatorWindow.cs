@@ -161,7 +161,7 @@ public partial class MainWindow
                 Redraw();
                 if (run.Ok) { status.Text = run.Text.Length > 0 ? run.Text : "The assistant finished; review what it wrote."; return; }
             }
-            status.Text = (CanAskDirectly ? "Queued." : WhyQueued) + " Say \"check Arcadia Studio\" in your chat with the assistant and it will pick this up and reply here.";
+            status.Text = "Queued. Say \"check Arcadia Studio\" in your chat with the assistant and it will pick this up and reply here.";
         }
         void Review(AgentRequest request)
         {

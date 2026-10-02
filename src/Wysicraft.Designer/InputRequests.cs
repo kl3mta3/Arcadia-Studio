@@ -8,8 +8,8 @@ namespace Wysicraft.Designer;
 //
 // MCP over HTTP runs stateless here, so the app cannot push a question down to the client and wait for an answer.
 // What it can do is leave the question somewhere the assistant will look: a request goes on this queue, the
-// assistant reads it with the pending_requests tool and replies with answer_request. Nothing depends on the client
-// supporting sampling, and if one day it does, "Create" can call it instead and fill in the same fields.
+// assistant reads it with the pending_requests tool and replies with answer_request. (With an assistant CLI set up,
+// the app starts it instead and the answer comes straight back: AgentRunner.cs.)
 //
 // A request is a draft until it is saved: the generated script sits here, where it can be read and tested, and only
 // reaches the project when Save to project is pressed.

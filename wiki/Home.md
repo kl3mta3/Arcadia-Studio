@@ -30,6 +30,7 @@ Arcadia Studio is a Windows app for designing Minecraft screens (menus, dashboar
 - [[Events and actions|Events-and-Actions]]: what happens when someone clicks, types or opens a screen
 - [[Scripting with JavaScript|Scripting]]: scripts, templates and the script API
 - [[Preview|Preview]]: test your screen on the desktop
+- [[Speech and video|Speech-and-Video]]: voiced lines for your characters, talking to your assistant, and videos of your game
 - [[Testing in Minecraft|Testing-in-Minecraft]]: launch a real game from the editor
 
 ## Shipping your project

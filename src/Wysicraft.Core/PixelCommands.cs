@@ -4,7 +4,7 @@ namespace Wysicraft.Core;
 /// <summary>One drawing or layer command for the pixel_art MCP tool. Which fields matter depends on <see cref="Op"/>.</summary>
 public sealed class PixelCommand
 {
-    [Description("pixels, grid, line, rect, ellipse, fill, clear, flip, shift, add_layer, add_group, set_layer, move_layer, merge_down, delete_layer, add_frame, delete_frame, move_frame, resize")]
+    [Description("pixels, grid, line, rect, ellipse, brush, smooth, fill, clear, flip, shift, add_layer, add_group, set_layer, move_layer, merge_down, delete_layer, add_frame, delete_frame, move_frame, resize")]
     public string Op { get; set; } = "";
     [Description("Layer or group name to act on. Empty = the top drawing layer.")]
     public string Layer { get; set; } = "";
@@ -21,13 +21,15 @@ public sealed class PixelCommand
     [Description("#RRGGBB, #AARRGGBB (see-through) or transparent.")]
     public string Color { get; set; } = "";
     public bool Filled { get; set; }
-    [Description("Brush size 1-8 for line and rect outlines.")]
+    [Description("Brush size: 1-8 for line and rect outlines, 1-64 (the diameter) for brush. smooth: how many passes, 1-8.")]
     public int Size { get; set; } = 1;
     [Description("0-255: fill also takes colors this close to the clicked one.")]
     public int Tolerance { get; set; }
     [Description("Mix see-through colors with what's there instead of replacing it.")]
     public bool Blend { get; set; }
-    [Description("pixels: [[x,y],...] painted with color.")]
+    [Description("brush: 0-1, how much of the brush is solid before its edge fades (default 0.5; 1 is a hard round brush with a smooth outline).")]
+    public double? Hardness { get; set; }
+    [Description("pixels: [[x,y],...] painted with color. brush: the points the stroke runs through, in order.")]
     public List<int[]> Points { get; set; } = [];
     [Description("grid: rows of characters painted from (x,y); each character is looked up in palette. Characters not in the palette are left as they are.")]
     public List<string> Rows { get; set; } = [];
@@ -133,6 +135,31 @@ public static class PixelCommands
             case "line": { uint color = ParseColor(c.Color); Draw(doc, c, img => PixelArt.Line(img, c.X, c.Y, c.X2, c.Y2, color, Math.Clamp(c.Size, 1, 8))); break; }
             case "rect": { uint color = ParseColor(c.Color); Draw(doc, c, img => PixelArt.Rectangle(img, c.X, c.Y, c.X2, c.Y2, color, c.Filled, Math.Clamp(c.Size, 1, 8))); break; }
             case "ellipse": { uint color = ParseColor(c.Color); Draw(doc, c, img => PixelArt.Ellipse(img, c.X, c.Y, c.X2, c.Y2, color, c.Filled)); break; }
+            case "brush":
+            {
+                // A soft round brush: the color is laid over what's there, fading out at the brush's edge. The stroke
+                // runs through points, or from x,y to x2,y2. A transparent color erases softly.
+                uint color = ParseColor(c.Color);
+                var path = c.Points.Count > 0 ? c.Points : [[c.X, c.Y], [c.X2, c.Y2]];
+                if (path.Count > 4096) throw new InvalidDataException("At most 4096 points in a stroke.");
+                if (path.Any(p => p.Length != 2)) throw new InvalidDataException("Each point is [x,y].");
+                if (c.Hardness is double h && (!double.IsFinite(h) || h is < 0 or > 1)) throw new InvalidDataException("hardness is 0–1.");
+                int size = Math.Clamp(c.Size, 1, PixelSoft.MaxSize); double hardness = c.Hardness ?? 0.5;
+                var cell = Target(doc, c); var basis = cell.Clone(); var coverage = new byte[cell.Width * cell.Height];
+                PixelSoft.Dab(coverage, cell.Width, cell.Height, path[0][0], path[0][1], size, hardness);
+                for (int i = 1; i < path.Count; i++) PixelSoft.Line(coverage, cell.Width, cell.Height, path[i - 1][0], path[i - 1][1], path[i][0], path[i][1], size, hardness);
+                PixelSoft.Paint(basis, cell, coverage, color, 0, 0, cell.Width - 1, cell.Height - 1);
+                break;
+            }
+            case "smooth":
+            {
+                // Softens jagged edges: the whole layer, or a box. Flat areas are left as they are.
+                var cell = Target(doc, c); bool box = c.Width > 0 && c.Height > 0;
+                if (box && !(c.X < cell.Width && c.Y < cell.Height && c.X + c.Width > 0 && c.Y + c.Height > 0)) throw new InvalidDataException($"That box is outside the {doc.Width}×{doc.Height} picture.");
+                var smoothed = PixelSoft.SmoothEdges(cell, box ? PixelMask.Box(cell.Width, cell.Height, c.X, c.Y, c.Width, c.Height) : null, Math.Clamp(c.Size, 1, 8));
+                Array.Copy(smoothed.Pixels, cell.Pixels, cell.Pixels.Length);
+                break;
+            }
             case "fill":
             {
                 uint color = ParseColor(c.Color); var cell = Target(doc, c);
@@ -198,7 +225,7 @@ public static class PixelCommands
                 break;
             }
             case "resize": doc.Resize(c.Width, c.Height); break;
-            default: throw new InvalidDataException("Unknown op. Use pixels, grid, line, rect, ellipse, fill, clear, flip, shift, add_layer, add_group, set_layer, move_layer, merge_down, delete_layer, add_frame, delete_frame, move_frame or resize.");
+            default: throw new InvalidDataException("Unknown op. Use pixels, grid, line, rect, ellipse, brush, smooth, fill, clear, flip, shift, add_layer, add_group, set_layer, move_layer, merge_down, delete_layer, add_frame, delete_frame, move_frame or resize.");
         }
     }
 

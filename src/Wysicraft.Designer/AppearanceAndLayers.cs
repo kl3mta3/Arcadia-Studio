@@ -186,6 +186,12 @@ public partial class MainWindow
         pixels.Click += (_, _) => Guard(() => PixelEditorForElement(e)); buttons.Children.Add(pixels); Properties.Children.Add(buttons);
         Properties.Children.Add(new TextBlock { Text = "An assigned image replaces the fill. Transparent pixels reveal the canvas.", Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
         Field(Properties, "Opacity", e, "Opacity");
+        // Web & desktop: the control turned and resized about its centre. A panel carries what's attached inside it.
+        if (AdvancedAllowed && !Untransformed(e))
+        {
+            Field(Properties, "Rotation (°)", e, "Rotation"); Field(Properties, "Scale", e, "Scale");
+            Properties.Children.Add(new TextBlock { Text = "Turned clockwise and resized about the centre (web & desktop). A panel takes everything attached inside it along. Physics bodies and colliders stay as they are.", Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+        }
         Heading(Properties, "Corners");
         var radiusLabel = new TextBlock { Text = $"Radius: {e.CornerRadius:0} px", Margin = new Thickness(4) };
         var radius = new Slider { Minimum = 0, Maximum = 128, Value = e.CornerRadius, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new Thickness(4), ToolTip = "Corner radius in Minecraft pixels; clamped to half the control size." };
@@ -215,6 +221,8 @@ public partial class MainWindow
         }
         Field(Properties, "Size scale", e, "FontScale");
         foreach (string property in new[] { "Bold", "Italic", "Underline" }) Field(Properties, property, e, property);
+        // Web & desktop: several lines instead of one cut off at the control's width.
+        if (AdvancedAllowed && e.Type is "label" or "button") Field(Properties, "Wrap text", e, "Wrap");
         var alignRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2), ToolTip = "How the text sits inside the control." };
         alignRow.Children.Add(new TextBlock { Text = "Alignment", Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4) });
         var align = new ComboBox { ItemsSource = new[] { "left", "center", "right" }, SelectedItem = e.Alignment };
@@ -293,7 +301,31 @@ public partial class MainWindow
     }
     TextBlock StyledText(Element e)
     {
-        var text = new TextBlock { Text = e.Text, TextTrimming = TextTrimming.CharacterEllipsis }; ApplyFont(text, e); return text;
+        var text = new TextBlock { Text = e.Wrap ? WrappedText(e.Text) : e.Text, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = e.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap }; ApplyFont(text, e); return text;
+    }
+    /// <summary>Wrapped text takes a typed \n as a line break, as the runtime does.</summary>
+    static string WrappedText(string text) => text.Replace("\\n", "\n");
+    /// <summary>Kinds the runtime never turns or scales: they aren't one rectangle (or aren't drawn at all).</summary>
+    static bool Untransformed(Element e) => e.Type is "tilemap" or "particles" or "camera" or "sound" or "collider";
+    static bool Turned(Element e) => (e.Rotation != 0 || e.Scale != 1) && !Untransformed(e);
+    /// <summary>One control's turn about its own centre, written in the coordinates of the control being drawn
+    /// (relativeTo): what the canvas needs to show a control inside a turned panel where the game draws it.</summary>
+    static Transform TurnOf(Element turnedOne, Element relativeTo)
+    {
+        double cx = (turnedOne.Bounds.X + turnedOne.Bounds.Width / 2 - relativeTo.Bounds.X) * 2, cy = (turnedOne.Bounds.Y + turnedOne.Bounds.Height / 2 - relativeTo.Bounds.Y) * 2;
+        var turn = new TransformGroup();
+        if (turnedOne.Scale != 1) turn.Children.Add(new ScaleTransform(turnedOne.Scale, turnedOne.Scale, cx, cy));
+        if (turnedOne.Rotation != 0) turn.Children.Add(new RotateTransform(turnedOne.Rotation, cx, cy));
+        return turn;
+    }
+    /// <summary>The canvas transform for a control, as the runtime draws it: its own turn first, then each turned panel
+    /// it is attached inside, from the nearest outwards. Null when nothing is turned. own is the control's own part.</summary>
+    Transform? CanvasTransform(Element e, out Transform? own)
+    {
+        own = Turned(e) ? TurnOf(e, e) : null;
+        var all = new TransformGroup(); if (own != null) all.Children.Add(own);
+        foreach (var panel in ContainerTree.Ancestors(ui, e)) if (Turned(panel)) all.Children.Add(TurnOf(panel, e));
+        return all.Children.Count == 0 ? null : all;
     }
     void ApplyFont(FrameworkElement widget, Element e)
     {

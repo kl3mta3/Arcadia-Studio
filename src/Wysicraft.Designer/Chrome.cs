@@ -30,7 +30,7 @@ public partial class MainWindow
             var item=new MenuItem {Header=title};item.Click+=(_,_)=>Guard(()=>ShowDock(id));panels.Items.Add(item);
         }
         Top("_View",panels,"view.resetLayout","-","view.zoomIn","view.zoomOut","view.zoomActual","view.zoomFit","-","view.grid","view.snap","-","view.shortcuts","view.askLockChildren");
-        advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.leaderboard.new","advanced.leaderboard.open","advanced.leaderboard.import","-","advanced.toolbox");
+        advancedMenu=Top("_Advanced","advanced.inputs","advanced.inputCreator","advanced.animations","advanced.stateGraphs","advanced.shaders","advanced.particleMaker","advanced.particles","advanced.collider","advanced.tilemap","advanced.layers","-","advanced.leaderboard.new","advanced.leaderboard.open","advanced.leaderboard.import","-","advanced.createAudio","advanced.createText","advanced.speechSettings","-","advanced.toolbox");
         Top("_Project","project.preview","project.test","project.validate","-","project.screen","project.settings","-","project.importTexture","project.pixelEditor","project.spriteSheet","-","project.musicMaker","project.soundEffects","project.importAudio","-","project.mcp");
         Top("_Help","help.manual","help.scriptApi","view.shortcuts","-","help.updates","help.autoUpdates","-","help.about");
 
@@ -77,7 +77,10 @@ public partial class MainWindow
         selected.Clear();dragBounds=null;Surface.ReleaseMouseCapture();Draw();RefreshInspector();ShowDock("properties");
     }
     void ShowAbout() {
-        string version=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+        // "1.4.0+build.37" (version.txt and build-number.txt) reads "1.4.0 (build 37)".
+        string info=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+        int plus=info.IndexOf("+build.",StringComparison.Ordinal);
+        string version=plus<0?info:info[..plus]+" (build "+info[(plus+7)..]+")";
         MessageBox.Show(this,$"Arcadia Studio {version}\nVisual UI and 2D game editor for the web, desktop and Minecraft 1.21.1 / NeoForge\nBundled Minecraft runtime {RuntimeInfo.Version}\nClient and server JavaScript use the bundled engine.","About Arcadia Studio");
     }
     // The release ships the manual as Docs\Wysicraft-Manual.html beside the Designer folder; development builds fall back to the online wiki.

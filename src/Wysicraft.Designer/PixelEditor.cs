@@ -17,7 +17,7 @@ namespace Wysicraft.Designer;
 sealed class PixelEditor : Window
 {
     public sealed record SaveRequest(PixelImage Sheet, int FrameWidth, int FrameHeight, int Frames, string Name, bool AsNew, string? Path, byte[]? Layers, double? AnimateFps = null);
-    enum Tool { Pencil, Eraser, Fill, Line, Rectangle, Ellipse, Select, Wand, Move, Picker }
+    enum Tool { Pencil, Eraser, Fill, Line, Rectangle, Ellipse, Select, Wand, Move, Picker, Brush, Smooth }
     enum SelectMode { Replace, Add, Subtract }
     sealed record Snapshot(PixelDocument Doc, int Frame, int[] LayerPath, PixelMask? Selection);
 
@@ -54,6 +54,10 @@ sealed class PixelEditor : Window
 
     // Gesture in progress.
     bool painting, moved; uint strokeColor; (int X, int Y) start, last, grab; PixelImage? strokeBase, strokeMask;
+    // The soft brush and the smooth tool draw through a coverage map (PixelSoft): how far each pixel has been painted
+    // in this stroke. softness is how much of the brush fades, 0–100.
+    byte[]? strokeCoverage; int softness = 50;
+    double Hardness => 1 - softness / 100.0;
     List<(PixelLayer Layer, PixelImage Base)>? moveBases;
     string notice = "";
 
@@ -75,7 +79,9 @@ sealed class PixelEditor : Window
     readonly TextBox fpsBox = new() { Text = "8", Width = 36 };
     readonly Slider toleranceSlider = new() { Minimum = 0, Maximum = 100, Value = 0, IsSnapToTickEnabled = true, TickFrequency = 1, Width = 118 };
     readonly TextBlock toleranceLabel = new() { Width = 40, VerticalAlignment = VerticalAlignment.Center, Text = "0%" };
-    readonly Slider brushSlider = new() { Minimum = 1, Maximum = 8, Value = 1, IsSnapToTickEnabled = true, TickFrequency = 1, Width = 200 };
+    readonly Slider brushSlider = new() { Minimum = 1, Maximum = PixelSoft.MaxSize, Value = 1, IsSnapToTickEnabled = true, TickFrequency = 1, Width = 200 };
+    readonly Slider softSlider = new() { Minimum = 0, Maximum = 100, Value = 50, IsSnapToTickEnabled = true, TickFrequency = 5, Width = 200, ToolTip = "Soft brush and Smooth: how much of the brush fades out. 0% is a round brush with a clean, smooth outline; 100% fades all the way from the middle." };
+    readonly TextBlock brushLabel = new() { Margin = new Thickness(0, 8, 0, 2) }, softLabel = new() { Margin = new Thickness(0, 6, 0, 2) };
     readonly Slider opacitySlider = new() { Minimum = 0, Maximum = 100, Value = 100, IsSnapToTickEnabled = true, TickFrequency = 1, Width = 150 };
     readonly TextBlock opacityLabel = new() { Width = 40, VerticalAlignment = VerticalAlignment.Center };
     readonly List<Button> layerButtons = [];
@@ -97,9 +103,9 @@ sealed class PixelEditor : Window
         var root = new DockPanel(); Content = root;
         root.Children.Add(Dock(BuildToolbar(), System.Windows.Controls.Dock.Top));
         root.Children.Add(Dock(status, System.Windows.Controls.Dock.Bottom));
-        root.Children.Add(Dock(BuildFrames(), System.Windows.Controls.Dock.Bottom));
-        root.Children.Add(Dock(BuildLeft(), System.Windows.Controls.Dock.Left));
-        root.Children.Add(Dock(BuildRight(), System.Windows.Controls.Dock.Right));
+        root.Children.Add(Dock(Parts["frames"] = BuildFrames(), System.Windows.Controls.Dock.Bottom));
+        root.Children.Add(Dock(Parts["tools"] = BuildLeft(), System.Windows.Controls.Dock.Left));
+        root.Children.Add(Dock(Parts["layers"] = BuildRight(), System.Windows.Controls.Dock.Right));
         foreach (var el in new UIElement[] { checker, onionPicture, picture, gridLines, mirrorLine, antsLight, antsDark, hover }) stage.Children.Add(el);
         foreach (var image in new[] { picture, onionPicture, preview }) RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
         checker.Fill = CheckerBrush();
@@ -119,6 +125,9 @@ sealed class PixelEditor : Window
     int W => doc.Width; int H => doc.Height;
     int FitZoom() => Math.Clamp(520 / Math.Max(doc.Width, doc.Height), 1, 48);
     static T Dock<T>(T element, System.Windows.Controls.Dock side) where T : UIElement { DockPanel.SetDock(element, side); return element; }
+    /// <summary>Parts of the editor an assistant can point at while teaching (tutorial target pixel:&lt;part&gt;).</summary>
+    internal readonly Dictionary<string, FrameworkElement> Parts = new(StringComparer.OrdinalIgnoreCase);
+    internal static readonly string[] PartNames = ["tools", "layers", "frames", "duplicate", "preview"];
     void UpdateTitle() => Title = "Pixel editor — " + (assetPath ?? name + " (not saved yet)") + (dirty ? " •" : "") + $"  ({W}×{H}, {doc.FrameCount} frame{(doc.FrameCount == 1 ? "" : "s")}, {doc.DrawingLayers().Count()} layer{(doc.DrawingLayers().Count() == 1 ? "" : "s")})";
     static TextBlock Title2(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, Foreground = Heading, Margin = new Thickness(0, 12, 0, 4) };
     static TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.6, FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
@@ -139,6 +148,7 @@ sealed class PixelEditor : Window
         Gap(); Add("Undo", "Ctrl+Z", Undo); Add("Redo", "Ctrl+Y", Redo);
         Gap(); Add("Select all", "Ctrl+A", SelectAll); Add("Deselect", "Ctrl+D or Esc", Deselect);
         Add("Flip ↔", "Flip the selection, or the whole layer, left to right", () => Flip(PixelArt.FlipHorizontal, m => m.FlipHorizontal())); Add("Flip ↕", "Flip the selection, or the whole layer, upside down", () => Flip(PixelArt.FlipVertical, m => m.FlipVertical())); Add("Clear", "Erase the selection, or the whole layer, in this frame (Delete)", ClearArea);
+        Add("Smooth edges", "Soften the jagged edges of the selection, or the whole layer, in this frame. Flat areas stay as they are; press it again for more.", SmoothEdges);
         Gap(); Add("Save to project", "Save into the project's images (Ctrl+S). Several frames are saved as one sprite sheet; your layers are kept for next time.", () => Save(false), true);
         Add("Save as new…", "Save as a new image in the project", () => Save(true)); Add("Export PNG…", "Save a PNG file on your computer", ExportPng);
         if (addToScreen != null) Add("Add to screen", "Save, then place it on the current screen (a Sprite control when it has several frames)", AddToScreen);
@@ -149,14 +159,16 @@ sealed class PixelEditor : Window
         var panel = new StackPanel { Margin = new Thickness(8), Width = 216 };
         panel.Children.Add(new TextBlock { Text = "TOOLS", FontWeight = FontWeights.SemiBold, Foreground = Heading, Margin = new Thickness(0, 0, 0, 4) });
         var tools = new UniformGrid { Columns = 2 };
-        foreach (var (t, label, key, icon) in new[] { (Tool.Pencil, "Pencil", "B", "tool_pencil"), (Tool.Eraser, "Eraser", "E", "tool_eraser"), (Tool.Fill, "Fill", "G", "tool_fill"), (Tool.Line, "Line", "L", "tool_line"), (Tool.Rectangle, "Rectangle", "R", "rectangle"), (Tool.Ellipse, "Ellipse", "O", "ellipse"), (Tool.Select, "Select", "S", "tool_select"), (Tool.Wand, "Magic wand", "W", "tool_wand"), (Tool.Move, "Move", "V", "tool_move"), (Tool.Picker, "Pick color", "I", "tool_picker") })
+        foreach (var (t, label, key, icon) in new[] { (Tool.Pencil, "Pencil", "B", "tool_pencil"), (Tool.Brush, "Soft brush", "A", "tool_brush"), (Tool.Eraser, "Eraser", "E", "tool_eraser"), (Tool.Smooth, "Smooth", "U", "tool_smooth"), (Tool.Fill, "Fill", "G", "tool_fill"), (Tool.Line, "Line", "L", "tool_line"), (Tool.Rectangle, "Rectangle", "R", "rectangle"), (Tool.Ellipse, "Ellipse", "O", "ellipse"), (Tool.Select, "Select", "S", "tool_select"), (Tool.Wand, "Magic wand", "W", "tool_wand"), (Tool.Move, "Move", "V", "tool_move"), (Tool.Picker, "Pick color", "I", "tool_picker") })
         {
             var b = new Button { Content = Icons.WithText(icon, label), ToolTip = $"{label} ({key})", Margin = new Thickness(0, 0, 4, 4), Padding = new Thickness(6, 4, 6, 4), HorizontalContentAlignment = HorizontalAlignment.Left };
             b.Click += (_, _) => Guard(() => SelectTool(t)); toolButtons[t] = b; tools.Children.Add(b);
         }
         panel.Children.Add(tools);
-        panel.Children.Add(new TextBlock { Text = "Brush size  ([ and ])", Margin = new Thickness(0, 8, 0, 2) });
-        brushSlider.ValueChanged += (_, _) => brush = (int)brushSlider.Value; panel.Children.Add(brushSlider);
+        void BrushText() { brushLabel.Text = $"Brush size: {brush}  ([ and ])"; softLabel.Text = $"Soft edge: {softness}%"; }
+        brushSlider.ValueChanged += (_, _) => { brush = (int)brushSlider.Value; BrushText(); }; panel.Children.Add(brushLabel); panel.Children.Add(brushSlider);
+        softSlider.ValueChanged += (_, _) => { softness = (int)softSlider.Value; BrushText(); }; panel.Children.Add(softLabel); panel.Children.Add(softSlider);
+        BrushText();
         foreach (var box in new[] { mirrorBox, filledBox, blendBox, touchingBox, diagonalBox }) { box.Margin = new Thickness(0, 4, 0, 0); panel.Children.Add(box); }
         mirrorBox.ToolTip = "Everything you draw is copied onto the other half, mirrored left to right";
         blendBox.ToolTip = "See-through colors mix with what's already there, instead of replacing it";
@@ -167,6 +179,7 @@ sealed class PixelEditor : Window
         toleranceRow.Children.Add(new TextBlock { Text = "Tolerance ", VerticalAlignment = VerticalAlignment.Center }); toleranceRow.Children.Add(toleranceSlider); toleranceRow.Children.Add(toleranceLabel);
         toleranceSlider.ValueChanged += (_, _) => { tolerancePercent = (int)toleranceSlider.Value; toleranceLabel.Text = $"{tolerancePercent}%"; };
         panel.Children.Add(toleranceRow);
+        panel.Children.Add(Hint("Soft brush lays the color over what's there and fades at its edge; with the transparent color it erases softly. Smooth softens jagged edges where you drag (Smooth edges, at the top, does the whole layer or selection)."));
         panel.Children.Add(Hint("Alt+click picks a color. Shift keeps rectangles and ellipses square. Select a box or use the magic wand (Shift adds to the selection, Ctrl takes away), then Move or the arrow keys move it; Ctrl+C / X / V copy, cut and paste."));
 
         panel.Children.Add(Title2("COLORS"));
@@ -234,7 +247,7 @@ sealed class PixelEditor : Window
         onionBox.ToolTip = "Shows the previous frame faintly underneath, for animating";
         gridBox.Click += (_, _) => { grid = gridBox.IsChecked == true; Layout(); }; onionBox.Click += (_, _) => { onion = onionBox.IsChecked == true; Render(); };
         panel.Children.Add(Title2("PREVIEW"));
-        panel.Children.Add(new Border { Background = CheckerBrush(6), Width = 96, Height = 96, HorizontalAlignment = HorizontalAlignment.Left, Child = preview });
+        panel.Children.Add(Parts["preview"] = new Border { Background = CheckerBrush(6), Width = 96, Height = 96, HorizontalAlignment = HorizontalAlignment.Left, Child = preview });
         var play = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         play.Children.Add(playBox); play.Children.Add(new TextBlock { Text = "  frames/s ", VerticalAlignment = VerticalAlignment.Center }); play.Children.Add(fpsBox);
         playBox.Click += (_, _) => UpdatePlayback(); fpsBox.LostKeyboardFocus += (_, _) => UpdatePlayback();
@@ -249,10 +262,10 @@ sealed class PixelEditor : Window
     {
         var panel = new DockPanel { Margin = new Thickness(6, 2, 6, 2) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        void Add(string text, string tip, Action action) { var b = new Button { Content = text, ToolTip = tip, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2) }; b.Click += (_, _) => Guard(action); buttons.Children.Add(b); }
+        Button Add(string text, string tip, Action action) { var b = new Button { Content = text, ToolTip = tip, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2) }; b.Click += (_, _) => Guard(action); buttons.Children.Add(b); return b; }
         buttons.Children.Add(new TextBlock { Text = "FRAMES ", FontWeight = FontWeights.SemiBold, Foreground = Heading, VerticalAlignment = VerticalAlignment.Center });
         Add("Add", "Add an empty frame after this one", AddFrame);
-        Add("Duplicate", "Copy the selected frames (every layer), right after them", () => DuplicateFrames(false));
+        Parts["duplicate"] = Add("Duplicate", "Copy the selected frames (every layer), right after them", () => DuplicateFrames(false));
         Add("Delete", "Delete the selected frames", DeleteFrames);
         Add("Move left", "Move the selected frames one place earlier", () => MoveFrames(-1));
         Add("Move right", "Move the selected frames one place later", () => MoveFrames(1));
@@ -341,7 +354,8 @@ sealed class PixelEditor : Window
         }
         if (!Ready()) return;
         Commit(); Checkpoint(); Own(layer, current);
-        strokeBase = Cell.Clone(); strokeMask = blend && tool != Tool.Eraser ? new PixelImage(W, H) : null;
+        bool soft = tool is Tool.Brush or Tool.Smooth;
+        strokeBase = Cell.Clone(); strokeMask = blend && tool != Tool.Eraser && !soft ? new PixelImage(W, H) : null; strokeCoverage = soft ? new byte[W * H] : null;
         strokeColor = tool == Tool.Eraser ? 0 : isRight ? right : left;
         start = last = at; painting = true;
         Apply(at);
@@ -377,7 +391,7 @@ sealed class PixelEditor : Window
         // A click that changed nothing (same color, outside the canvas) doesn't leave an empty undo step.
         if (strokeBase != null && strokeBase.Pixels.AsSpan().SequenceEqual(Cell.Pixels)) DropCheckpoint();
         else { dirty = true; RefreshThumbnail(current); RefreshLayers(); UpdateTitle(); }
-        strokeBase = strokeMask = null; Render();
+        strokeBase = strokeMask = null; strokeCoverage = null; Render();
     }
     int Mirrored(int x) => W - 1 - x;
     void Apply((int X, int Y) at)
@@ -388,6 +402,19 @@ sealed class PixelEditor : Window
             case Tool.Pencil or Tool.Eraser:
                 PixelArt.Line(paint, last.X, last.Y, at.X, at.Y, strokeColor, brush);
                 if (mirror) PixelArt.Line(paint, Mirrored(last.X), last.Y, Mirrored(at.X), at.Y, strokeColor, brush);
+                break;
+            case Tool.Brush or Tool.Smooth:
+                // Each move adds dabs to the stroke's coverage, then redraws the part they can have touched from the
+                // picture as it was before the stroke.
+                void Soft(int x0, int y0, int x1, int y1)
+                {
+                    PixelSoft.Line(strokeCoverage!, W, H, x0, y0, x1, y1, brush, Hardness);
+                    var (l, t, r, bottom) = PixelSoft.Reach(W, H, x0, y0, x1, y1, brush);
+                    if (tool == Tool.Brush) PixelSoft.Paint(strokeBase!, cell, strokeCoverage!, strokeColor, l, t, r, bottom);
+                    else PixelSoft.Smooth(strokeBase!, cell, strokeCoverage, l, t, r, bottom);
+                }
+                Soft(last.X, last.Y, at.X, at.Y);
+                if (mirror) Soft(Mirrored(last.X), last.Y, Mirrored(at.X), at.Y);
                 break;
             case Tool.Fill:
                 void FillAt(int x, int y)
@@ -426,7 +453,7 @@ sealed class PixelEditor : Window
     void ShowHover((int X, int Y) at)
     {
         hoverAt = at;
-        int size = tool is Tool.Pencil or Tool.Eraser ? brush : 1, offset = -(size - 1) / 2;
+        int size = tool is Tool.Pencil or Tool.Eraser or Tool.Brush or Tool.Smooth ? brush : 1, offset = -(size - 1) / 2;
         hover.Width = size * zoom + 1; hover.Height = size * zoom + 1; Canvas.SetLeft(hover, (at.X + offset) * zoom - 0.5); Canvas.SetTop(hover, (at.Y + offset) * zoom - 0.5);
         hover.Visibility = shown.Contains(at.X, at.Y) && tool is not (Tool.Move or Tool.Select) ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatus();
@@ -493,6 +520,15 @@ sealed class PixelEditor : Window
         if (floating != null) { floating = flip(floating); floatMask = flipShape(floatMask ?? PixelMask.Full(floating.Width, floating.Height)); selection = FloatSelection(); Render(); return; }
         var targets = layer.Self().Where(l => !l.IsGroup && !doc.LockedHere(l)).ToList(); if (targets.Count == 0) return;
         Checkpoint(); foreach (var l in targets) l.Cells[current] = flip(l.Cells[current]); dirty = true; RefreshFrame(current);
+    }
+    /// <summary>Smooth edges: the selection, or the whole layer, in this frame. One Undo step.</summary>
+    void SmoothEdges()
+    {
+        Commit(); if (!Ready()) return;
+        Checkpoint(); Own(layer, current);
+        var smoothed = PixelSoft.SmoothEdges(Cell, selection);
+        if (smoothed.Pixels.AsSpan().SequenceEqual(Cell.Pixels)) { DropCheckpoint(); notice = "There were no edges to smooth here."; UpdateStatus(); return; }
+        Array.Copy(smoothed.Pixels, Cell.Pixels, Cell.Pixels.Length); dirty = true; RefreshFrame(current);
     }
     void ClearArea()
     {
@@ -676,7 +712,6 @@ sealed class PixelEditor : Window
         int at = picked[^1] + 1;
         FrameOp(() => { for (int k = 0; k < sources.Count; k++) doc.InsertFrame(at + k, sources[k]); current = at; }, Enumerable.Range(at, sources.Count));
     }
-    void DeleteFrame() => DeleteFrames();
     void DeleteFrames()
     {
         var picked = PickedFrames();
@@ -694,7 +729,6 @@ sealed class PixelEditor : Window
             current += by;
         }, picked.Select(f => f + by));
     }
-    void MoveFrame(int by) => MoveFrames(by);
 
     // ---- View ----
     void Layout()
@@ -847,6 +881,8 @@ sealed class PixelEditor : Window
                 Guard(() => Nudge(e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0, e.Key == Key.Up ? -step : e.Key == Key.Down ? step : 0)); break;
             case Key.B or Key.P when !ctrl: SelectTool(Tool.Pencil); break;
             case Key.E when !ctrl: SelectTool(Tool.Eraser); break;
+            case Key.A when !ctrl: SelectTool(Tool.Brush); break;
+            case Key.U when !ctrl: SelectTool(Tool.Smooth); break;
             case Key.G when !ctrl: SelectTool(Tool.Fill); break;
             case Key.L when !ctrl: SelectTool(Tool.Line); break;
             case Key.R when !ctrl: SelectTool(Tool.Rectangle); break;
@@ -858,7 +894,7 @@ sealed class PixelEditor : Window
             case Key.X when !ctrl: SwapColors(); break;
             case Key.M when !ctrl: mirror = !mirror; mirrorBox.IsChecked = mirror; Layout(); break;
             case Key.OemOpenBrackets: brushSlider.Value = Math.Max(1, brush - 1); break;
-            case Key.OemCloseBrackets: brushSlider.Value = Math.Min(8, brush + 1); break;
+            case Key.OemCloseBrackets: brushSlider.Value = Math.Min(PixelSoft.MaxSize, brush + 1); break;
             case Key.OemPlus or Key.Add: ZoomAt(1, new Point(stage.Width / 2, stage.Height / 2), new Point(scroller.ViewportWidth / 2, scroller.ViewportHeight / 2)); break;
             case Key.OemMinus or Key.Subtract: ZoomAt(-1, new Point(stage.Width / 2, stage.Height / 2), new Point(scroller.ViewportWidth / 2, scroller.ViewportHeight / 2)); break;
             case Key.OemComma: if (current > 0) GoToFrame(current - 1); break;
@@ -977,12 +1013,18 @@ sealed class PixelEditor : Window
     internal void TestMirror(bool on) { mirror = on; mirrorBox.IsChecked = on; Layout(); }
     internal void TestFilled(bool on) { filledShapes = on; filledBox.IsChecked = on; }
     internal void TestBlend(bool on) { blend = on; blendBox.IsChecked = on; }
+    internal void TestBrush(int size, int softPercent) { brushSlider.Value = size; softSlider.Value = softPercent; }
+    internal void TestSmoothEdges() => SmoothEdges();
+    internal (double Maximum, string Size, string Soft) TestBrushPanel => (brushSlider.Maximum, brushLabel.Text, softLabel.Text);
+    internal bool TestHasTool(string label) => toolButtons.Values.Any(b => (b.ToolTip as string ?? "").StartsWith(label + " ("));
     internal void TestStroke(bool isRight, params (int X, int Y)[] points) { BeginAt(points[0], isRight); foreach (var p in points.Skip(1)) MoveTo(p); EndStroke(); }
     internal void TestUndo() => Undo();
     internal void TestRedo() => Redo();
     internal void TestAddFrame() => AddFrame();
     internal void TestDuplicateFrame() => DuplicateFrame();
     internal void TestDiscard() { dirty = false; Close(); }
+    /// <summary>Plays the frames in the Preview box (its Play tick box), as an assistant drawing live does when it's done.</summary>
+    internal void TestPlay(bool on) { playBox.IsChecked = on; UpdatePlayback(); }
     internal void TestAnimate(bool on, double fps) { animate = on; animateBox.IsChecked = on; fpsBox.Text = fps.ToString(System.Globalization.CultureInfo.InvariantCulture); }
     internal void TestPickFrames(params int[] frames) { current = frames[^1]; RefreshFrames(); PickFrames(frames); Render(); }
     internal void TestDuplicateFrames(bool mirrored) => DuplicateFrames(mirrored);
@@ -1008,19 +1050,18 @@ sealed class PixelEditor : Window
     }
     internal PixelMask? TestSelection => selection;
     internal void TestSave(string saveName) => SaveNamed(saveName, assetPath == null);
+    /// <summary>After an assistant saved what it drew here (live pixel_art): the editor now edits that image, saved.</summary>
+    internal void ShowSaved(string path, string savedName) { assetPath = path; name = savedName; dirty = false; notice = "Saved to the project as " + System.IO.Path.GetFileName(path) + "."; UpdateTitle(); UpdateStatus(); }
     internal void TestAddToScreen() => AddToScreen();
     internal void TestPickLayer(string layerName) { Commit(); layer = doc.All().First(l => l.Name == layerName); RefreshLayers(); }
     internal void TestNewLayer() => NewLayer();
     internal void TestNewGroup() => NewGroup();
-    internal void TestLayerUp() => LayerOp(() => doc.Move(layer, 1));
     internal void TestIntoGroup() => LayerOp(() => doc.IntoGroup(layer));
     internal void TestOutOfGroup() => LayerOp(() => doc.OutOfGroup(layer));
     internal void TestMergeDown() => MergeDown();
-    internal void TestDuplicateLayer() => DuplicateLayer();
     internal void TestDeleteLayer() => DeleteLayer();
     internal void TestOpacity(double percent) { opacitySlider.Value = percent; opacityEditing = false; RefreshAll(); }
     internal void TestToggleVisible(string layerName) { var l = doc.All().First(x => x.Name == layerName); l.Visible = !l.Visible; dirty = true; RefreshAll(); }
-    internal void TestSelectAll() => SelectAll();
     internal void TestDeselect() => Deselect();
     internal void TestCopy(bool cut) => Copy(cut);
     internal void TestPaste() => Paste();

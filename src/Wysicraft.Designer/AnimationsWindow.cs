@@ -26,14 +26,13 @@ public partial class MainWindow
             if (time <= keys[i].Time) { var a = keys[i - 1]; var b = keys[i]; double t = b.Time == a.Time ? 1 : (time - a.Time) / (b.Time - a.Time); return a.Value + (b.Value - a.Value) * Ease(b.Ease, t); }
         return keys[^1].Value;
     }
-    static double PropertyOf(Element e, string property) => property switch { "x" => e.Bounds.X, "y" => e.Bounds.Y, "width" => e.Bounds.Width, "height" => e.Bounds.Height, _ => e.Opacity };
-    static void SetProperty(Element e, string property, double v) { switch (property) { case "x": e.Bounds.X = v; break; case "y": e.Bounds.Y = v; break; case "width": e.Bounds.Width = Math.Max(1, v); break; case "height": e.Bounds.Height = Math.Max(1, v); break; default: e.Opacity = Math.Clamp(v, 0, 1); break; } }
+    static void SetProperty(Element e, string property, double v) { switch (property) { case "x": e.Bounds.X = v; break; case "y": e.Bounds.Y = v; break; case "width": e.Bounds.Width = Math.Max(1, v); break; case "height": e.Bounds.Height = Math.Max(1, v); break; case "rotation": e.Rotation = v; break; case "scale": e.Scale = Math.Clamp(v, 0.01, 100); break; default: e.Opacity = Math.Clamp(v, 0, 1); break; } }
 
     void ShowAnimationsWindow()
     {
         var screen = ui; var animations = Json.Clone(screen.Animations);
-        var saved = screen.Elements.ToDictionary(e => e.Id, e => (e.Bounds.X, e.Bounds.Y, e.Bounds.Width, e.Bounds.Height, e.Opacity));
-        void Restore() { foreach (var e in screen.Elements) if (saved.TryGetValue(e.Id, out var s)) { e.Bounds.X = s.X; e.Bounds.Y = s.Y; e.Bounds.Width = s.Width; e.Bounds.Height = s.Height; e.Opacity = s.Opacity; } Draw(); }
+        var saved = screen.Elements.ToDictionary(e => e.Id, e => (e.Bounds.X, e.Bounds.Y, e.Bounds.Width, e.Bounds.Height, e.Opacity, e.Rotation, e.Scale));
+        void Restore() { foreach (var e in screen.Elements) if (saved.TryGetValue(e.Id, out var s)) { e.Bounds.X = s.X; e.Bounds.Y = s.Y; e.Bounds.Width = s.Width; e.Bounds.Height = s.Height; e.Opacity = s.Opacity; e.Rotation = s.Rotation; e.Scale = s.Scale; } Draw(); }
         var window = new Window { Owner = this, Title = "Animations · " + screen.Id + " · web & desktop", Width = 900, Height = 600, WindowStartupLocation = WindowStartupLocation.Manual, Left = Left + Math.Max(0, ActualWidth - 920), Top = Top + 80 };
         var root = new DockPanel { Margin = new Thickness(10) }; window.Content = root;
         var left = new DockPanel { Width = 200, Margin = new Thickness(0, 0, 10, 0) }; DockPanel.SetDock(left, Dock.Left); root.Children.Add(left);
@@ -46,7 +45,7 @@ public partial class MainWindow
         var scrub = new Slider { Minimum = 0, Maximum = 1000, ToolTip = "Drag to preview on the canvas" }; timeline.Children.Add(scrub);
         var editor = new StackPanel(); root.Children.Add(new ScrollViewer { Content = editor, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         ScreenAnimation? current = null;
-        string[] properties = ["x", "y", "width", "height", "opacity"], eases = ["linear", "ease_in", "ease_out", "ease_in_out", "step"];
+        string[] properties = ["x", "y", "width", "height", "opacity", "rotation", "scale"], eases = ["linear", "ease_in", "ease_out", "ease_in_out", "step"];
         void Preview(double time)
         {
             if (current == null) return; Restore();
@@ -84,7 +83,7 @@ public partial class MainWindow
                 var target = new ComboBox { ItemsSource = screen.Elements.Select(e => e.Id).ToList(), SelectedItem = track.Target, Width = 140, Margin = new Thickness(0, 0, 6, 0) }; target.SelectionChanged += (_, _) => { track.Target = target.SelectedItem as string ?? ""; Preview(scrub.Value); };
                 var property = new ComboBox { ItemsSource = properties, SelectedItem = track.Property, Width = 90, Margin = new Thickness(0, 0, 6, 0) }; property.SelectionChanged += (_, _) => { track.Property = property.SelectedItem as string ?? "x"; Preview(scrub.Value); };
                 var capture = new Button { Content = "Add keyframe from canvas", Margin = new Thickness(0, 0, 6, 0), ToolTip = "Adds a keyframe at the timeline position with the control's value on the canvas right now" };
-                capture.Click += (_, _) => { if (!saved.ContainsKey(track.Target)) return; var s = saved[track.Target]; double v = track.Property switch { "x" => s.X, "y" => s.Y, "width" => s.Width, "height" => s.Height, _ => s.Opacity }; track.Keys.RemoveAll(k => k.Time == (int)scrub.Value); track.Keys.Add(new Keyframe { Time = (int)scrub.Value, Value = v }); track.Keys.Sort((p, q) => p.Time.CompareTo(q.Time)); Edit(); };
+                capture.Click += (_, _) => { if (!saved.ContainsKey(track.Target)) return; var s = saved[track.Target]; double v = track.Property switch { "x" => s.X, "y" => s.Y, "width" => s.Width, "height" => s.Height, "rotation" => s.Rotation, "scale" => s.Scale, _ => s.Opacity }; track.Keys.RemoveAll(k => k.Time == (int)scrub.Value); track.Keys.Add(new Keyframe { Time = (int)scrub.Value, Value = v }); track.Keys.Sort((p, q) => p.Time.CompareTo(q.Time)); Edit(); };
                 var removeTrack = new Button { Content = "Remove track" }; removeTrack.Click += (_, _) => { a.Tracks.Remove(track); Restore(); Edit(); };
                 row.Children.Add(target); row.Children.Add(property); row.Children.Add(capture); row.Children.Add(removeTrack);
                 foreach (var key in track.Keys.ToList())

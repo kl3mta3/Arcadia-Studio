@@ -37,11 +37,13 @@ public partial class MainWindow
     void ImportSounds() { var d = new OpenFileDialog { Filter = SoundFilter, Multiselect = true }; if (d.ShowDialog() == true) ImportSoundFiles(d.FileNames); }
 
     /// <summary>A sound chooser: the project's sounds, "Import…", or any sound ID typed in (Minecraft sounds too).</summary>
-    void SoundPicker(Panel panel, string label, string current, Action<string> apply, string? tip = null)
+    /// <param name="buttonsBelow">On a narrow card: Import… goes on a line of its own, so the list has the whole width.</param>
+    void SoundPicker(Panel panel, string label, string current, Action<string> apply, string? tip = null, bool buttonsBelow = false)
     {
         var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2), ToolTip = tip ?? "A project sound, or a Minecraft sound ID such as minecraft:ui.button.click (Minecraft sounds only play in Minecraft)." };
         row.Children.Add(new TextBlock { Text = label, Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center });
-        var import = new Button { Content = "Import…", Margin = new Thickness(4, 0, 0, 0) }; DockPanel.SetDock(import, Dock.Right); row.Children.Add(import);
+        var import = new Button { Content = "Import…", Margin = new Thickness(4, 0, 0, 0) };
+        if (!buttonsBelow) { DockPanel.SetDock(import, Dock.Right); row.Children.Add(import); }
         var sounds = SoundAssets.All(project).ToList();
         var box = new ComboBox { IsEditable = true, ItemsSource = sounds.Select(p => SoundAssets.Resource(p) + "  (" + Path.GetExtension(p).TrimStart('.') + ")").ToList(), Text = current };
         void Commit(string value)
@@ -55,5 +57,10 @@ public partial class MainWindow
         box.LostKeyboardFocus += (_, _) => Commit(box.Text);
         import.Click += (_, _) => Guard(() => { var d = new OpenFileDialog { Filter = SoundFilter }; if (d.ShowDialog() != true) return; var added = ImportSoundFiles([d.FileName]); if (added.Count > 0) { apply(added[0]); current = added[0]; RefreshInspector(); } });
         row.Children.Add(box); panel.Children.Add(row);
+        if (buttonsBelow)
+        {
+            var below = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, 3) };
+            import.Padding = new Thickness(8, 0, 8, 0); below.Children.Add(import); panel.Children.Add(below);
+        }
     }
 }

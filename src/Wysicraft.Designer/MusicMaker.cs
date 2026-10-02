@@ -89,7 +89,6 @@ sealed class MusicMaker : Window
     }
     static T Dock<T>(T e, System.Windows.Controls.Dock d) where T : UIElement { DockPanel.SetDock(e, d); return e; }
     internal Track Layer => song.Tracks[Math.Clamp(layerIndex, 0, song.Tracks.Count - 1)];
-    internal double StepX(double step) => step * colW;
 
     // ---------------- Toolbar ----------------
     UIElement BuildToolbar()
@@ -542,7 +541,6 @@ sealed class MusicMaker : Window
     }
 
     // ---------------- Playback and recording ----------------
-    double StepSeconds => song.StepSeconds;
     /// <summary>Where the song is now (in steps, fractional) while playing; the start marker otherwise.</summary>
     double SongStep()
     {

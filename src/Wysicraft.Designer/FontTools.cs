@@ -91,5 +91,4 @@ public partial class MainWindow
     }
 
     /// <summary>Forgets the cached families, so a re-imported font is picked up rather than the old one.</summary>
-    static void ForgetFonts() => fontFamilies.Clear();
 }

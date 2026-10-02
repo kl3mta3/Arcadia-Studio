@@ -117,6 +117,9 @@ public partial class MainWindow
             muteBox.IsChecked = designer.Prefs().PreviewMuted;
             muteBox.Click += (_, _) => { bool muted = muteBox.IsChecked == true; if (view.CoreWebView2 != null) view.CoreWebView2.IsMuted = muted; designer.Prefs().PreviewMuted = muted; designer.SavePrefs(); };
             tools.Children.Add(muteBox);
+            // Record the game (only its own area, as players see it) to a video, with its sound and any narration.
+            recordButton.Click += async (_, _) => await designer.ToggleRecordingAsync(this);
+            tools.Children.Add(recordButton);
             tools.Children.Add(new TextBlock { Text = "Click controls and use the keyboard to test • Server operations are simulated", Margin = new Thickness(12, 6, 4, 6), VerticalAlignment = VerticalAlignment.Center });
             var sizes = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(sizes, Dock.Top); layout.Children.Add(sizes);
             sizes.Children.Add(new TextBlock { Text = "Layout size (GUI pixels)", Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center });
@@ -150,7 +153,8 @@ public partial class MainWindow
             view.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D);
             layout.Children.Add(view);
             Window.Closing += (_, args) => { if (!closed) { args.Cancel = true; closing ??= CloseAsync(); } };
-            Window.Closed += (_, _) => { closed = true; view.Dispose(); try { Directory.Delete(folder, true); } catch { } };
+            Window.Closed += (_, _) => { closed = true; Open.Remove(this); lock (SoundProcesses) SoundProcesses.Remove(browserProcess); view.Dispose(); try { Directory.Delete(folder, true); } catch { } };
+            Open.Add(this);
             Window.Loaded += async (_, _) =>
             {
                 KeepOnScreen();
@@ -226,6 +230,9 @@ public partial class MainWindow
                 var web = view.CoreWebView2;
                 web.Settings.AreDefaultContextMenusEnabled = false; web.Settings.IsStatusBarEnabled = false; web.Settings.IsZoomControlEnabled = false; web.Settings.AreBrowserAcceleratorKeysEnabled = false;
                 web.IsMuted = muteBox.IsChecked == true;
+                // The browser process this Preview's sound comes from, for recordings (WebView2 can share one between
+                // programs, so it isn't always this program's own child).
+                browserProcess = (int)web.BrowserProcessId; lock (SoundProcesses) SoundProcesses.Add(browserProcess);
                 web.SetVirtualHostNameToFolderMapping(Host, folder, CoreWebView2HostResourceAccessKind.DenyCors);
                 web.NavigationStarting += (_, e) => { if (!e.Uri.StartsWith($"https://{Host}/")) e.Cancel = true; };
                 web.NewWindowRequested += (_, e) => e.Handled = true;
@@ -329,6 +336,35 @@ public partial class MainWindow
             await WaitReady();
         }
         // Runs JavaScript as a client script on the current screen (same API and limits as scripts), then waits for it.
+        /// <summary>MCP: holds the named inputs (comma-separated, from the project's Inputs) for ms milliseconds, as a
+        /// player holding keys or on-screen buttons would, then lets go. Lets an assistant walk a character around.</summary>
+        internal async Task HoldInputsAsync(string names, int ms)
+        {
+            await WaitReady();
+            var inputs = names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToList();
+            if (inputs.Count == 0) throw new InvalidOperationException("Name the input(s) to hold in element, for example right or right,up.");
+            foreach (var name in inputs) if (!project.Manifest.Inputs.Any(i => i.Name == name)) throw new InvalidOperationException("No input named " + name + ". The project's inputs: " + string.Join(", ", project.Manifest.Inputs.Select(i => i.Name)));
+            ms = Math.Clamp(ms, 16, 10000);
+            await Script("(() => { const a = Wysicraft._app; for (const n of " + JsonSerializer.Serialize(inputs) + ") a.virtualPress(n, true); })()");
+            try { await Task.Delay(ms); }
+            finally { await Script("(() => { const a = Wysicraft._app; for (const n of " + JsonSerializer.Serialize(inputs) + ") a.virtualPress(n, false); })()"); }
+        }
+        /// <summary>MCP: a press at x,y in screen coordinates (the same as control bounds; a camera's view is allowed for),
+        /// held for ms (default 120), like a tap or click on the game: buttons get clicked, and a press on the floor moves
+        /// the pointer a game reads with ctx.input.pointer(). value is "x,y" or "x,y,ms".</summary>
+        internal async Task TapAsync(string value)
+        {
+            await WaitReady();
+            var parts = value.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 || !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double x) || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double y))
+                throw new InvalidOperationException("value is x,y (or x,y,ms) in screen coordinates, the same as control bounds.");
+            int ms = parts.Length > 2 && int.TryParse(parts[2], out int held) ? Math.Clamp(held, 16, 5000) : 120;
+            string at = "(() => { const a = Wysicraft._app, r = a.canvas.getBoundingClientRect(), v = a._cam && a.view(a._cam), x = " + x.ToString(CultureInfo.InvariantCulture) + ", y = " + y.ToString(CultureInfo.InvariantCulture) + ";" +
+                " const cx = r.left + ((v ? v.ox + x * v.k : x) + (v ? 0 : a.originX)) * a.scale, cy = r.top + ((v ? v.oy + y * v.k : y) + (v ? 0 : a.originY)) * a.scale;";
+            await Script(at + " for (const kind of ['mousemove', 'mousedown']) a.canvas.dispatchEvent(new MouseEvent(kind, { button: 0, bubbles: true, cancelable: true, clientX: cx, clientY: cy })); })()");
+            await Task.Delay(ms);
+            await Script(at + " window.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, clientX: cx, clientY: cy })); })()");
+        }
         internal async Task RunScriptAsync(string source)
         {
             await WaitReady();
@@ -360,6 +396,34 @@ public partial class MainWindow
             return Convert.FromBase64String(url[(comma + 1)..]);
         }
         internal bool IsOpen => !closed && Window.IsVisible;
+        /// <summary>Every Preview window that's open, newest last.</summary>
+        internal static readonly List<PreviewSession> Open = [];
+        internal readonly Button recordButton = new() { Content = "● Record", Margin = new Thickness(12, 0, 0, 0), Padding = new Thickness(8, 0, 8, 0), ToolTip = "Record the game to a video (only the game, as players see it), with its sound. Videos go to Videos\\Arcadia Studio." };
+        internal void ShowRecording(string? text) { recordButton.Content = text ?? "● Record"; recordButton.Foreground = text == null ? Brushes.White : Brushes.IndianRed; }
+        internal void Say(string category, string text) => Print(category, text);
+        int browserProcess;
+        /// <summary>The WebView2 browser processes the open Previews play their sound from (one entry per Preview).</summary>
+        internal static readonly List<int> SoundProcesses = [];
+        /// <summary>Sound on or off for this Preview only (the remembered Mute choice is left as it is).</summary>
+        internal void SetMuted(bool muted) { muteBox.IsChecked = muted; if (view.CoreWebView2 != null) view.CoreWebView2.IsMuted = muted; }
+        /// <summary>What to record for the game: this window, cropped to the game's own area (in the window's pixels).</summary>
+        internal async Task<MediaRecorder.Source> GameSourceAsync(bool wholeWindow = false)
+        {
+            await WaitReady();
+            var handle = new WindowInteropHelper(Window).Handle;
+            var (clientWidth, clientHeight) = CaptureTargets.ClientSize(handle);
+            if (wholeWindow) return new MediaRecorder.Source(handle, IntPtr.Zero, 0, 0, 0, 0, "the Preview window");
+            string result = await Script("(() => { const a = Wysicraft._app, r = a.canvas.getBoundingClientRect(); return [r.left + a.originX * a.scale, r.top + a.originY * a.scale, a.ui.size.width * a.scale, a.ui.size.height * a.scale, window.devicePixelRatio]; })()");
+            var g = JsonSerializer.Deserialize<double[]>(result) ?? throw new InvalidOperationException("Preview didn't say where the game is.");
+            var dpi = VisualTreeHelper.GetDpi(Window);
+            var at = view.TranslatePoint(new Point(0, 0), Window);
+            int left = (int)Math.Round(at.X * dpi.DpiScaleX + g[0] * g[4]), top = (int)Math.Round(at.Y * dpi.DpiScaleY + g[1] * g[4]);
+            int width = (int)Math.Round(g[2] * g[4]), height = (int)Math.Round(g[3] * g[4]);
+            // Never past the window's edges (a game bigger than the window is recorded as far as it shows).
+            left = Math.Clamp(left, 0, clientWidth - 2); top = Math.Clamp(top, 0, clientHeight - 2);
+            width = Math.Clamp(width, 2, clientWidth - left); height = Math.Clamp(height, 2, clientHeight - top);
+            return new MediaRecorder.Source(handle, IntPtr.Zero, left, top, clientWidth - left - width, clientHeight - top - height, "the game in Preview");
+        }
         internal async Task CaptureCanvas(string path)
         {
             await WaitReady(); await Task.Delay(100);
@@ -373,6 +437,8 @@ public partial class MainWindow
             if (!closed && ready.Task.IsCompletedSuccessfully) { try { await Script("Wysicraft._app.process({ ui: Wysicraft._app.ui, element: null, event: 'close', value: '' })"); await Task.Delay(50); } catch { } }
             closed = true; Window.Close();
         }
+        /// <summary>Self-checks read the running game through this.</summary>
+        internal Task<string> EvalForTest(string code) => Script(code);
         internal async Task VerifyClickAsync()
         {
             await WaitReady();

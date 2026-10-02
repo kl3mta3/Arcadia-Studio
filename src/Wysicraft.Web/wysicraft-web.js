@@ -126,7 +126,8 @@
       this.canvas.width = width; this.canvas.height = height;
       if (this.frame) { this.gl.deleteFramebuffer(this.frame); this.gl.deleteTexture(this.frameTexture); this.frame = null; this.frameTexture = null; }
     }
-    // An image becomes a texture once and is kept. Nearest neighbour, like the rest of the renderer.
+    // An image becomes a texture once and is kept. Nearest neighbour, like the rest of the renderer, unless the
+    // project asks for smooth pictures (illustrated art, which is scaled without hard pixel edges).
     // Whether this picture can go through the batch: uploads it on first sight, so the answer is known before drawing.
     usable(img) { if (!img) return true; if (this.refused.has(img)) return false; this.textureFor(img); return !this.refused.has(img); }
     textureFor(img) {
@@ -140,7 +141,8 @@
       // CORS) is remembered, so the control using it is drawn on canvas2D instead of as a white quad.
       try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
       catch (ex) { gl.deleteTexture(tex); this.refused.add(img); return this.white; }
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const filter = this.smooth ? gl.LINEAR : gl.NEAREST;
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.textures.set(img, tex);
       return tex;
@@ -162,7 +164,10 @@
       const iw = img ? (img.naturalWidth || img.width || 1) : 1, ih = img ? (img.naturalHeight || img.height || 1) : 1;
       const d = this.data, at = this.total * GL_FLOATS;
       d[at] = x; d[at + 1] = y; d[at + 2] = w; d[at + 3] = h;
-      d[at + 4] = sx / iw; d[at + 5] = sy / ih; d[at + 6] = (sx + sw) / iw; d[at + 7] = (sy + sh) / ih;
+      // Smooth sampling reads neighbouring texels, so a frame cut from a sheet is taken half a texel inside its
+      // edges: otherwise the frame next door bleeds into its border.
+      const inset = this.smooth && img ? 0.5 : 0;
+      d[at + 4] = (sx + inset) / iw; d[at + 5] = (sy + inset) / ih; d[at + 6] = (sx + sw - inset) / iw; d[at + 7] = (sy + sh - inset) / ih;
       d[at + 8] = r; d[at + 9] = g; d[at + 10] = b; d[at + 11] = a;
       d[at + 12] = rot || 0;
       run.count++; this.total++;
@@ -482,6 +487,8 @@
       this.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.className = 'wysicraft-canvas';
       // WebGL2 if this browser has it; every path below falls back to canvas2D when it doesn't.
       this.glLayer = new GLLayer(); this.dot = this.glLayer.ok ? dotTexture() : null;
+      // Smooth pictures (Project settings): pictures are scaled smoothly instead of with hard pixel edges.
+      this.smooth = !!project.smoothImages; this.glLayer.smooth = this.smooth;
       this.batched = false; this.glFlushes = 0; this.glT = [1, 1, 0, 0];
       // Canvas2D managed 2000 at about 0.9 ms a frame; the batch draws them in one call, so it carries far more.
       this.maxParticles = this.glLayer.ok ? MAX_PARTICLES_GL : MAX_PARTICLES;
@@ -623,9 +630,43 @@
     enabled(e) { return e.enabled && safeEvaluate(e.enabledIf, this.state) && this.parents(e).every(p => p.enabled && safeEvaluate(p.enabledIf, this.state)); }
     x(e) { return this.originX + e.bounds.x; }
     y(e) { return this.originY + e.bounds.y - this.parents(e).filter(p => p.type === 'scroll_panel').reduce((s, p) => s + (this.scroll.get(p.id) || 0), 0); }
+    // Rotation (degrees, clockwise) and scale turn a control about its own centre. A panel carries everything attached
+    // inside it, so a card made of a panel, a picture and labels turns as one. Bodies and colliders are not turned.
+    turn(e) {
+      const g = this.g, cx = this.x(e) + e.bounds.width / 2, cy = this.y(e) + e.bounds.height / 2, s = scaleOf(e);
+      g.translate(cx, cy); if (e.rotation) g.rotate(e.rotation * Math.PI / 180); if (s !== 1) g.scale(s, s); g.translate(-cx, -cy);
+    }
+    // A point as a turned control sees it, in its own unturned rectangle: for hover and clicks.
+    unturn(e, px, py) {
+      const cx = this.x(e) + e.bounds.width / 2, cy = this.y(e) + e.bounds.height / 2, s = scaleOf(e) || 1;
+      const a = -(e.rotation || 0) * Math.PI / 180, c = Math.cos(a), n = Math.sin(a), dx = px - cx, dy = py - cy;
+      return [cx + (dx * c - dy * n) / s, cy + (dx * n + dy * c) / s];
+    }
+    localPoint(e, mx, my) {
+      const parents = this.parents(e); let at = [mx, my];
+      for (let i = parents.length - 1; i >= 0; i--) if (turned(parents[i])) at = this.unturn(parents[i], at[0], at[1]);
+      return turned(e) && !UNTURNED.has(e.type) ? this.unturn(e, at[0], at[1]) : at;
+    }
+    // A batched picture, turned and scaled about its centre (the batch rotates a quad itself).
+    glTurned(e, img, sx, sy, sw, sh, x, y, w, h) {
+      const s = scaleOf(e);
+      if (s !== 1) { x += w * (1 - s) / 2; y += h * (1 - s) / 2; w *= s; h *= s; }
+      this.glQuad(img, sx, sy, sw, sh, x, y, w, h, null, e.opacity, (e.rotation || 0) * Math.PI / 180, false);
+    }
     inside(e, mx, my) {
       const cam = this._cam; if (cam && (mx < this.x(cam) || mx >= this.x(cam) + cam.bounds.width || my < this.y(cam) || my >= this.y(cam) + cam.bounds.height)) return false;
       if (this.ui.clipToScreen && (mx < this.originX || mx >= this.originX + this.ui.size.width || my < this.originY || my >= this.originY + this.ui.size.height)) return false;
+      const chain = this.parents(e);
+      if ((turned(e) && !UNTURNED.has(e.type)) || chain.some(turned)) {
+        // The point is taken back through each turned panel, outermost first, and then through the control itself.
+        let px = mx, py = my;
+        for (let i = chain.length - 1; i >= 0; i--) {
+          const p = chain[i]; if (turned(p)) { const at = this.unturn(p, px, py); px = at[0]; py = at[1]; }
+          if (px < this.x(p) || px >= this.x(p) + p.bounds.width || py < this.y(p) || py >= this.y(p) + p.bounds.height) return false;
+        }
+        if (turned(e) && !UNTURNED.has(e.type)) { const at = this.unturn(e, px, py); px = at[0]; py = at[1]; }
+        return px >= this.x(e) && px < this.x(e) + e.bounds.width && py >= this.y(e) && py < this.y(e) + e.bounds.height;
+      }
       if (mx < this.x(e) || mx >= this.x(e) + e.bounds.width || my < this.y(e) || my >= this.y(e) + e.bounds.height) return false;
       return this.parents(e).every(p => mx >= this.x(p) && mx < this.x(p) + p.bounds.width && my >= this.y(p) && my < this.y(p) + p.bounds.height);
     }
@@ -661,6 +702,8 @@
     // window, a zoomed camera) neighbours then meet exactly, with no hairline seam between tiles or backdrop halves.
     pixelImage(img, sx, sy, sw, sh, x, y, w, h) {
       const g = this.g, t = g.getTransform();
+      // A turned control has no device-pixel rectangle to snap to: it is drawn where the transform puts it.
+      if (t.b || t.c) { g.drawImage(img, sx, sy, sw, sh, x, y, w, h); return; }
       const x0 = Math.round(t.a * x + t.e), y0 = Math.round(t.d * y + t.f), x1 = Math.round(t.a * (x + w) + t.e), y1 = Math.round(t.d * (y + h) + t.f);
       if (x1 <= x0 || y1 <= y0) return;
       g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(img, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0); g.restore();
@@ -692,8 +735,46 @@
       if (this.project.fonts && this.project.fonts[font]) return fontFamilyName(font) + ', ' + fallback;
       return fallback;
     }
+    // Wrap: several lines, broken at spaces to fit the width and at line breaks (a real one, or \n typed as those two
+    // characters). The block sits in the middle of the control's height when it fits and starts at the top when it
+    // doesn't; lines that would fall below the control are left out. Each line is drawn as one line of text is.
+    textBlock(e, x, y, w, h, value) {
+      const text = String(value ?? ''); if (!text) return;
+      const g = this.g, scale = e.fontScale, lineHeight = 12 * scale;
+      g.font = this.font(e, scale);
+      const lines = this.wrapLines(e, text, g.font, Math.max(1, w - 4 * scale));
+      const shown = Math.min(lines.length, Math.max(1, Math.floor(h / lineHeight)));
+      const top = lines.length * lineHeight <= h ? y + (h - lines.length * lineHeight) / 2 : y;
+      const one = Object.create(e); one.wrap = false;
+      for (let i = 0; i < shown; i++) if (lines[i]) this.text(one, x, top + i * lineHeight, w, lineHeight, lines[i]);
+    }
+    // The lines are worked out when the text, the font or the width changes, not every frame.
+    wrapLines(e, text, font, max) {
+      const cache = this._wrap || (this._wrap = new Map()), name = e.id || text, key = font + '|' + max + '|' + text, had = cache.get(name);
+      if (had && had.key === key) return had.lines;
+      const g = this.g, lines = [];
+      for (const paragraph of text.replace(/\\n/g, '\n').split('\n')) {
+        let line = '';
+        for (const word of paragraph.split(' ')) {
+          const next = line ? line + ' ' + word : word;
+          if (g.measureText(next).width <= max) { line = next; continue; }
+          if (line) lines.push(line);
+          // A word wider than the control is broken where it has to be.
+          let rest = word;
+          while (rest.length > 1 && g.measureText(rest).width > max) {
+            let n = rest.length - 1; while (n > 1 && g.measureText(rest.slice(0, n)).width > max) n--;
+            lines.push(rest.slice(0, n)); rest = rest.slice(n);
+          }
+          line = rest;
+        }
+        lines.push(line);
+      }
+      if (cache.size > 4000) cache.clear();
+      cache.set(name, { key, lines }); return lines;
+    }
     // One line of text, clipped to the width (DynamicScreen.text).
     text(e, x, y, w, h, value) {
+      if (e.wrap) { this.textBlock(e, x, y, w, h, value); return; }
       const g = this.g, scale = e.fontScale; let text = String(value ?? '');
       g.font = this.font(e, scale); g.textBaseline = 'middle';
       const max = Math.max(1, w - 4 * scale); if (g.measureText(text).width > max) { while (text && g.measureText(text).width > max) text = text.slice(0, -1); }
@@ -745,7 +826,7 @@
             this.glMark();
             let sx = 0, sy = 0, sw = tex.img.naturalWidth, sh = tex.img.naturalHeight;
             if (tex.anim) { const i = tex.anim.frameAt(performance.now()); sx = (i % tex.anim.columns) * tex.anim.fw; sy = Math.floor(i / tex.anim.columns) * tex.anim.fh; sw = tex.anim.fw; sh = tex.anim.fh; }
-            this.glQuad(tex.img, sx, sy, sw, sh, x, y, w, h, null, e.opacity, 0, false);
+            this.glTurned(e, tex.img, sx, sy, sw, sh, x, y, w, h);
             break;
           }
           if (e.type === 'texture_region') {
@@ -846,7 +927,11 @@
       const usable = resource => { const tex = this.texture(resource); return !!tex && this.glLayer.usable(tex.img); };
       if (e.type === 'tilemap') return !e.texture || !this.texture(e.texture) || usable(e.texture);
       if (e.type === 'particles') { const fx = this.effectOf(e); return !(fx && fx.shape === 'texture' && fx.texture && this.texture(fx.texture)) || usable(fx.texture); }
-      if ((e.type === 'sprite' || e.type === 'image') && e.texture && usable(e.texture)) return true;
+      // With smooth pictures, pictures and sprites are drawn on canvas2D: it shrinks a large drawing properly (each
+      // screen pixel an average of what it covers) and blends see-through edges without a dark fringe. The batch
+      // samples four texels and no more, which leaves a picture shown much smaller than it was drawn almost as jagged
+      // as with hard edges (measured: 24 of 188 edge pixels blended, against 188 of 188 on canvas2D).
+      if ((e.type === 'sprite' || e.type === 'image') && e.texture && !this.smooth && usable(e.texture)) return true;
       return false;
     }
     // Reads the 2D context's current transform, which carries the display scale and the camera. Called once per
@@ -883,7 +968,7 @@
       // A change of pixel density (a zoom, or moving to another screen) that came without a resize event.
       if ((window.devicePixelRatio || 1) !== this.dpr) this.layout();
       g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      g.setTransform(this.scale * this.dpr, 0, 0, this.scale * this.dpr, 0, 0); g.imageSmoothingEnabled = false;
+      g.setTransform(this.scale * this.dpr, 0, 0, this.scale * this.dpr, 0, 0); g.imageSmoothingEnabled = this.smooth; if (this.smooth) g.imageSmoothingQuality = 'high';
       const W = this.canvas.width / (this.scale * this.dpr), H = this.canvas.height / (this.scale * this.dpr);
       if (this.ui.dimBackground) { g.fillStyle = 'rgba(16,20,27,0.69)'; g.fillRect(0, 0, W, H); }
       if (this.ui.showFrame) {
@@ -902,16 +987,21 @@
         // between two batched ones still appears between them.
         this.batched = this.glElement(e, en);
         if (!this.batched) this.flushGL();
-        const parents = this.parents(e); for (const p of parents) this.clip(this.x(p), this.y(p), p.bounds.width, p.bounds.height);
+        // Panels clip what is attached inside them, outermost first, and a turned panel turns its contents (and its
+        // clip) with it. A batched picture turns itself (glTurned), so only the 2D path sets a transform.
+        const parents = this.parents(e);
+        for (let i = parents.length - 1; i >= 0; i--) { const p = parents[i]; g.save(); if (turned(p)) this.turn(p); g.beginPath(); g.rect(this.x(p), this.y(p), p.bounds.width, p.bounds.height); g.clip(); }
+        const own = !this.batched && turned(e) && !UNTURNED.has(e.type); if (own) { g.save(); this.turn(e); }
         try {
           const x = this.x(e), y = this.y(e), w = e.bounds.width, h = e.bounds.height;
           this.skin(e, x, y, w, h); this.draw(e, x, y, w, h, hover && en); this.border(e, x, y, w, h);
           if (!en && !UNSEEN.has(e.type)) this.fill(x, y, w, h, e.cornerRadius, 'rgba(0,0,0,0.467)');
         } catch (ex) { this.batched = false; g.fillStyle = '#FF7070'; g.font = '8px sans-serif'; g.fillText('Invalid ' + e.type, this.x(e), this.y(e) + 8); }
-        finally { for (const p of parents) this.unclip(); }
+        finally { if (own) g.restore(); for (const p of parents) this.unclip(); }
       }
       this.batched = false;
       this.flushGL();
+      if (!this.closed && this.particles.size) this.drawBursts();
       if (view) { this.unclip(); g.restore(); }
       if (clipped) this.unclip();
       if (over !== this.hovered) { if (this.hovered) this.fire(this.hovered, 'mouse_leave', ''); this.hovered = over; if (over) this.fire(over, 'mouse_enter', ''); }
@@ -1012,6 +1102,8 @@
       if (this.closed) { if (!this.host.onClose) { this.messages = []; this.open(this.ui.id); } return; }
       this.focused = null;
       for (const e of this.ui.elements.slice().reverse()) if (!UNSEEN.has(e.type) && this.visible(e) && this.enabled(e) && this.inside(e, mx, my)) {
+        // Inside a turned control, the press is where it falls in the control's own rectangle (a row of a list, a slider's track).
+        const local = this.localPoint(e, mx, my); mx = local[0]; my = local[1];
         if (e.input) this.virtualPress(e.input, true); // held until the mouse button is let go
         switch (e.type) {
           case 'shape': this.fire(e, 'click', ''); break;
@@ -1254,7 +1346,12 @@
           if (!inst.seek) this.velocity.set(target, { x: 0, y: 0 });
           return;
         }
+        case 'set_opacity': if (element && Number.isFinite(nums[0])) element.opacity = Math.min(1, Math.max(0, nums[0])); return;
+        case 'set_rotation': if (element && Number.isFinite(nums[0])) element.rotation = nums[0]; return;
+        case 'set_scale': if (element && Number.isFinite(nums[0])) element.scale = Math.min(100, Math.max(0.01, nums[0])); return;
+        case 'set_order': if (element) this.reorder(element, value); return;
         case 'emit_particles': this.emitParticles(target); return;
+        case 'burst_particles': this.burstParticles(target, value); return;
         case 'stop_particles': this.stopParticles(target, value === 'clear'); return;
         case 'play_animation': this.playAnimation(target); return;
         case 'stop_animation': this.playing.delete(target); return;
@@ -1273,6 +1370,24 @@
           return;
       }
       this.log('warn', 'Unsupported script action ' + type);
+    }
+    // Draw order from a script: to the front, to the back, or just above or below another control. A panel takes
+    // everything attached inside it along, in the order they were in.
+    reorder(e, where) {
+      const list = this.ui.elements, moving = [], rest = [];
+      for (const c of list) (c === e || this.parents(c).includes(e) ? moving : rest).push(c);
+      let at = rest.length;
+      if (where === 'back') at = 0;
+      else if (where.indexOf('above:') === 0 || where.indexOf('below:') === 0) {
+        const other = elementOf(this.ui, where.slice(6)), first = other ? rest.indexOf(other) : -1;
+        if (first < 0) { this.log('warn', 'Draw order: there is no other control ' + where.slice(6) + ' to put ' + e.id + ' next to'); return; }
+        // "Above" is above the other control and whatever is attached inside it.
+        let last = first; for (let i = first + 1; i < rest.length; i++) if (this.parents(rest[i]).includes(other)) last = i;
+        at = where.indexOf('above:') === 0 ? last + 1 : first;
+      }
+      const ordered = rest.slice(0, at).concat(moving, rest.slice(at));
+      for (let i = 0; i < ordered.length; i++) list[i] = ordered[i];
+      this.orderVersion = (this.orderVersion || 0) + 1;
     }
     playSound(sound, volume) { this.hook('onSound', sound); this.playAudio(sound, volume); }
     // What host.js can use to drive the UI from outside (for example after a fetch), and what Preview uses.
@@ -1448,7 +1563,7 @@
       const frame = this.spriteFrame(e), sx = (frame % columns) * fw, sy = Math.floor(frame / columns) * fh;
       // glElement counted this sprite as batched, so it must go into the batch: drawn on the 2D canvas instead, it
       // would land under whatever the batch still holds (a backdrop drawn before it) when that is composited.
-      if (this.batched) { this.glMark(); this.glQuad(tex.img, sx, sy, fw, fh, x, y, w, h, null, e.opacity, 0, false); return; }
+      if (this.batched) { this.glMark(); this.glTurned(e, tex.img, sx, sy, fw, fh, x, y, w, h); return; }
       const g = this.g; g.save(); g.globalAlpha = e.opacity; this.pixelImage(tex.img, sx, sy, fw, fh, x, y, w, h); g.restore();
     },
     spriteClockFor(e) {
@@ -1672,6 +1787,7 @@
         for (const track of p.anim.tracks) {
           const e = elementOf(this.ui, track.target), v = e && trackValue(track, t); if (v === null || v === undefined || !e) continue;
           if (track.property === 'opacity') e.opacity = Math.min(1, Math.max(0, v));
+          else if (track.property === 'rotation') e.rotation = v; else if (track.property === 'scale') e.scale = Math.min(100, Math.max(0.01, v));
           else if (track.property === 'width') e.bounds.width = Math.max(1, v); else if (track.property === 'height') e.bounds.height = Math.max(1, v);
           else { const dx = track.property === 'x' ? v - e.bounds.x : 0, dy = track.property === 'y' ? v - e.bounds.y : 0; this.moveElement(e, dx, dy); }
         }
@@ -1719,6 +1835,21 @@
       if (fx.emission === 'burst') { const at = this.emitPoint(e); for (let i = 0; i < fx.count; i++) this.spawnParticle(id, fx, at.x, at.y); }
       else this.streams.set(id, { until: fx.duration > 0 ? performance.now() + fx.duration * 1000 : Infinity, carry: 0 });
     },
+    // A one-off burst of any effect, with no Particles control: at a control's middle, or at "x,y". Its particles
+    // are kept under "@" + the effect and drawn over the screen's controls (inside the camera's view, like them).
+    burstParticles(effect, at) {
+      const fx = (this.project.particles || []).find(f => f.id === effect);
+      if (!fx) { this.log('warn', 'Unknown particle effect: ' + effect); return; }
+      let x, y; const e = elementOf(this.ui, at);
+      if (e) { const p = this.emitPoint(e); x = p.x; y = p.y; }
+      else { const parts = String(at).split(','); x = Number(parts[0]); y = Number(parts[1]); if (!Number.isFinite(x) || !Number.isFinite(y)) { this.log('warn', 'ui.burst: no control or x,y called ' + at); return; } }
+      for (let i = 0; i < Math.max(1, fx.count); i++) this.spawnParticle('@' + effect, fx, x, y);
+    },
+    // The effect a list of particles belongs to: a Particles control's, or a burst's own.
+    particleEffectOf(owner) { return owner.charAt(0) === '@' ? ((this.project.particles || []).find(f => f.id === owner.slice(1)) || null) : this.effectOf(elementOf(this.ui, owner)); },
+    drawBursts() {
+      for (const owner of this.particles.keys()) if (owner.charAt(0) === '@') { const fx = this.particleEffectOf(owner); if (fx) this.drawParticleList(owner, fx); }
+    },
     stopParticles(id, clear) { this.streams.delete(id); if (clear) { const l = this.particles.get(id); if (l) { this.particleCount -= l.length; this.particles.delete(id); } } },
     emitPoint(e) { return { x: this.x(e) + e.bounds.width / 2, y: this.y(e) + e.bounds.height / 2 }; },
     stepParticles(now) {
@@ -1733,7 +1864,7 @@
         for (let i = 0; i < n; i++) this.spawnParticle(id, fx, at.x, at.y);
       }
       for (const [id, list] of this.particles) {
-        const fx = this.effectOf(elementOf(this.ui, id));
+        const fx = this.particleEffectOf(id);
         if (!fx) { this.particleCount -= list.length; this.particles.delete(id); continue; }
         let n = 0;
         for (let i = 0; i < list.length; i++) {
@@ -1748,9 +1879,9 @@
         if (!n && !this.streams.has(id)) this.particles.delete(id);
       }
     },
-    drawParticles(e) {
-      const list = this.particles.get(e.id); if (!list || !list.length) return;
-      const fx = this.effectOf(e); if (!fx) return;
+    drawParticles(e) { const fx = this.effectOf(e); if (fx) this.drawParticleList(e.id, fx); },
+    drawParticleList(owner, fx) {
+      const list = this.particles.get(owner); if (!list || !list.length) return;
       const g = this.g, ramp = rampOf(fx);
       const blend = g.globalCompositeOperation;
       if (fx.blend === 'add') g.globalCompositeOperation = 'lighter';
@@ -2034,6 +2165,8 @@
         if (gone) tagsChanged = true;
       }
       sent.count = elements.length;
+      // findByTag answers in draw order, so a change of order (bringToFront…) sends the tag lists again.
+      if (sent.order !== (this.orderVersion || 0)) { sent.order = this.orderVersion || 0; if (!reset) tagsChanged = true; }
       if (reset || sent.instancesVersion !== this.instancesVersion) {
         instances = {}; for (const [id, inst] of this.instances) (instances[inst.template] = instances[inst.template] || []).push(id);
         sent.instancesVersion = this.instancesVersion;
@@ -2049,10 +2182,11 @@
         const kind = (e.body || (e.type === 'collider' ? 'static' : '')) + (e.trigger ? '/trigger' : '') + (e.collider === 'circle' ? '/circle' : '');
         if (!reset && sent.tags.get(id) !== tagKey) tagsChanged = true;
         sent.tags.set(id, tagKey);
-        const b = sent.bodies.get(id), r = e.bounds;
+        const b = sent.bodies.get(id), r = e.bounds, rotation = e.rotation || 0, scale = scaleOf(e), opacity = e.opacity === undefined ? 1 : e.opacity;
         if (reset || !b || b.x !== r.x || b.y !== r.y || b.width !== r.width || b.height !== r.height || b.vx !== vx || b.vy !== vy || b.visible !== e.visible
+            || b.rotation !== rotation || b.scale !== scale || b.opacity !== opacity
             || b.frame !== frame || b.clip !== clipName || b.clipStep !== step || b.clipDone !== done || b.state !== state || b.tagKey !== tagKey || b.kind !== kind) {
-          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice(), kind };
+          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, rotation, scale, opacity, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice(), kind };
           (bodies = bodies || {})[id] = body; sent.bodies.set(id, Object.assign({ tagKey }, body));
         }
         if (e.type === 'tilemap') {
@@ -2353,6 +2487,10 @@
 
   // Controls with no picture: never hovered or clicked.
   const UNSEEN = new Set(['collider', 'camera', 'sound', 'particles']);
+  // Rotation and scale: whether a control is turned at all, and the kinds that never are (they aren't one rectangle).
+  const scaleOf = e => (e.scale === undefined || e.scale === null ? 1 : e.scale);
+  const turned = e => (e.rotation || 0) !== 0 || scaleOf(e) !== 1;
+  const UNTURNED = new Set(['tilemap', 'particles', 'camera', 'sound', 'collider']);
   // Controls a tap works (see click); anything else under a finger is scenery.
   const TAPPABLE = new Set(['button', 'textbox', 'checkbox', 'slider', 'dropdown', 'item_list']);
   // Screen pixels of thumb travel for a full push on the touch stick.
@@ -2644,7 +2782,7 @@
       },
       tileSize: id => { const t = grid(id); return t ? { columns: t.m.columns, rows: t.m.rows, tileWidth: t.m.tileWidth, tileHeight: t.m.tileHeight } : null; },
       hasTag: (id, tag) => { const b = r.bodies && r.bodies[id]; return !!(b && b.tags && b.tags.indexOf(String(tag)) >= 0); },
-      getElement: id => { const b = (r.bodies && r.bodies[id]) || {}; return Object.freeze({ id, text: r.texts[id] === undefined ? '' : r.texts[id], x: b.x, y: b.y, width: b.width, height: b.height, vx: b.vx, vy: b.vy, visible: b.visible, frame: b.frame || 0, clip: b.clip || '', clipStep: b.clipStep || 0, clipDone: !!b.clipDone, state: b.state || '', tags: (b.tags || []).slice(), setText: v => emit('set_text', id, v), setItem: v => setItem(id, v) }); },
+      getElement: id => { const b = (r.bodies && r.bodies[id]) || {}; return Object.freeze({ id, text: r.texts[id] === undefined ? '' : r.texts[id], x: b.x, y: b.y, width: b.width, height: b.height, vx: b.vx, vy: b.vy, visible: b.visible, rotation: b.rotation || 0, scale: b.scale === undefined ? 1 : b.scale, opacity: b.opacity === undefined ? 1 : b.opacity, frame: b.frame || 0, clip: b.clip || '', clipStep: b.clipStep || 0, clipDone: !!b.clipDone, state: b.state || '', tags: (b.tags || []).slice(), setText: v => emit('set_text', id, v), setItem: v => setItem(id, v) }); },
       // Opening a screen: server scripts everywhere, and client scripts in web & desktop projects (in Minecraft a
       // client can't be trusted to navigate, so those use an open_ui action).
       close: () => emit('close_ui', '', ''),
@@ -2652,6 +2790,8 @@
       play: (id, clip) => emit('set_value', id, clip),
       animate: (name) => emit('play_animation', name, ''), stopAnimation: (name) => emit('stop_animation', name, ''),
       emit: (id) => emit('emit_particles', id, ''), stopEmit: (id, clear) => emit('stop_particles', id, clear ? 'clear' : ''),
+      // A one-off burst of a particle effect where a control is (or at x, y), with no Particles control needed.
+      burst: (effect, at, y) => emit('burst_particles', String(effect), y === undefined ? String(at) : Number(at) + ',' + Number(y)),
       setVelocity: (id, vx, vy) => emit('set_velocity', id, Number(vx) + ',' + Number(vy)),
       setPosition: (id, x, y) => emit('set_position', id, Number(x) + ',' + Number(y)),
       // A value for a "uniform float u_name" in the screen's shader.
@@ -2659,6 +2799,14 @@
       // Forces a state graph into a state, for the cases the conditions can't express.
       setState: (graph, state) => emit('set_state', graph, state),
       setSize: (id, w, h) => emit('set_size', id, Number(w) + ',' + Number(h)),
+      // Web and desktop: fade a control (0-1), turn it (degrees, clockwise) and resize it (1 = its own size) about its
+      // centre. A panel turns and scales everything attached inside it. Bodies and colliders stay as they were.
+      setOpacity: (id, opacity) => emit('set_opacity', id, String(Math.min(1, Math.max(0, Number(opacity) || 0)))),
+      setRotation: (id, degrees) => emit('set_rotation', id, String(Number(degrees) || 0)),
+      setScale: (id, scale) => emit('set_scale', id, String(Number(scale) || 0)),
+      // Draw order (web and desktop): later is on top. A panel takes what is attached inside it along.
+      bringToFront: id => emit('set_order', id, 'front'), sendToBack: id => emit('set_order', id, 'back'),
+      moveAbove: (id, other) => emit('set_order', id, 'above:' + String(other)), moveBelow: (id, other) => emit('set_order', id, 'below:' + String(other)),
       // A Sound control's volume, 0-1, applied at once if it is playing (web and desktop).
       setVolume: (id, volume) => emit('set_volume', id, String(Math.min(1, Math.max(0, Number(volume) || 0)))),
       // Spawned objects (web and desktop): a copy of the template control at x, y (its top-left, like setPosition),

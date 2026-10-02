@@ -22,6 +22,7 @@ Project files contain your **server script source**. Only share them with people
 | **Author**, **Version** | Metadata. Version is `major.minor.patch`. |
 | **RuntimeVersion** | Oldest Arcadia Studio runtime your project needs. Exports set this for you. |
 | **GridSize**, **Snap** | Canvas grid spacing and whether moves snap to it. |
+| **Smooth pictures** | Web & desktop: pictures are scaled smoothly, for illustrated art, instead of with hard pixel edges. Leave it off for pixel art. |
 | **Dependencies** | Mod IDs that must be installed (for example `kubejs`). Minecraft refuses to load the project without them. |
 
 ## Recovering unsaved work

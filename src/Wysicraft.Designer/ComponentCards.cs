@@ -175,6 +175,8 @@ public partial class MainWindow
         if (tunables.Count == 0) body.Children.Add(new TextBlock { Text = "Nothing to tune: the script has no var lines above its first function.", TextWrapping = TextWrapping.Wrap, Opacity = 0.65, FontSize = 11, Margin = new Thickness(4, 0, 4, 2) });
         foreach (var t in tunables)
         {
+            // A Pickup's sound and particles get pickers of their own, below.
+            if (id == "pickup" && t.Name is "SOUND" or "PARTICLES") continue;
             var row = new DockPanel { Margin = new Thickness(0, 1, 0, 1), ToolTip = t.Comment.Length > 0 ? t.Comment.TrimStart('/', ' ') : "var " + t.Name + " at the top of " + path };
             row.Children.Add(new TextBlock { Text = t.Name, Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4), FontFamily = new FontFamily("Consolas") });
             var box = new TextBox { Text = Behaviours.TunableText(t), Tag = "tunable:" + t.Name };
@@ -182,12 +184,36 @@ public partial class MainWindow
             box.KeyDown += (_, k) => { if (k.Key == Key.Enter) { Guard(() => CommitTunable(path, t.Name, box.Text)); k.Handled = true; } };
             row.Children.Add(box); body.Children.Add(row);
         }
+        if (id == "pickup") PickupChoices(body, e, path, tunables);
         var foot = new DockPanel { Margin = new Thickness(4, 2, 4, 0) };
         var openScript = new Button { Content = "Open script", Padding = new Thickness(8, 2, 8, 2), ToolTip = path };
         openScript.Click += (_, _) => Guard(() => { RefreshScripts(path); ShowDock("scripts"); });
         DockPanel.SetDock(openScript, Dock.Right); foot.Children.Add(openScript);
         foot.Children.Add(new TextBlock { Text = $"Runs {wiring.Function}() from the {(wiring.OnScreen ? "screen's" : "control's")} {wiring.Event} event.", Opacity = 0.65, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
         body.Children.Add(foot);
+    }
+
+    /// <summary>The Pickup card's optional sound and particle burst: a project sound (or Import…) and a project effect
+    /// or a built-in template (or Import…). Both are plain lines at the top of its script (SOUND, PARTICLES), so a
+    /// script can still set them, and an untouched Pickup from before they existed is brought up to date when one is
+    /// chosen.</summary>
+    void PickupChoices(Panel body, Element e, string path, List<Behaviours.Tunable> tunables)
+    {
+        string Current(string name) => tunables.FirstOrDefault(t => t.Name == name) is { } t ? Behaviours.TunableText(t) : "";
+        SoundPicker(body, "Sound", Current("SOUND"), v => Guard(() => SetPickupChoice(e, path, "SOUND", v)),
+            "Played when it's picked up. Optional: choose a project sound, Import… one, or leave it empty for none.", buttonsBelow: true);
+        ParticlePicker(body, "Particles", Current("PARTICLES"), v => Guard(() => SetPickupChoice(e, path, "PARTICLES", v)),
+            "A burst of particles where it was, when it's picked up. Optional: choose an effect in the project or a template, Import… one, or (none).");
+    }
+    void SetPickupChoice(Element e, string path, string name, string value)
+    {
+        if (!project.Scripts.TryGetValue(path, out var source)) return;
+        var current = Behaviours.UpgradePickup(source, e)
+            ?? throw new InvalidOperationException($"{path} was changed by hand, so the card can't add this for you. In the script, add  var {name} = '{value}';  at the top, and in taken():  " + (name == "SOUND" ? "if (SOUND) ctx.client.playSound(SOUND);" : $"if (PARTICLES) ctx.ui.burst(PARTICLES, '{e.Id}');"));
+        project.Scripts[path] = Behaviours.WithTunable(current, name, value);
+        RefreshScripts();
+        Log(value.Length > 0 ? $"{e.Id}: {(name == "SOUND" ? "plays " + value : "bursts " + value)} when it's picked up." : $"{e.Id}: no {(name == "SOUND" ? "sound" : "particles")} when it's picked up.");
+        Dispatcher.BeginInvoke(RefreshInspector);
     }
 
     /// <summary>Writes one tunable back into its script, in place, and refreshes the Scripts panel if it is open there.</summary>
@@ -294,6 +320,31 @@ public partial class MainWindow
         sprite.Behaviours.Add("jetpack"); RefreshInspector();
         if (!Cards().Any(c => (string)c.Tag == "card:jetpack") || !Wysicraft.Core.Validation.Errors(project).Any(m => m.Message.Contains("Unknown component"))) throw new Exception("Unknown component not surfaced");
         sprite.Behaviours.Remove("jetpack");
+        // ---- Pickup: an optional sound and particle burst, chosen on its card (pickers, not text boxes) ----
+        var gem = new Element { Id = "gem", Type = "panel", Bounds = new Bounds { X = 60, Y = 10, Width = 16, Height = 16 } };
+        ui.Elements.Add(gem); Behaviours.Apply(project, ui, gem, "pickup"); selected.Clear(); selected.Add(gem.Id); RefreshInspector();
+        string gemPath = Behaviours.ScriptPath(gem, "pickup");
+        var pickupCard = Cards().FirstOrDefault(c => (string)c.Tag == "card:pickup") ?? throw new Exception("No Pickup card");
+        if (Descend(pickupCard).OfType<TextBox>().Any(t => t.Tag as string is "tunable:SOUND" or "tunable:PARTICLES")) throw new Exception("The Pickup's sound and particles show as text boxes, not pickers");
+        if (Descend(pickupCard).OfType<Button>().Count(b => b.Content as string == "Import…") != 2) throw new Exception("The Pickup card should have Import… for its sound and its particles");
+        var particlesBox = Descend(pickupCard).OfType<ComboBox>().FirstOrDefault(c => c.ItemsSource is List<string> l && l.Contains("(none)")) ?? throw new Exception("No particle picker on the Pickup card");
+        if (!((List<string>)particlesBox.ItemsSource).Contains("sparkle  (template)")) throw new Exception("The particle picker doesn't offer the templates: " + string.Join(",", (List<string>)particlesBox.ItemsSource));
+        particlesBox.SelectedItem = "sparkle  (template)";
+        if (!project.Manifest.Particles.Any(p => p.Id == "sparkle") || !project.Scripts[gemPath].Contains("var PARTICLES = 'sparkle';")) throw new Exception("Choosing a template didn't add it and set the Pickup's particles: " + project.Scripts[gemPath]);
+        SetPickupChoice(gem, gemPath, "SOUND", project.Manifest.Id + ":gem_get");
+        if (!project.Scripts[gemPath].Contains("var SOUND = '" + project.Manifest.Id + ":gem_get';")) throw new Exception("The Pickup's sound wasn't set");
+        // A Pickup from before sounds and particles is brought up to date when one is chosen, its WORTH kept.
+        project.Scripts[gemPath] = string.Join('\n', Behaviours.ScriptSource(gem, "pickup").Split('\n').Where(l => !l.Contains("SOUND") && !l.Contains("PARTICLES"))).Replace("var WORTH = 1;", "var WORTH = 3;");
+        SetPickupChoice(gem, gemPath, "PARTICLES", "sparkle");
+        if (!project.Scripts[gemPath].Contains("var WORTH = 3;") || !project.Scripts[gemPath].Contains("ctx.ui.burst(PARTICLES, 'gem')")) throw new Exception("An older Pickup wasn't brought up to date: " + project.Scripts[gemPath]);
+        // One edited by hand is left alone, and says how to do it in code.
+        project.Scripts[gemPath] = project.Scripts[gemPath].Replace("var SOUND", "var NOISE").Replace("if (SOUND) ctx.client.playSound(SOUND);", "");
+        project.Scripts[gemPath] = project.Scripts[gemPath].Replace("var PARTICLES", "var PUFF");
+        try { SetPickupChoice(gem, gemPath, "SOUND", "x:y"); throw new Exception("An edited Pickup was rewritten"); } catch (InvalidOperationException ex) when (ex.Message.Contains("playSound")) { }
+        project.Scripts[gemPath] = Behaviours.ScriptSource(gem, "pickup");
+        Behaviours.Remove(project, ui, gem, "pickup");
+        if (project.Scripts.ContainsKey(gemPath)) throw new Exception("An untouched Pickup script was kept on remove");
+        ui.Elements.Remove(gem); project.Manifest.Particles.RemoveAll(p => p.Id == "sparkle");
         ui.Elements.Remove(actor); selected.Clear(); RefreshInspector();
     }
     static IEnumerable<UIElement> Descend(UIElement root)

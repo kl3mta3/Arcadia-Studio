@@ -16,7 +16,7 @@ These are Minecraft's limits. Projects made for web and desktop can go further; 
 | Tilemaps | 512 columns, 512 rows and 65,536 cells each (web & desktop) |
 | State graphs | 64 per screen, 64 states each, 16 ways out of a state (web & desktop) |
 | Fonts | `.ttf`, `.otf`, `.woff2`, `.woff`, 8 MiB each (web & desktop) |
-| Script size | 256 KiB each (web & desktop: 1 MiB; only attached scripts are exported) |
+| Script size | 256 KiB each (web & desktop: 4 MiB; only attached scripts are exported) |
 | Screen changes per script run | 128 (web & desktop: 100,000). Every `ctx.ui` call and `ctx.state.set` counts; going over applies none of that run's changes. See [[Scripting limits|Scripting#limits]] |
 | Time per script run | 2 seconds |
 | Saved games (`ctx.save`) | None in Minecraft (web & desktop: text only, 512 KB per game) |

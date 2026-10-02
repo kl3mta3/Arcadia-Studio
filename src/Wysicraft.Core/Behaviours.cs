@@ -169,7 +169,7 @@ public static class Behaviours
                 }
             if (project.Scripts.TryGetValue(path, out var source))
             {
-                if (source == ScriptSource(e, id) || (id == "pickup" && source == OldPickup(e.Id))) { project.Scripts.Remove(path); did.Add("deleted " + path); }
+                if (Untouched(source, e, id)) { project.Scripts.Remove(path); did.Add("deleted " + path); }
                 else did.Add("kept " + path + " because it was edited — delete it in Scripts if it is not wanted");
             }
         }
@@ -303,6 +303,23 @@ public static class Behaviours
     static string Pickup(string id) => $$"""
         // "{{id}}" is taken when something enters it. Its trigger_enter event runs this.
         var WORTH = 1;
+        var SOUND = '';      // a sound played when it's taken, e.g. 'myproject:coin' ('' for none)
+        var PARTICLES = '';  // a particle effect burst where it was, e.g. 'sparkle' ('' for none)
+
+        function taken(ctx) {
+            // ctx.value is the ID of whatever walked into it, so a pickup can ignore anything but the player.
+            ctx.ui.setVisible('{{id}}', false);
+            ctx.state.set('score', Number(ctx.state.get('score') || 0) + WORTH);
+            if (SOUND) ctx.client.playSound(SOUND);
+            if (PARTICLES) ctx.ui.burst(PARTICLES, '{{id}}');
+        }
+        """;
+
+    // The Pickup script before it had a sound and particles. Kept to recognise it untouched, so the Pickup card can
+    // bring it up to date when a sound or an effect is chosen.
+    static string PlainPickup(string id) => $$"""
+        // "{{id}}" is taken when something enters it. Its trigger_enter event runs this.
+        var WORTH = 1;
 
         function taken(ctx) {
             // ctx.value is the ID of whatever walked into it, so a pickup can ignore anything but the player.
@@ -310,6 +327,28 @@ public static class Behaviours
             ctx.state.set('score', Number(ctx.state.get('score') || 0) + WORTH);
         }
         """;
+
+    /// <summary>A script with every tunable's value left out, so two scripts that differ only in what was tuned on the
+    /// card count as the same.</summary>
+    static string Untuned(string source)
+    {
+        var lines = source.Replace("\r\n", "\n").Split('\n');
+        foreach (var t in Tunables(string.Join('\n', lines))) lines[t.Line] = "var " + t.Name + ";";
+        return string.Join('\n', lines);
+    }
+    /// <summary>Whether a component's script is still exactly what it wrote (any earlier version of it counts too).</summary>
+    public static bool Untouched(string source, Element e, string id) =>
+        source == ScriptSource(e, id) || (id == "pickup" && (source == PlainPickup(e.Id) || source == OldPickup(e.Id)));
+
+    /// <summary>An untouched Pickup script from before sounds and particles, brought up to date with its WORTH kept.
+    /// Null when the script has been edited by hand (then it's left as it is).</summary>
+    public static string? UpgradePickup(string source, Element e)
+    {
+        if (Tunables(source).Any(t => t.Name == "SOUND") && Tunables(source).Any(t => t.Name == "PARTICLES")) return source;
+        if (Untuned(source) != Untuned(PlainPickup(e.Id)) && Untuned(source) != Untuned(OldPickup(e.Id))) return null;
+        string worth = Tunables(source).FirstOrDefault(t => t.Name == "WORTH")?.Value ?? "1";
+        return WithTunable(Pickup(e.Id), "WORTH", worth);
+    }
 
     // The Pickup script as it was first written, with a debug message players saw. Kept to recognise it untouched.
     static string OldPickup(string id) => $$"""

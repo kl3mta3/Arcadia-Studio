@@ -58,7 +58,6 @@ public static class Fonts
     }
 
     /// <summary>The CSS font-family for a built-in, or null.</summary>
-    public static string? CssFor(string font) => Builtin.FirstOrDefault(f => f.Id == font).Css;
 
     /// <summary>A stable CSS family name for a project font, used by both the export's @font-face and the runtime.</summary>
     public static string FamilyName(string font)

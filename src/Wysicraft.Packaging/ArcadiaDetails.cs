@@ -18,7 +18,13 @@ public sealed class ArcadiaGameDetails
     public List<string>? Videos { get; set; }
     public ArcadiaMedia? Cover { get; set; }
     public List<ArcadiaMedia>? Screenshots { get; set; }
-    public JsonObject? Scores { get; set; }
+    /// <summary>The leaderboard on Arcadia: its setup (an object), false (no leaderboard, on purpose: turned off on the
+    /// website or by the last upload), or nothing (none was chosen).</summary>
+    public JsonNode? Scores { get; set; }
+    /// <summary>The leaderboard's setup, when the game has one on Arcadia.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public JsonObject? Board => Scores as JsonObject;
+    /// <summary>Arcadia says the game has no leaderboard on purpose ("scores": false).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool NoLeaderboard => Scores is JsonValue v && v.TryGetValue<bool>(out bool on) && !on;
 }
 /// <summary>A picture on Arcadia: where to download it, and its git blob hash (so an unchanged one isn't downloaded).</summary>
 public sealed class ArcadiaMedia { public string Url { get; set; } = ""; public string Sha { get; set; } = ""; }
@@ -46,6 +52,17 @@ public static class ArcadiaDetailsMerge
         "videos" => "Videos", "cover" => "Cover", "screenshots" => "Screenshots", "scores" => "Leaderboard", _ => field
     };
     public static string Names(IEnumerable<string> fields) => string.Join(", ", fields.Select(Name));
+
+    /// <summary>What a leaderboard clash means, as the question to ask, when the check lists "scores" among what changed:
+    /// the arcade has a board the app would remove, or the board was turned off on the website and the app would turn it
+    /// back on. Null when it's only a different setup (or no clash).</summary>
+    public static string? LeaderboardQuestion(ArcadiaDetails clash, bool appKeepsLeaderboard)
+    {
+        if (!clash.Changed.Contains("scores") || clash.Arcade == null) return null;
+        if (clash.Arcade.Board != null && !appKeepsLeaderboard) return "The arcade has a leaderboard set up on the website. Remove it?";
+        if (clash.Arcade.NoLeaderboard && appKeepsLeaderboard) return "The leaderboard was turned off on the website. Turn it back on?";
+        return null;
+    }
 
     /// <summary>git's blob hash of a file (sha1 of "blob {length}\0" and the bytes), as the arcade lists pictures.</summary>
     public static string GitSha(byte[] bytes)
@@ -86,7 +103,10 @@ public static class ArcadiaDetailsMerge
             foreach (var media in arcade.Screenshots.Take(8)) { var (bytes, type) = await Picture(media); shots.Add(new PublishImage { Type = type, Bytes = bytes }); }
             s.Screenshots = shots;
         }
-        if (arcade.Scores != null) { s.Leaderboard = true; s.Scores = ScoresFrom(arcade.Scores, current.Scores); }
+        // A board on Arcadia turns the leaderboard on with its setup; "no leaderboard, on purpose" turns it off (the
+        // project's own setup is kept for when it's turned on again); nothing chosen changes nothing.
+        if (arcade.Board != null) { s.Leaderboard = true; s.Scores = ScoresFrom(arcade.Board, current.Scores); }
+        else if (arcade.NoLeaderboard) s.Leaderboard = false;
         return s;
     }
 

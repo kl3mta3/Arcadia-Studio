@@ -41,6 +41,25 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
         }
         try
         {
+            // Old exports are cleared: a check's package after a day, an export after two weeks; anything newer stays.
+            string exports=Path.Combine(Path.GetTempPath(),"mcp-exports-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(exports);
+            try
+            {
+                void Make(string name,bool folder,double daysOld)
+                {
+                    string full=Path.Combine(exports,name);
+                    if(folder) { Directory.CreateDirectory(full); File.WriteAllBytes(Path.Combine(full,"game.zip"),new byte[1000]); Directory.SetLastWriteTimeUtc(full,DateTime.UtcNow.AddDays(-daysOld)); }
+                    else { File.WriteAllBytes(full,new byte[1000]); File.SetLastWriteTimeUtc(full,DateTime.UtcNow.AddDays(-daysOld)); }
+                }
+                string oldCheck=Guid.NewGuid().ToString("N"),newCheck=Guid.NewGuid().ToString("N");
+                Make(oldCheck,true,2); Make(newCheck,true,0.5); Make("game-old.html",false,15); Make("game-new.html",false,13); Make("game-electron-0a1b2c3d",true,20); Make("game-electron-4e5f6a7b",true,3);
+                var pruned=PruneMcpExports(exports,DateTime.UtcNow);
+                var left=Directory.EnumerateFileSystemEntries(exports).Select(Path.GetFileName).OrderBy(n=>n,StringComparer.Ordinal).ToList();
+                if(pruned.Removed!=3 || pruned.Bytes!=3000 || !left.SequenceEqual(new[] { newCheck,"game-electron-4e5f6a7b","game-new.html" }.OrderBy(n=>n,StringComparer.Ordinal)))
+                    throw new Exception("Old MCP exports were not cleared as expected: removed "+pruned.Removed+", left "+string.Join(", ",left));
+                if(PruneMcpExports(Path.Combine(exports,"missing"),DateTime.UtcNow).Removed!=0) throw new Exception("A missing exports folder was not handled.");
+            }
+            finally { try { Directory.Delete(exports,true); } catch { } }
             await StartMcp();
             using(var denied=await client.GetAsync(mcpUrl))
                 if(denied.StatusCode!=HttpStatusCode.Unauthorized) throw new Exception("Unauthenticated access was not rejected.");
@@ -54,12 +73,127 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             // An assistant meeting this server is told how to use it before it calls anything.
             string greeting=handshake["instructions"]?.GetValue<string>() ?? "";
             if(!greeting.Contains("get_project") || !greeting.Contains("guide")) throw new Exception("Server instructions missing.");
+            // The server says it's Arcadia Studio, and so does the config the app hands out (it was "wysicraft").
+            if(handshake["serverInfo"]?["name"]?.GetValue<string>()!="arcadia-studio" || handshake["serverInfo"]?["title"]?.GetValue<string>()!="Arcadia Studio" || greeting.Contains("named wysicraft")) throw new Exception("The MCP server doesn't announce itself as Arcadia Studio: "+handshake["serverInfo"]);
+            var handedOut=JsonNode.Parse(McpConfigJson())!["mcpServers"]!.AsObject();
+            if(handedOut.Count!=1 || !handedOut.ContainsKey("arcadia-studio")) throw new Exception("The MCP config isn't keyed arcadia-studio: "+string.Join(",",handedOut.Select(p=>p.Key)));
             var listing=await Rpc("tools/list",new {});
-            if(listing["tools"]!.AsArray().Count!=30) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
+            if(listing["tools"]!.AsArray().Count!=34) throw new Exception("Tools missing: "+listing["tools"]!.AsArray().Count);
             if(connectionOnly) { if(!mcpClients.ContainsKey("Arcadia Studio smoke") || mcpRequests<2) throw new Exception("Client visibility missing"); File.WriteAllText(output,"PASS: authentication, origin checks, MCP discovery and client visibility."); return; }
+            // The tutorial tools through MCP: what can be pointed at, a highlight, clearing it.
+            var targets=await Call("tutorial",new{action="targets"});
+            if(!targets.ToJsonString().Contains("menu:file.publish")||!targets.ToJsonString().Contains("panel:layers"))throw new Exception("tutorial targets is missing menu commands or panels.");
+            var pointed=await Call("tutorial",new{action="highlight",target="panel:layers",caption="Your layers",seconds=5});
+            if(!pointed["highlighted"]!.GetValue<string>().Contains("Layers")||(IsVisible&&!HighlightShowing))throw new Exception("tutorial highlight didn't point at Layers.");
+            await Call("tutorial",new{action="clear"});if(HighlightShowing)throw new Exception("tutorial clear left the highlight.");
+            await Call("tutorial",new{action="highlight",target="panel:not_a_panel"},fail:true);
+            string someControl=project.Screens.SelectMany(s=>s.Elements).First().Id;
+            var picked=await Call("tutorial",new{action="select",target="element:"+someControl});
+            if(picked["selected"]!.GetValue<string>()!=someControl||!selected.Contains(someControl))throw new Exception("tutorial select didn't select "+someControl);
+            await Call("tutorial",new{action="select",target="element:no_such_control"},fail:true);
+            // Every window, dialog and panel the app has can be opened and closed again through MCP.
+            var canOpen=await Call("tutorial",new{action="windows"});
+            var openable=canOpen["canOpen"]!.AsArray().Select(c=>c!["target"]!.GetValue<string>()).ToList();
+            if(openable.Count<30||canOpen["panels"]!.AsArray().Count<8)throw new Exception("tutorial windows lists too little: "+openable.Count+" windows, "+canOpen["panels"]!.AsArray().Count+" panels");
+            var windowProblems=new List<string>();
+            // Left out here only because of what they do when opened in a test: the manual opens in the web browser, updates and
+            // the publish windows go online, Minecraft test and Recover depend on this computer, and three need a selection.
+            var skipped=new[]{"help.manual","help.updates","file.publish","file.publishItch","project.test","file.recover","project.spriteSheet","advanced.collider","advanced.tilemap","advanced.leaderboard.open"};
+            foreach(var opening in openable.Where(t=>!skipped.Contains(t["window:".Length..])))
+            {
+                try
+                {
+                    var shown=await Call("tutorial",new{action="open_window",target=opening});
+                    // Screen settings shows in the Properties panel rather than a window of its own.
+                    if(opening=="window:project.screen")continue;
+                    if(shown["open"]!.AsArray().Count==0)throw new Exception("nothing opened");
+                    await Call("tutorial",new{action="close_window",target="all"});
+                    for(int i=0;i<40&&(await Call("tutorial",new{action="windows"}))["open"]!.AsArray().Count>0;i++)await Task.Delay(100);
+                    var left=(await Call("tutorial",new{action="windows"}))["open"]!.AsArray();
+                    if(left.Count>0)throw new Exception("still open after close_window all: "+left.ToJsonString());
+                }
+                catch(Exception ex){windowProblems.Add(opening+": "+ex.Message);}
+            }
+            if(windowProblems.Count>0)throw new Exception("open_window / close_window: "+string.Join(" | ",windowProblems));
+            var byName=await Call("tutorial",new{action="open_window",target="Music maker"});
+            if(!byName["opened"]!.GetValue<string>().Contains("Music maker"))throw new Exception("open_window by name: "+byName);
+            await Call("tutorial",new{action="close_window",target="Music"});
+            var shownPanel=await Call("tutorial",new{action="open_window",target="panel:layers"});
+            if(!shownPanel["opened"]!.GetValue<string>().Contains("Layers"))throw new Exception("open_window panel: "+shownPanel);
+            await Call("tutorial",new{action="open_window",target="window:advanced.tilemap"},fail:true);
+            await Call("tutorial",new{action="open_window",target="window:not_a_window"},fail:true);
+            await Call("tutorial",new{action="close_window",target="no such window title"},fail:true);
+            // Speech and video through MCP: the voices, a voiced line added to the project, reading it back, recording status.
+            var speech=await Call("speech",new{action="status"});
+            if(speech["textToSpeech"]!.GetValue<bool>())
+            {
+                var voices=await Call("speech",new{action="voices"});if(voices["voices"]!.AsArray().Count<50)throw new Exception("speech voices lists too few voices.");
+                await Call("speech",new{action="say",text="hi",voice="zz_nobody"},fail:true);
+                string speechBefore=(await Call("get_project",new{}))["revision"]!.GetValue<string>();
+                var line=await Call("speech",new{action="add_sound",expectedRevision=speechBefore,lines="[{\"name\":\"guard_hello\",\"text\":\"Halt! Who goes there?\",\"voice\":\"am_michael*0.7+bm_george*0.3\"}]"});
+                string id=line["sounds"]![0]!["sound"]!.GetValue<string>();if(!id.EndsWith(":guard_hello"))throw new Exception("speech add_sound didn’t add guard_hello: "+id);
+                var heard=await Call("speech",new{action="transcribe",sound=id});
+                if(!heard["text"]!.GetValue<string>().Contains("who goes there",StringComparison.OrdinalIgnoreCase))throw new Exception("speech transcribe heard: "+heard["text"]);
+                await Call("undo",new{expectedRevision=line["revision"]!.GetValue<string>()});
+            }
+            var video=await Call("video",new{action="status"});if(video["monitors"]!.AsArray().Count<1)throw new Exception("video status lists no monitors.");
+            // A particle effect through MCP, burst from a script with no Particles control on the screen.
+            string burstScreen=(await Call("get_project",new{}))["activeScreen"]!.GetValue<string>();
+            var made=await Call("particles",new{expectedRevision=(await Call("get_project",new{}))["revision"]!.GetValue<string>(),effect="mcp_sparkle",preset="sparkle",settings=new{count=20}});
+            if(made["effect"]!.GetValue<string>()!="mcp_sparkle"||made["settings"]!["count"]!.GetValue<int>()!=20)throw new Exception("particles didn't make the effect: "+made);
+            await Call("particles",new{expectedRevision=made["revision"]!.GetValue<string>(),effect="Bad Name"},fail:true);
+            var spot=await Call("apply_edits",new{expectedRevision=made["revision"]!.GetValue<string>(),edits=new object[]{new{kind="upsert_element",screen=burstScreen,element="mcp_spot",data=new{type="button",text="Spot"}}}});
+            string spotRevision=spot["revision"]!.GetValue<string>();
+            await Call("preview_control",new{expectedRevision=spotRevision,action="open",screen=burstScreen});
+            await Call("preview_control",new{expectedRevision=spotRevision,action="profile",value="on"});
+            await Call("preview_control",new{expectedRevision=spotRevision,action="script",value="ui.burst('mcp_sparkle', 'mcp_spot')"});
+            var burst=await Call("preview_control",new{expectedRevision=spotRevision,action="wait",value="300"});
+            if((burst["profile"]?["particles"]?.GetValue<int>()??0)<=0)throw new Exception("ui.burst made no particles: "+burst["profile"]);
+            await Call("preview_control",new{expectedRevision=spotRevision,action="close"});
+            await Call("undo",new{expectedRevision=spotRevision});
+            // Pixel art drawn live in the pixel editor: the same picture as without live, a new frame begun as a duplicate.
+            string liveRevision=(await Call("undo",new{expectedRevision=(await Call("get_project",new{}))["revision"]!.GetValue<string>()}))["revision"]!.GetValue<string>();
+            var live=await Call("pixel_art",new{expectedRevision=liveRevision,newName="mcp_live",width=4,height=4,live=true,delayMs=10,commands=new object[]{
+                new{op="grid",x=0,y=0,rows=new[]{"ab..","ba..","....","..aa"},palette=new{a="#FF0000",b="#0000FF"}},
+                new{op="add_frame",copyOf=0},
+                new{op="pixels",frame=1,points=new[]{new[]{3,0}},color="#00FF00"}}});
+            if(live["drawnLive"]?["pixels"]?.GetValue<int>()!=7||live["sheet"]!["width"]!.GetValue<int>()!=8||SideEditorCount!=0)throw new Exception("pixel_art live didn't draw each pixel once and save: "+live["drawnLive"]+" sheet "+live["sheet"]+" editors open "+SideEditorCount);
+            await Call("undo",new{expectedRevision=live["revision"]!.GetValue<string>()});
+            // Kept open while it's talked about: its parts can be pointed at, then close_editors closes it.
+            string keptRevision=(await Call("get_project",new{}))["revision"]!.GetValue<string>();
+            var kept=await Call("pixel_art",new{expectedRevision=keptRevision,newName="mcp_kept",width=2,height=2,live=true,delayMs=10,keepOpen=true,commands=new object[]{new{op="grid",x=0,y=0,rows=new[]{"ab"},palette=new{a="#FF0000",b="#0000FF"}},new{op="add_frame",copyOf=0}}});
+            if(SideEditorCount!=1)throw new Exception("pixel_art keepOpen closed the editor");
+            foreach(var part in new[]{"pixel:duplicate","pixel:preview","pixel:frames","pixel:tools"})
+            {
+                var shown=await Call("tutorial",new{action="highlight",target=part,caption="here",seconds=3});
+                if(!shown["highlighted"]!.GetValue<string>().Contains("pixel editor"))throw new Exception(part+" didn't point into the pixel editor: "+shown);
+            }
+            var screensList=await Call("tutorial",new{action="highlight",target="screens",caption="Screens",seconds=3});
+            if(!screensList["highlighted"]!.GetValue<string>().Contains("screens list"))throw new Exception("screens didn't point at the screens list: "+screensList);
+            await Call("tutorial",new{action="clear"});
+            var closedEditors=await Call("tutorial",new{action="close_editors"});
+            if(SideEditorCount!=0||!closedEditors.ToJsonString().Contains("pixel editor"))throw new Exception("close_editors didn't close the pixel editor: "+closedEditors);
+            await Call("undo",new{expectedRevision=kept["revision"]!.GetValue<string>()});
+            if(await Call("tutorial",new{action="status"}) is var none && none["open"]!.GetValue<bool>())throw new Exception("tutorial status says one is open.");
             string index=await CallText("guide",new {});
             if(!index.Contains("apply_edits") || !McpGuideTopicNames.All(index.Contains)) throw new Exception("Guide index missing topics.");
             foreach(string topic in McpGuideTopicNames) { string page=await CallText("guide",new { topic }); if(page.Length<400) throw new Exception("Guide topic "+topic+" is empty."); }
+            // get_project in part: one screen in full and the rest in brief, scripts by name or not at all.
+            var whole=await Call("get_project",new {});
+            string firstScreen=project.Screens[0].Id;
+            var onlyScreen=await Call("get_project",new { screen=firstScreen,scripts="none" });
+            var partScreens=onlyScreen["project"]!["screens"]!.AsArray();
+            if(partScreens.Count!=1 || partScreens[0]!["id"]!.GetValue<string>()!=firstScreen || partScreens[0]!["elements"]!.AsArray().Count!=project.Screens[0].Elements.Count) throw new Exception("get_project screen did not return that screen in full.");
+            if(onlyScreen["project"]!["scripts"]!.AsObject().Count!=0 || onlyScreen["partial"]!["otherScripts"]!.AsArray().Count!=project.Scripts.Count || onlyScreen["partial"]!["otherScreens"]!.AsArray().Count!=project.Screens.Count-1) throw new Exception("get_project did not list what it left out: "+onlyScreen["partial"]);
+            if(onlyScreen["revision"]!.GetValue<string>()!=whole["revision"]!.GetValue<string>() || whole["partial"]!=null || whole["project"]!["scripts"]!.AsObject().Count!=project.Scripts.Count) throw new Exception("get_project's revision or its whole-project answer changed.");
+            if(project.Scripts.Count>0)
+            {
+                string onePath=project.Scripts.Keys.First();
+                var oneScript=await Call("get_project",new { scripts=onePath });
+                if(oneScript["project"]!["scripts"]!.AsObject().Count!=1 || oneScript["project"]!["scripts"]![onePath]!.GetValue<string>()!=project.Scripts[onePath] || oneScript["project"]!["screens"]!.AsArray().Count!=project.Screens.Count) throw new Exception("get_project scripts=<path> did not return just that script.");
+            }
+            if(!(await Call("get_project",new { screen="no_such_screen" },true)).ToJsonString().Contains("There is no screen")) throw new Exception("get_project accepted a screen that isn't there.");
+            File.WriteAllText(output+".sizes.txt",$"get_project {whole.ToJsonString().Length:N0} chars whole, {onlyScreen.ToJsonString().Length:N0} for one screen without scripts");
             var before=await Call("get_project",new {});
             string revision=before["revision"]!.GetValue<string>();
             string screen=ui.Id;
@@ -111,6 +245,40 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             if(hit["variables"]!["hit"]!.GetValue<string>()!="yes")throw new Exception("A test click after open_ui did not reach the new screen: "+hit["variables"]);
             await Call("preview_control",new{expectedRevision=roomsRevision,action="close"});
             await Call("undo",new{expectedRevision=roomsRevision});
+            // Playing like a person: holding an input, tapping a button by where it is, and capturing just the game.
+            var play=await Call("apply_edits",new{expectedRevision=revision,edits=new object[]{
+                new{kind="upsert_input",key="mcp_right",data=new{keys=new[]{"d"}}},
+                new{kind="upsert_screen",screen="mcp_play",data=new{size=new{width=320,height=200},tickInterval=16,variables=new{held="no",tapped="no"},events=new{tick=new{client=new{script="scripts/client/mcp_held.js",function="tick"}}}}},
+                new{kind="put_script",key="scripts/client/mcp_held.js",source="function tick(ctx) { if (ctx.input.isDown('mcp_right')) ctx.state.set('held', 'yes'); }"},
+                new{kind="upsert_element",screen="mcp_play",element="mcp_tapme",data=new{type="button",text="Tap",bounds=new{x=200,y=120,width=80,height=30},events=new{click=new{client=new{actions=new[]{new{type="set_variable",target="tapped",value="yes"}}}}}}}
+            }});
+            string playRevision=play["revision"]!.GetValue<string>();
+            await Call("preview_control",new{expectedRevision=playRevision,action="open",screen="mcp_play"});
+            var idle=await Call("preview_control",new{expectedRevision=playRevision,action="wait",value="200"});
+            if(idle["variables"]!["held"]!.GetValue<string>()!="no")throw new Exception("The held-input test started pressed.");
+            var held=await Call("preview_control",new{expectedRevision=playRevision,action="input",element="mcp_right",value="300"});
+            if(held["variables"]!["held"]!.GetValue<string>()!="yes")throw new Exception("preview_control input didn't hold the input: "+held["variables"]);
+            await Call("preview_control",new{expectedRevision=playRevision,action="input",element="nope",value="100"},fail:true);
+            var tapped=await Call("preview_control",new{expectedRevision=playRevision,action="tap",value="240,135"});
+            if(tapped["variables"]!["tapped"]!.GetValue<string>()!="yes")throw new Exception("preview_control tap didn't click the button under it: "+tapped["variables"]);
+            string gameShot=(await Call("preview_control",new{expectedRevision=playRevision,action="capture",value="game"}))["path"]!.GetValue<string>();
+            var shotFrame=System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(gameShot),System.Windows.Media.Imaging.BitmapCreateOptions.None,System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];
+            if(Math.Abs((double)shotFrame.PixelWidth/shotFrame.PixelHeight-320.0/200)>0.02)throw new Exception("capture game isn't the game's own area: "+shotFrame.PixelWidth+"x"+shotFrame.PixelHeight);
+            await Call("preview_control",new{expectedRevision=playRevision,action="close"});
+            // arcadia_publish: a leaderboard page imported from a file, and a picture given by path fitted to 1280 × 800.
+            string pageFile=Path.Combine(Path.GetTempPath(),"mcp-board-"+Guid.NewGuid().ToString("N")+".html"), smallPng=Path.Combine(Path.GetTempPath(),"mcp-cover-"+Guid.NewGuid().ToString("N")+".png");
+            try
+            {
+                File.WriteAllText(pageFile,"<html><head><link href=\"https://fonts.googleapis.com/css2?family=Bungee\" rel=\"stylesheet\"></head><body>Scores</body></html>");
+                var smallBitmap=new System.Windows.Media.Imaging.WriteableBitmap(64,40,96,96,System.Windows.Media.PixelFormats.Bgra32,null);
+                var smallEncoder=new System.Windows.Media.Imaging.PngBitmapEncoder();smallEncoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(smallBitmap));
+                using(var smallFile=File.Create(smallPng))smallEncoder.Save(smallFile);
+                await Call("arcadia_publish",new{action="prepare",expectedRevision=playRevision,leaderboardFile=pageFile,cover=smallPng});
+                if(project.Publishing.LeaderboardPage!="file" || System.Text.Encoding.UTF8.GetString(project.Publishing.LeaderboardHtml)!=File.ReadAllText(pageFile))throw new Exception("arcadia_publish leaderboardFile didn't import the page as the game's leaderboard page.");
+                if(Wysicraft.Packaging.ArcadiaPackage.ImageSize(project.Publishing.Cover)!=(1280,800))throw new Exception("A cover given by path wasn't fitted to 1280 × 800: "+Wysicraft.Packaging.ArcadiaPackage.ImageSize(project.Publishing.Cover));
+            }
+            finally { File.Delete(pageFile); File.Delete(smallPng); }
+            await Call("undo",new{expectedRevision=Revision()});await Call("undo",new{expectedRevision=Revision()});await Call("undo",new{expectedRevision=Revision()});
             await Call("get_test_status",new {});
             await Call("get_schema",new {});
             await Call("validate_project",new {});
@@ -192,7 +360,36 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
                     throw new Exception("Arcadia package wrong: "+prepared.ToJsonString());
             if(project.Publishing.Title!="MCP smoke" || ArcadiaPackage.ImageSize(project.Publishing.Cover)!=(1280,800) || project.Publishing.Screenshots.Count!=2 || !project.Publishing.Mobile || project.Publishing.Videos.Count!=1)throw new Exception("Arcadia settings, cover or screenshots not kept in the project");
             try { Directory.Delete(Path.GetDirectoryName(packagePath)!,true); } catch { }
+            // The same settings as an object, which is what the tool's schema now describes (the call above sent them the
+            // old way, as a string of JSON, and still worked). Only the fields given change; an empty list clears the gallery.
+            var typed=await Call("arcadia_publish",new{action="prepare",expectedRevision=rev,settings=new{description="Typed over MCP.",leaderboard=true,scores=new{label="Points",max=5000,score=new{variable="score",path=""},triggers=new[]{new{variable="mode",path="",equals="over"}}}},screenshots=Array.Empty<string>()});
+            rev=typed["revision"]!.GetValue<string>();
+            try { Directory.Delete(Path.GetDirectoryName(typed["package"]!.GetValue<string>())!,true); } catch { }
+            var typedNow=project.Publishing;
+            if(typedNow.Title!="MCP smoke" || typedNow.Description!="Typed over MCP." || !typedNow.Mobile || !typedNow.Leaderboard || typedNow.Scores.Label!="Points" || typedNow.Scores.Max!=5000 || typedNow.Scores.Score.Variable!="score" || typedNow.Scores.Triggers is not [{ Variable:"mode",EqualsValue:"over" }] || typedNow.Screenshots.Count!=0)
+                throw new Exception("Typed arcadia_publish settings were not applied as given: "+Json.Write(typedNow));
+            // The schema names each field and its type, and a value of the wrong type is refused before anything changes.
+            JsonNode Schema(string tool)=>listing["tools"]!.AsArray().First(t=>t!["name"]!.GetValue<string>()==tool)!["inputSchema"]!["properties"]!;
+            string settingsSchema=Schema("arcadia_publish")["settings"]!.ToJsonString();
+            if(!settingsSchema.Contains("\"title\"") || !settingsSchema.Contains("\"mobile\"") || !settingsSchema.Contains("boolean") || !settingsSchema.Contains("\"triggers\"") || !Schema("arcadia_publish")["screenshots"]!.ToJsonString().Contains("array"))
+                throw new Exception("arcadia_publish's schema doesn't describe its settings: "+settingsSchema);
+            if(!Schema("itch_publish")["settings"]!.ToJsonString().Contains("\"webChannel\"") || !Schema("answer_request")["payload"]!.ToJsonString().Contains("\"inputName\""))
+                throw new Exception("itch_publish or answer_request doesn't describe its input.");
+            bool refusedType=false;
+            try { var answer=await Rpc("tools/call",new{name="arcadia_publish",arguments=new{action="prepare",expectedRevision=rev,settings=new{mobile="yes"}}}); refusedType=answer["isError"]?.GetValue<bool>() ?? false; }
+            catch(InvalidOperationException) { refusedType=true; }
+            if(!refusedType || !project.Publishing.Mobile || Revision()!=rev) throw new Exception("A setting of the wrong type was not refused.");
+            File.AppendAllText(output+".sizes.txt","\narcadia_publish settings schema: "+settingsSchema.Length+" chars");
             // itch.io over MCP: status, and a prepared web upload for a game given by its page address; never an upload.
+            // Soft drawing over MCP: a hard-edged disc, a soft brush stroke across it, then its edges smoothed.
+            var softArt=await Call("pixel_art",new{expectedRevision=rev,newName="mcp_soft",width=32,height=32,commands=new object[]{
+                new{op="ellipse",x=4,y=4,x2=27,y2=27,color="#FFFFFF",filled=true},
+                new{op="brush",points=new[]{new[]{8,16},new[]{24,16}},color="#FF0000",size=7,hardness=0.4},
+                new{op="smooth"}}});
+            rev=softArt["revision"]!.GetValue<string>();
+            var softPng=project.Assets.First(a=>a.Key.EndsWith("mcp_soft.png")).Value; var softImage=DecodePixels(softPng);
+            if(softImage.Get(16,16)!=0xFFFF0000u || softImage.Pixels.Count(p=>p>>24 is >0 and <255)<20 || softImage.Pixels.Distinct().Count()<30) throw new Exception("pixel_art brush and smooth did not draw soft art: "+softImage.Pixels.Distinct().Count()+" colors");
+            await Call("pixel_art",new{expectedRevision=rev,newName="mcp_soft_bad",width=8,height=8,commands=new object[]{new{op="brush",color="#FFFFFF",hardness=3}}},fail:true);
             var itch=await Call("itch_publish",new{action="status"});
             if(itch["settings"]==null || itch["note"]==null)throw new Exception("itch.io status incomplete: "+itch.ToJsonString());
             await Call("itch_publish",new{action="publish"},fail:true);
@@ -250,7 +447,7 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             await StopMcp();
             try { using var stopped=await client.GetAsync(mcpUrl); throw new Exception("Server still accepts connections after stopping."); }
             catch(HttpRequestException) { }
-            File.WriteAllText(output,"PASS: 30 MCP tools, connect instructions, guide topics, itch_publish (status, prepare), pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
+            File.WriteAllText(output,"PASS: 34 MCP tools, tutorial (targets, highlight, clear, status), speech (status, voices, mix, add_sound, transcribe), video (status), particles (+ ui.burst in Preview), pixel_art live, connect instructions, guide topics, itch_publish (status, prepare), pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
         }
         finally { await StopMcp(); dirty=false; }
     }

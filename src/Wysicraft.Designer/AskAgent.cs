@@ -80,7 +80,35 @@ public partial class MainWindow
 
         var send = new Button { Content = art ? "Ask it to draw this" : "Ask", IsDefault = true, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(12, 3, 12, 3) };
         var close = new Button { Content = "Close", IsCancel = true, Padding = new Thickness(12, 3, 12, 3) };
-        buttons.Children.Add(send); buttons.Children.Add(close);
+        // Speak instead of typing: listens until you pause, writes what it heard into the box and asks.
+        var mic = new Button
+        {
+            Content = "🎤 Speak", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(12, 3, 12, 3),
+            IsEnabled = SpeechToText.Available,
+            ToolTip = SpeechToText.Available ? "Say what you want; it's asked when you stop talking. Click again to stop listening." : "Speech recognition isn't installed with this copy of Arcadia Studio."
+        };
+        var level = new ProgressBar { Width = 60, Height = 6, Maximum = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+        buttons.Children.Add(level); buttons.Children.Add(mic); buttons.Children.Add(send); buttons.Children.Add(close);
+        Microphone? listening = null; bool asked = false;
+        mic.Click += async (_, _) =>
+        {
+            if (listening != null) { listening.Stop(); return; }
+            asked = false;
+            try
+            {
+                listening = new Microphone(Prefs().Microphone);
+                mic.Content = "■ Stop"; level.Visibility = Visibility.Visible; send.IsEnabled = false;
+                status.Text = "Listening… say what you want, then pause."; status.Foreground = Brushes.Goldenrod;
+                string heard = await ListenAsync(v => Dispatcher.BeginInvoke(() => level.Value = v), listening);
+                if (heard.Length == 0) { status.Text = "Nothing was heard. Check the microphone in Advanced → Speech settings."; status.Foreground = Brushes.IndianRed; return; }
+                want.Text = (want.Text.Trim() + " " + heard).Trim();
+                send.IsEnabled = true; asked = true;
+                send.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            }
+            catch (Exception ex) { status.Text = ex.Message; status.Foreground = Brushes.IndianRed; }
+            finally { listening = null; mic.Content = "🎤 Speak"; level.Visibility = Visibility.Collapsed; if (!asked) send.IsEnabled = true; asked = false; }
+        };
+        window.Closed += (_, _) => listening?.Stop();
 
         AgentRequest? sent = null;
         void Show()
@@ -88,7 +116,7 @@ public partial class MainWindow
             if (sent == null) return;
             if (sent.Status == "waiting")
             {
-                status.Text = WhyQueued + " Queued either way: ask it in chat to check Arcadia Studio and the reply appears here.";
+                status.Text = "Queued: ask your assistant in chat to check Arcadia Studio and the reply appears here.";
                 status.Foreground = Brushes.Goldenrod;
             }
             else if (sent.Problem.Length > 0 && sent.Reply.Length == 0)
@@ -119,16 +147,8 @@ public partial class MainWindow
             send.IsEnabled = false;
             Show();
             Log($"Ask Agent: {about} — {sent.Want}");
-            // If the client supports sampling this comes straight back; if not, the request stays queued exactly as
-            // it did before, and the person is told which of the two happened rather than left watching nothing.
-            // Three ways down, best first: a live sampling session, then starting an assistant of our own, then
-            // leaving it on the queue. Only the middle one can actually use tools, which is what most asks need.
-            if (CanAskDirectly)
-            {
-                status.Text = "Asking the assistant…";
-                var reply = await AskDirectlyAsync(AgentPrompt(sent));
-                if (reply != null) { sent.Reply = reply; sent.Status = "done"; }
-            }
+            // Two ways down: starting the assistant that's set up (its CLI, which can use the editor's tools), or, with
+            // none set up, leaving the ask on the queue for a connected assistant to pick up on its next turn.
             if (sent.Status == "waiting" && CanRunAgent)
             {
                 reply.Visibility = Visibility.Collapsed;

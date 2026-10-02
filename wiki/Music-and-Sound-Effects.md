@@ -8,6 +8,8 @@ Open them from **Project → Music maker…** and **Project → Sound effect mak
 
 Sounds save as **Ogg** by default: it's small and plays everywhere, including Minecraft. **WAV** is also available for web and desktop apps.
 
+For spoken lines (a character, a narrator, a menu voice), use **Advanced → Create audio from text…**. See [[Speech and video|Speech-and-Video]].
+
 ## The Music maker
 
 A song is a set of **layers**, like the tracks in a music program. Each layer has its own instrument and notes.

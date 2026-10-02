@@ -24,6 +24,14 @@ public partial class MainWindow
         // Details edited on the website: the check reports a clash, uploads say whose details were used, the game
         // sends Arcadia's details, and its pictures can be downloaded. One screenshot is one the project already has.
         bool clash = false;
+        // The leaderboard turned off on the website: the arcade's details then say "scores": false.
+        bool boardOff = false;
+        static bool UploadHasBoard(byte[] zip)
+        {
+            using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(zip));
+            using var reader = new StreamReader(archive.GetEntry("game.json")!.Open());
+            return JsonNode.Parse(reader.ReadToEnd())!["scores"] is JsonObject;
+        }
         static byte[] Png(int width, int height, byte shade)
         {
             var bitmap = new System.Windows.Media.Imaging.WriteableBitmap(width, height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
@@ -41,7 +49,7 @@ public partial class MainWindow
             ["screenshots"] = new JsonArray(
                 new JsonObject { ["url"] = "http://" + host + "/media/keep.png", ["sha"] = ArcadiaDetailsMerge.GitSha(project.Publishing.Screenshots[0].Bytes) },
                 new JsonObject { ["url"] = "http://" + host + "/media/shot.png", ["sha"] = ArcadiaDetailsMerge.GitSha(mediaShot) }),
-            ["scores"] = new JsonObject { ["label"] = "Dots", ["format"] = "points", ["order"] = "desc", ["min"] = 0, ["max"] = 99999, ["stats"] = new JsonArray(), ["watch"] = new JsonObject { ["score"] = new JsonObject { ["variable"] = "dots" }, ["trigger"] = new JsonArray(new JsonObject { ["variable"] = "over", ["equals"] = "true" }), ["round"] = "floor" } }
+            ["scores"] = boardOff ? JsonValue.Create(false) : new JsonObject { ["label"] = "Dots", ["format"] = "points", ["order"] = "desc", ["min"] = 0, ["max"] = 99999, ["stats"] = new JsonArray(), ["watch"] = new JsonObject { ["score"] = new JsonObject { ["variable"] = "dots" }, ["trigger"] = new JsonArray(new JsonObject { ["variable"] = "over", ["equals"] = "true" }), ["round"] = "floor" } }
         };
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [], ApplicationName = typeof(MainWindow).Assembly.FullName, ContentRootPath = AppContext.BaseDirectory });
         builder.Logging.ClearProviders();
@@ -67,7 +75,10 @@ public partial class MainWindow
                     if (deleted && http.Request.Query["game"] == "c-smoke") { await Send(404, "{\"error\":\"You deleted this game on Arcadia.\",\"code\":\"deleted\"}"); return; }
                     if (clash && http.Request.Query["game"].Count > 0)
                     {
-                        var details = new JsonObject { ["conflict"] = true, ["changed"] = new JsonArray("title", "description", "screenshots", "scores"), ["editedAt"] = 1790812345678, ["editedBy"] = "creator", ["arcade"] = ArcadeBlock(http.Request.Host.Value!, "Goblin Pac Deluxe") };
+                        // "scores" is listed only when the upload and the website disagree about having a leaderboard.
+                        var changed = boardOff ? new JsonArray() : new JsonArray("title", "description", "screenshots");
+                        if (UploadHasBoard(body.ToArray()) == boardOff) changed.Add("scores");
+                        var details = new JsonObject { ["conflict"] = changed.Count > 0, ["changed"] = changed, ["editedAt"] = 1790812345678, ["editedBy"] = "creator", ["arcade"] = ArcadeBlock(http.Request.Host.Value!, boardOff ? "Goblin Pac Remix" : "Goblin Pac Deluxe") };
                         await Send(200, new JsonObject { ["ok"] = true, ["wouldHold"] = false, ["findings"] = new JsonArray(), ["details"] = details }.ToJsonString()); return;
                     }
                     await Send(200, "{\"ok\":true,\"wouldHold\":true,\"findings\":[{\"level\":\"hold\",\"code\":\"new-runtime\",\"message\":\"A new Arcadia Studio runtime build\",\"file\":\"wysicraft/wysicraft-web.js\"}]}"); return;
@@ -81,7 +92,8 @@ public partial class MainWindow
                     // Deleted on the arcade: updates are refused with their own code.
                     string id = path[(path.LastIndexOf('/') + 1)..];
                     if (deleted && id == "c-smoke") { await Send(404, "{\"error\":\"You deleted this game on Arcadia.\",\"code\":\"deleted\"}"); return; }
-                    string used = clash && http.Request.Query["overwrite"] != "true" ? ",\"details\":{\"used\":\"arcade\",\"kept\":[\"title\",\"description\",\"screenshots\",\"scores\"]}" : ",\"details\":{\"used\":\"app\"}";
+                    lastUpload = body.ToArray();
+                    string used = clash && http.Request.Query["overwrite"] != "true" ? ",\"details\":{\"used\":\"arcade\",\"kept\":[" + (boardOff ? "" : "\"title\",\"description\",\"screenshots\",") + "\"scores\"]}" : ",\"details\":{\"used\":\"app\"}";
                     await Send(202, "{\"game\":{\"id\":\"" + id + "\",\"title\":\"Smoke\",\"url\":\"GAMEURL\"},\"submission\":" + submission("processing") + used + "}"); return;
                 case var one when one.StartsWith("GET /api/publish/games/") && !one.EndsWith("/download"):
                     await Send(200, new JsonObject { ["id"] = path[(path.LastIndexOf('/') + 1)..], ["title"] = "Goblin Pac Remix", ["status"] = "live", ["url"] = "GAMEURL", ["submissions"] = new JsonArray(), ["arcade"] = ArcadeBlock(http.Request.Host.Value!, "Goblin Pac Remix"), ["editedAt"] = 1790812345678, ["editedBy"] = "mod" }.ToJsonString()); return;
@@ -101,7 +113,8 @@ public partial class MainWindow
         try
         {
             dialog = new ArcadiaDialog(this, client); dialog.Show();
-            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, mediaCover, mediaShot);
+            dialog.PromptPictures = output;
+            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, on => boardOff = !on, mediaCover, mediaShot);
             // A picture of the window as it ended, scrolled to the screenshots and videos, beside the result, for a look at the layout.
             dialog.ShowGallery(); dialog.UpdateLayout();
             var shot = new System.Windows.Media.Imaging.RenderTargetBitmap((int)dialog.ActualWidth, (int)dialog.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); shot.Render(dialog);
@@ -123,9 +136,11 @@ public partial class MainWindow
     sealed partial class ArcadiaDialog
     {
         internal void CloseForTest() { busy = false; Close(); }
+        /// <summary>Where pictures of the details prompt go (the result's path; ".remove.png" and ".turnon.png" are added).</summary>
+        internal string PromptPictures = "";
         internal void ShowGallery() { UpdateLayout(); shots.BringIntoView(); }
         async Task Settle() { for (int i = 0; i < 400 && busy; i++) await Task.Delay(25); await Task.Delay(50); }
-        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, byte[] mediaCover, byte[] mediaShot)
+        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, Action<bool> boardOnWebsite, byte[] mediaCover, byte[] mediaShot)
         {
             void Expect(bool ok, string what) { if (!ok) throw new Exception("Publish window: " + what + "\nStatus: " + status.Text + "\nAccount: " + account.Text + "\nCalls:\n" + string.Join("\n", calls)); }
             await Settle();
@@ -187,6 +202,7 @@ public partial class MainWindow
                 Expect(shotsSent.SequenceEqual(["screenshots/1.png", "screenshots/2.png"]) && ArcadiaPackage.ImageSize(Entry("screenshots/1.png")) == (640, 400) && ArcadiaPackage.ImageSize(Entry("screenshots/2.png")) == (1280, 800), "the screenshots go in the gallery order chosen");
                 Expect(sentGame["videos"]!.AsArray().Select(n => (string)n!).SequenceEqual(["https://youtu.be/aBcDeFgHiJk", "https://www.youtube.com/shorts/aBcDeFgHiJk"]) && !sent.Entries.Any(e => e.FullName.EndsWith(".mp4")), "the video links are listed, and no video file is sent");
                 Expect(sentGame["mobile"]?.GetValue<bool>() == true, "mobile: true when Plays on phones and tablets is ticked");
+                Expect(sentGame.AsObject().ContainsKey("scores") && sentGame["scores"] is JsonValue noBoard && noBoard.TryGetValue<bool>(out bool keeps) && !keeps && sentGame["leaderboardPage"] == null, "Keep a leaderboard off is sent as \"scores\": false (not left out), with no leaderboard page");
             }
             Expect(editor.project.Publishing.Screenshots.Count == 2 && editor.project.Publishing.Videos.Count == 2 && editor.project.Publishing.Mobile, "the screenshots, videos and phone setting are kept in the project");
 
@@ -224,6 +240,17 @@ public partial class MainWindow
             await Guard(Publish);
             Expect(seen != null && seen.Changed.SequenceEqual(["title", "description", "screenshots", "scores"]) && seen.EditedBy == "creator" && seen.Arcade?.Title == "Goblin Pac Deluxe", "a clash is found before uploading, with what changed and Arcadia's values");
             Expect(status.Text.StartsWith("Nothing was published") && calls.Count(c => c.StartsWith("POST /api/publish/games/")) == uploadsBefore, "Cancel uploads nothing");
+            // The prompt itself, as a person sees it (closed as Cancel), with the leaderboard line in it.
+            string PromptText(string picture)
+            {
+                string text = ""; var choose = ChooseDetails; ChooseDetails = null;
+                DetailsPromptForTest = w => { text = string.Join("\n", ((StackPanel)w.Content).Children.OfType<TextBlock>().Select(t => t.Text)) + "\n" + string.Join(" | ", ((StackPanel)w.Content).Children.OfType<StackPanel>().SelectMany(b => b.Children.OfType<Button>()).Select(b => (string)b.Content)); MainWindow.SaveWindowPicture(w, PromptPictures + picture); };
+                try { Expect(AskDetails(seen!) == null, "the prompt closed as Cancel"); } finally { DetailsPromptForTest = null; ChooseDetails = choose; }
+                return text;
+            }
+            string removePrompt = PromptText(".remove.png");
+            Expect(removePrompt.Contains("The arcade has a leaderboard set up on the website. Remove it? Use mine removes it. Keep Arcadia's keeps it, and ticks Keep a leaderboard here.") && removePrompt.EndsWith("Keep Arcadia's | Use mine | Cancel"), "the existing keep/overwrite prompt shows the leaderboard question: " + removePrompt);
+            Expect(leaderboard.IsChecked == false && seen!.Arcade is { Board: not null, NoLeaderboard: false } && LeaderboardQuestion == "The arcade has a leaderboard set up on the website. Remove it?", "the arcade has a board and the project says none: the prompt asks whether to remove it: " + LeaderboardQuestion);
             ChooseDetails = _ => true;
             await Guard(Publish);
             Expect(calls.Last(c => c.StartsWith("POST /api/publish/games/")).Contains("?overwrite=true") && editor.project.Publishing.Title == "Smoke", "Use mine uploads with overwrite=true and leaves the project's details alone");
@@ -236,9 +263,51 @@ public partial class MainWindow
             Expect(!calls.Any(c => c.StartsWith("GET /media/keep.png")) && calls.Any(c => c.StartsWith("GET /media/cover.png [key]")), "a picture the project already has isn't downloaded again");
             Expect(took.Leaderboard && took.Scores.Label == "Dots" && took.Scores.Score.Variable == "dots" && took.Scores.Triggers.Count == 1 && took.Scores.Triggers[0].EqualsValue == "true" && took.Scores.Max == 99999, "and Arcadia's leaderboard setup");
             Expect(title.Text == "Goblin Pac Deluxe" && gallery.Count == 2 && status.Text.Contains("Kept Arcadia's title, description, screenshots, leaderboard"), "the form shows them, and the status says what was kept: " + status.Text);
+            Expect(leaderboard.IsChecked == true && scoresPanel.Visibility == Visibility.Visible, "and Keep a leaderboard is ticked, since the website's board was kept");
             ChooseDetails = null;
             await Guard(LoadDetails);
             Expect(title.Text == "Goblin Pac Remix" && editor.project.Publishing.Title == "Goblin Pac Remix" && status.Text.StartsWith("Loaded the details from Arcadia"), "Load details from Arcadia takes what's on Arcadia now");
+
+            // The other way round: the leaderboard was turned off on the website, and this project keeps one.
+            JsonNode SentGame() { using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(lastUpload())); using var reader = new StreamReader(zip.GetEntry("game.json")!.Open()); return JsonNode.Parse(reader.ReadToEnd())!; }
+            boardOnWebsite(false); seen = null; LeaderboardQuestion = null; uploadsBefore = calls.Count(c => c.StartsWith("POST /api/publish/games/"));
+            Expect(leaderboard.IsChecked == true, "(the project keeps a leaderboard at this point)");
+            ChooseDetails = d => { seen = d; return null; };
+            await Guard(Publish);
+            Expect(seen != null && seen.Changed.SequenceEqual(["scores"]) && seen.Arcade is { Board: null, NoLeaderboard: true }, "a leaderboard turned off on the website is a clash over \"scores\", with Arcadia's value false: " + status.Text);
+            Expect(LeaderboardQuestion == "The leaderboard was turned off on the website. Turn it back on?" && calls.Count(c => c.StartsWith("POST /api/publish/games/")) == uploadsBefore, "the prompt asks whether to turn it back on, and Cancel uploads nothing: " + LeaderboardQuestion);
+            string turnOnPrompt = PromptText(".turnon.png");
+            Expect(turnOnPrompt.Contains("The leaderboard was turned off on the website. Turn it back on? Use mine turns it back on. Keep Arcadia's leaves it off, and unticks Keep a leaderboard here."), "and the prompt shows the question the other way round: " + turnOnPrompt);
+            ChooseDetails = _ => true;
+            await Guard(Publish);
+            Expect(calls.Last(c => c.StartsWith("POST /api/publish/games/")).Contains("?overwrite=true") && SentGame()["scores"] is JsonObject && leaderboard.IsChecked == true, "Use mine sends the board with overwrite=true, turning it back on: " + status.Text);
+            ChooseDetails = _ => false;
+            await Guard(Publish);
+            Expect(calls.Last(c => c.StartsWith("POST /api/publish/games/")).Contains("?overwrite=false") && leaderboard.IsChecked == false && scoresPanel.Visibility == Visibility.Collapsed && !editor.project.Publishing.Leaderboard && status.Text.Contains("Kept Arcadia's leaderboard"), "Keep Arcadia's leaves it off and unticks Keep a leaderboard: " + status.Text);
+            Expect(editor.project.Publishing.Scores.Label == "Dots" && editor.project.Publishing.Scores.Score.Variable == "dots", "the project's leaderboard setup is kept for turning it on again later");
+            // Both sides now agree there's none: nothing is asked, and the upload says so on purpose.
+            bool askedAgain = false; ChooseDetails = _ => { askedAgain = true; return null; };
+            await Guard(Publish);
+            Expect(!askedAgain && SentGame()["scores"] is JsonValue stillOff && stillOff.TryGetValue<bool>(out bool stillKeeps) && !stillKeeps && SentGame()["leaderboardPage"] == null, "once both agree there's no leaderboard nothing is asked, and the upload carries \"scores\": false: " + status.Text);
+            ChooseDetails = null;
+            // Load details from Arcadia follows the website both ways.
+            leaderboard.IsChecked = true;
+            await Guard(LoadDetails);
+            Expect(leaderboard.IsChecked == false && !editor.project.Publishing.Leaderboard, "Load details from Arcadia unticks Keep a leaderboard when it was turned off on the website");
+            boardOnWebsite(true);
+            await Guard(LoadDetails);
+            Expect(leaderboard.IsChecked == true && editor.project.Publishing.Leaderboard && title.Text == "Goblin Pac Remix", "and ticks it again when the website has a board");
+            // Settings changed outside the open window (an MCP arcadia_publish, Undo): the window must take them, never
+            // write its older form back over them. This is what emptied a publishing setup made while the window was open.
+            var outside = Json.Clone(editor.project.Publishing); outside.KeepImages(editor.project.Publishing);
+            outside.Title = "Set from MCP"; outside.Description = "Written while the window was open."; outside.Genre = ["Roguelike"];
+            editor.project.Publishing = outside;
+            await Guard(Check);
+            Expect(editor.project.Publishing.Title == "Set from MCP" && editor.project.Publishing.Description == "Written while the window was open." && editor.project.Publishing.Genre.SequenceEqual(["Roguelike"]), "a stale window doesn't write its form over settings changed elsewhere: " + editor.project.Publishing.Title);
+            Expect(title.Text == "Set from MCP" && description.Text == "Written while the window was open." && genres[0].Text == "Roguelike", "and shows them instead");
+            editor.project.Publishing.Description = "Changed in place.";
+            OnActivated(EventArgs.Empty);
+            Expect(description.Text == "Changed in place.", "a change made in place (the itch.io hand-over does that) shows when the window is used again");
             bool refused = false; int before = calls.Count;
             try { await client.MediaAsync(key!, "https://elsewhere.example/steal.png"); } catch (ArcadiaException ex) when (ex.Code == "media") { refused = true; }
             Expect(refused && calls.Count == before, "a picture address outside the arcade is never fetched, so the key goes nowhere else");
@@ -261,7 +330,7 @@ public partial class MainWindow
                 Expect(editor.ArcadiaKey(client.Host) == null && !editor.Prefs().ArcadiaKeys.ContainsKey("old.arcade.test"), "unlinking clears both addresses, so an old key can't come back");
             }
             finally { FormerHosts.Remove(client.Host); }
-            return "PASS: Publish to Arcadia window against a fake arcade: link (pending → approved), encrypted key, account and review mode, cover fitting, screenshots (reorder, order sent), YouTube-only video links (flagged as typed, refused before sending), mobile, Check, Publish (processing → live, game ID kept, next version), update to the same game (check?game=), a game deleted on the arcade (Check and Publish; No / Yes → new game at 1.0.0 with its details kept), a title already taken, revoked key, an arcade at a new address (link and game carried over; forgetting clears both), details edited on the website (checked before an update; Cancel, Use mine = overwrite=true, Keep Arcadia's = overwrite=false and copied into the project with its pictures, an unchanged picture not downloaded again), Load details from Arcadia, pictures only from the arcade.";
+            return "PASS: Publish to Arcadia window against a fake arcade: link (pending → approved), encrypted key, account and review mode, cover fitting, screenshots (reorder, order sent), YouTube-only video links (flagged as typed, refused before sending), mobile, Check, Publish (processing → live, game ID kept, next version), update to the same game (check?game=), a game deleted on the arcade (Check and Publish; No / Yes → new game at 1.0.0 with its details kept), a title already taken, revoked key, an arcade at a new address (link and game carried over; forgetting clears both), details edited on the website (checked before an update; Cancel, Use mine = overwrite=true, Keep Arcadia's = overwrite=false and copied into the project with its pictures, an unchanged picture not downloaded again), the leaderboard clash both ways (a board on the website and none here: \"Remove it?\"; turned off on the website and one here: \"Turn it back on?\"; Use mine, Keep Arcadia's ticking or unticking Keep a leaderboard), Keep a leaderboard off sent as \"scores\": false, Load details from Arcadia (unticks Keep a leaderboard when it's off on the website), pictures only from the arcade.";
         }
     }
 }

@@ -153,7 +153,7 @@ public partial class MainWindow
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
     }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
 
-    internal Task<string> McpSoundEffect(string expected, string preset, JsonElement? settings, string sound, string name, string format, bool mutate, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
+    internal Task<string> McpSoundEffect(string expected, string preset, JsonElement? settings, string sound, string name, string format, bool mutate, double showSeconds, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
     {
         try
         {
@@ -181,7 +181,45 @@ public partial class MainWindow
             string fmt = format.Length > 0 ? format : path != null ? Path.GetExtension(path).TrimStart('.') : "ogg";
             if (!AudioFiles.Formats.Contains(fmt)) throw new InvalidDataException("format is ogg (default) or wav.");
             string savedPath = SaveSoundAsset(fx.Name, fmt, path == null, path, [fx.Render(SongRenderer.SampleRate)], SoundAssets.EffectSuffix, Encoding.UTF8.GetBytes(Json.Write(fx)));
+            if (showSeconds > 0) ShowForAWhile(OpenSoundEffectMaker(savedPath), m => m.PlayNow(), m => m.Untouched, showSeconds);
             return Json.Write(new { revision = Revision(), sound = SoundAssets.Resource(savedPath), path = savedPath, seconds = Math.Round(fx.Seconds, 3), settings = fx, note = "Play it with ctx.client.playSound('" + SoundAssets.Resource(savedPath) + "') or a play_sound action. Pass sound and settings (or mutate) to adjust it." });
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
+    }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
+
+    /// <summary>Opens a maker for the person to see, does something in it (plays it), and closes it after a while unless
+    /// they've started changing it.</summary>
+    void ShowForAWhile<T>(T window, Action<T> start, Func<T, bool> untouched, double seconds) where T : System.Windows.Window
+    {
+        window.Activate();
+        Dispatcher.BeginInvoke(() => { try { start(window); } catch (Exception) { } }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120)) };
+        timer.Tick += (_, _) => { timer.Stop(); if (window.IsVisible && untouched(window)) window.Close(); };
+        timer.Start();
+    }
+
+    internal Task<string> McpParticles(string expected, string effect, string preset, JsonElement? settings, bool mutate, double showSeconds, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
+    {
+        try
+        {
+            if (mcpHost == null) throw new InvalidOperationException("MCP server is stopped.");
+            CheckRevision(expected);
+            string id = effect.Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9_]{1,40}$")) throw new InvalidDataException("effect is the effect's name: lowercase letters, digits and _ (e.g. coin_sparkle).");
+            var existing = project.Manifest.Particles.FirstOrDefault(p => p.Id == id);
+            ParticleEffect fx;
+            if (preset.Length > 0)
+            {
+                if (!Wysicraft.Core.Particles.Presets.Contains(preset)) throw new InvalidDataException("preset is one of " + string.Join(", ", Wysicraft.Core.Particles.Presets) + ".");
+                fx = Wysicraft.Core.Particles.Preset(preset);
+            }
+            else fx = existing != null ? Json.Clone(existing) : Wysicraft.Core.Particles.Preset("sparks");
+            fx = Patch(fx, settings);
+            if (mutate) fx = fx.Mutate(new Random());
+            fx.Id = id; fx.Check();
+            string saved = SaveParticleEffect(new ParticleMaker.SaveRequest(fx, existing == null, existing?.Id));
+            if (showSeconds > 0) ShowForAWhile(OpenParticleMaker(saved), m => m.FireNow(), m => m.Untouched, showSeconds);
+            return Json.Write(new { revision = Revision(), effect = saved, created = existing == null, settings = project.Manifest.Particles.First(p => p.Id == saved), note = "Choose it as a Pickup's Particles (or var PARTICLES = '" + saved + "' in its script), on a Particles control, or burst it from a script with ui.burst('" + saved + "', controlId)." });
         }
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
     }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
@@ -247,9 +285,12 @@ public sealed partial class DesignerMcpTools
     [McpServerTool(Name = "compose_music"), Description("Write or change 8-bit music, like the Music maker, and save it as a project sound (Ogg by default; plays in Minecraft, web and desktop). New song: name + song {bpm, timeSignature, key, scale, tracks:[{name, instrument (preset), instrumentSettings, volume, pan, transpose, notes (text) or noteList}]}. Notes text: \"C4 q E4 e G4 e | C5 h r q C4+E4+G4 w\" (w h q e s t lengths, . dotted, r rest, + chord). Change a song: sound = its ID, and only the fields to change (tracks replace the layers, or addTracks adds them). A sound not made in the Music maker is replaced by the new song, keeping its ID. Set loop:true for background music. Returns the sound ID and every layer as text.")]
     public Task<string> ComposeMusic(string expectedRevision, SongSpec? song = null, string sound = "", string name = "", string format = "", bool addTracks = false, CancellationToken cancellationToken = default)
         => editor.McpComposeMusic(expectedRevision, song, sound, name, format, addTracks, cancellationToken);
-    [McpServerTool(Name = "sound_effect"), Description("Make or change a retro sound effect, like the Sound effect maker, saved as a project sound. preset: coin, jump, laser, explosion, powerup, hurt, blip or random (a new random take each call). settings patch any of: wave (square|triangle|saw|sine|noise), frequency (Hz), minFrequency, slide (octaves/s), deltaSlide, vibratoDepth (semitones), vibratoSpeed, arpeggioSemitones, arpeggioTime (s), duty, dutySweep, attack, sustain, punch, decay (s), repeatTime, lowPass, lowPassSweep, highPass, crush, volume. sound = an existing effect to change; mutate:true for a close variation.")]
-    public Task<string> MakeSoundEffect(string expectedRevision, string preset = "", JsonElement? settings = null, string sound = "", string name = "", string format = "", bool mutate = false, CancellationToken cancellationToken = default)
-        => editor.McpSoundEffect(expectedRevision, preset, settings, sound, name, format, mutate, cancellationToken);
+    [McpServerTool(Name = "sound_effect"), Description("Make or change a retro sound effect, like the Sound effect maker, saved as a project sound. preset: coin, jump, laser, explosion, powerup, hurt, blip or random (a new random take each call). settings patch any of: wave (square|triangle|saw|sine|noise), frequency (Hz), minFrequency, slide (octaves/s), deltaSlide, vibratoDepth (semitones), vibratoSpeed, arpeggioSemitones, arpeggioTime (s), duty, dutySweep, attack, sustain, punch, decay (s), repeatTime, lowPass, lowPassSweep, highPass, crush, volume. sound = an existing effect to change; mutate:true for a close variation. showSeconds > 0 opens it in the Sound effect maker where the person can see it, plays it, and closes it after that many seconds (unless they change it).")]
+    public Task<string> MakeSoundEffect(string expectedRevision, string preset = "", JsonElement? settings = null, string sound = "", string name = "", string format = "", bool mutate = false, double showSeconds = 0, CancellationToken cancellationToken = default)
+        => editor.McpSoundEffect(expectedRevision, preset, settings, sound, name, format, mutate, showSeconds, cancellationToken);
+    [McpServerTool(Name = "particles"), Description("Make or change a particle effect, like the Particle maker, saved in the project (web and desktop). effect = its name (an existing one is changed, a new one made). preset: sparks, explosion, smoke, fountain, sparkle, blood, rain, magic, trail, confetti or random. settings patch any field (emission burst|stream, count, duration, life, lifeVariance, direction, spread, speed, speedVariance, gravity, drag, radius, sizeStart, sizeEnd, sizeVariance, colors [{at, color}], opacityStart, opacityEnd, spin, shape square|circle|line|texture, texture, blend normal|add); get_schema particleDefaults shows them all. mutate:true for a close variation. showSeconds > 0 opens it in the Particle maker where the person can see it, plays it, and closes it after that many seconds (unless they change it). Use it on a Pickup (its card's Particles, or var PARTICLES in its script), a Particles control, or ui.burst(effect, controlId) from a script.")]
+    public Task<string> Particles(string expectedRevision, string effect, string preset = "", JsonElement? settings = null, bool mutate = false, double showSeconds = 0, CancellationToken cancellationToken = default)
+        => editor.McpParticles(expectedRevision, effect, preset, settings, mutate, showSeconds, cancellationToken);
     [McpServerTool(Name = "song_from_audio"), Description("Turn a recording into an 8-bit song (a chiptune cover), like the Music maker's Song from audio: the beat is tracked through the song, the chord on every beat is named, the singer becomes the melody and the drums come from their hits. When the Demucs instrument splitter has been downloaded (the Music maker offers it on first import), the song is split into vocals, bass, drums and other first, which is much more accurate (a minute or two). style arrange (default: Chords, Bass, Melody, Drums layers; chordRhythm eighths|quarters|held, chordVoicing auto|power|triads) or notes (every note heard, for piano or solo pieces). file = full path of an audio file on this computer (MP3, WAV, Ogg, M4A…) or sound = a project sound. bpm 0 = detect. removeVocals takes out centre-mixed singing first (then the lead is the instruments). Saved as a new project sound with its song, so compose_music and the Music maker can change it.")]
     public Task<string> SongFromAudio(string expectedRevision, string file = "", string sound = "", string name = "", double bpm = 0, bool lead = true, bool chords = true, bool bass = true, bool drums = true, bool removeVocals = false, double sensitivity = 0.5, string format = "", string style = "arrange", string chordRhythm = "eighths", string chordVoicing = "auto", CancellationToken cancellationToken = default)
         => editor.McpSongFromAudio(expectedRevision, file, sound, name, bpm, lead, chords, bass, drums, removeVocals, sensitivity, format, style, chordRhythm, chordVoicing, cancellationToken);

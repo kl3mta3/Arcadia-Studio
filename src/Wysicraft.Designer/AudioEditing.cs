@@ -52,13 +52,14 @@ public partial class MainWindow
         if (transcribe != null) maker.Loaded += (_, _) => maker.ImportAudio(transcribe);
         OpenBeside(maker);
     }
-    internal void OpenSoundEffectMaker(string? path = null)
+    internal SoundEffectMaker OpenSoundEffectMaker(string? path = null)
     {
         var fx = path != null && project.Assets.TryGetValue(path + SoundAssets.EffectSuffix, out var saved) ? Json.Read<SoundEffect>(Encoding.UTF8.GetString(saved)) : SoundEffect.Preset("coin");
         string? opened = path != null && project.Assets.ContainsKey(path + SoundAssets.EffectSuffix) ? path : null;
         var file = Watch(opened); SoundEffectMaker? maker = null;
         maker = new SoundEffectMaker(this, fx, opened, r => { CheckOverwrite(file, r.AsNew ? null : r.Path, maker!); var saved = SaveEffect(r); Saw(file, saved); return saved; });
         OpenBeside(maker);
+        return maker;
     }
 
     // ---- Reading audio ----

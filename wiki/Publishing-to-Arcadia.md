@@ -33,7 +33,7 @@ The link is saved for your Windows user, encrypted, and only for that arcade. **
 Every picture is **1280 × 800** (16:10) at its best, real gameplay, no borders: a PNG, JPEG or WebP of up to 2 MB. Each one can come from either button:
 
 - **Capture from Preview**: the first click opens Preview. Play to a good moment, then click it again. Arcadia Studio takes the game screen (without collider outlines), crops the middle to 16:10 and scales it to 1280 × 800, keeping pixel art sharp.
-- **Choose file…**: a picture from your computer. One over 2 MB is fitted to 1280 × 800 for you.
+- **Choose file…**: a picture from your computer. A PNG or JPEG that isn't already 1280 × 800 is fitted for you (the middle at 16:10, like a capture); a WebP is used as it is.
 
 | | What it's for |
 | --- | --- |
@@ -46,6 +46,20 @@ A moderator looks at the pictures and videos along with the game when an upload 
 ## 4. A leaderboard (optional)
 
 Tick **Keep a leaderboard for this game** and Arcadia records each player's scores without any code in your game: it reads your game's variables while it runs.
+
+Leave it unticked and the game is published with no leaderboard, on purpose: Arcadia doesn't set one up by itself, and a leaderboard page isn't sent.
+
+**Scan…** (beside the tick box) reads your game the way Arcadia does when a game is uploaded, and suggests the answers for the settings below:
+
+| It suggests | From |
+| --- | --- |
+| **Score comes from** | A variable named like `score`, `points`, `coins` or `distance` that goes up, as a screen variable, a `ctx.state` name, or a field of a variable that holds JSON (`g.score`). |
+| **Run ends when** | A variable set to a word like `over` or `dead`, or a flag like `gameOver`, `dead` or `won` set to true. |
+| **Extra columns** | Other figures worth showing: level, wave, lines, lives, time and the like. |
+
+Each suggestion shows the line of script it was found on. The ones Arcadia would use by itself are already picked, and the window says whether Arcadia would be sure enough to set the board up alone. **Use these** puts your choices into the fields (and ticks **Keep a leaderboard**), where you can still change them; they're saved with the rest of the window. **Cancel** changes nothing. Ticked conditions replace the ones in the form; ticked columns are added to the ones already there.
+
+The scan only sees what Arcadia can read while the game runs: screen variables and `ctx.state` names. A score kept only in a script's own variable isn't found; save it with `ctx.state.set`.
 
 | Setting | Meaning |
 | --- | --- |
@@ -63,7 +77,16 @@ Tick **Keep a leaderboard for this game** and Arcadia records each player's scor
 
 A score is sent **each time "run ends" turns from false to true**. So it has to be false while playing, true at game over, and false again when a new run starts (for example `mode` going `play` → `over` → `play`). A game that starts in the ended state sends nothing until it has been false once.
 
-**Leaderboard page.** What players see when they open the leaderboard: the arcade's standard board, or a page of your own. **Create leaderboard…** designs one in the editor (a podium, a top 10, the player's own rank and more, filled with the game's real scores), and **Import leaderboard…** brings in a `.lb` file or a page. A project with a page uses it unless you choose the standard board. See [[Leaderboard pages|Leaderboard-Pages]].
+**Leaderboard page.** What players see when they open the leaderboard: the arcade's standard board, or a page of your own. A project with a page uses it unless you choose the standard board. See [[Leaderboard pages|Leaderboard-Pages]].
+
+| Button | What it does |
+| --- | --- |
+| **Create leaderboard…** | Opens the **leaderboard creator**, a window of its own, on a new page with a starter layout (a podium, a top 10, the player's own rank and more, filled with the game's real scores once it's published). |
+| **Import leaderboard…** | Brings in a `.lb` file or a page. |
+| **Edit** | Opens the chosen page in the leaderboard creator. |
+| **Remove** | Stops using a page of your own: the choice goes back to the arcade's standard board, and the next publish takes your page off the game. A page you designed stays in the project, so you can choose it again; an imported page is taken out of the project (after asking). Off while the standard board is chosen. |
+
+Closing the leaderboard creator (or its **Done** button) comes back to this window with the page chosen.
 
 ## 5. Check, then publish
 
@@ -101,7 +124,14 @@ Everything in the window is saved with the project, including the game's permane
 | **Use mine** | The game is updated with the details in this window, replacing the website's. |
 | **Cancel** | Nothing is published. |
 
-**Load details from Arcadia** copies the game's current details from Arcadia into the window at any time, for example after editing them on the website.
+When the difference is whether the game has a leaderboard at all, the question says so:
+
+| The question | Use mine | Keep Arcadia's |
+| --- | --- | --- |
+| **The arcade has a leaderboard set up on the website. Remove it?** (the website has one; **Keep a leaderboard** is unticked here) | Removes the game's leaderboard. | Keeps it, and ticks **Keep a leaderboard** here with the website's setup. |
+| **The leaderboard was turned off on the website. Turn it back on?** (the website has none; **Keep a leaderboard** is ticked here) | Turns it back on with this window's setup. | Leaves it off, and unticks **Keep a leaderboard** here. Your setup stays filled in for later. |
+
+**Load details from Arcadia** copies the game's current details from Arcadia into the window at any time, for example after editing them on the website. If the leaderboard was turned off there, it unticks **Keep a leaderboard**.
 
 **Publishing history…** lists the last 20 uploads and can download any stored version (or what's live) as a zip.
 

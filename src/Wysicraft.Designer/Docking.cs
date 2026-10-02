@@ -15,7 +15,7 @@ public partial class MainWindow
 
     void InitializeDocking()
     {
-        EventManager.RegisterClassHandler(typeof(AvalonDock.Controls.LayoutFloatingWindowControl),System.Windows.Input.Keyboard.PreviewKeyDownEvent,new System.Windows.Input.KeyEventHandler(Keys));
+        if(!creatorMode) EventManager.RegisterClassHandler(typeof(AvalonDock.Controls.LayoutFloatingWindowControl),System.Windows.Input.Keyboard.PreviewKeyDownEvent,new System.Windows.Input.KeyEventHandler(Keys));
         foreach(var item in Workspace.Layout.Descendents().OfType<LayoutContent>()) dockContents[item.ContentId]=item.Content;
         using var writer=new StringWriter(); new XmlLayoutSerializer(Workspace).Serialize(writer); defaultDockLayout=writer.ToString();
         Loaded+=(_,_)=> {
@@ -24,7 +24,7 @@ public partial class MainWindow
             catch(Exception ex) { ResetDockLayout(); Log("Saved workspace layout could not be restored: "+ex.Message); }
         };
         Closed+=(_,_)=> {
-            if(DockSmoke) return;
+            if(DockSmoke || creatorMode) return;
             try { Directory.CreateDirectory(Path.GetDirectoryName(DockLayoutPath)!); using var saved=new StringWriter(); new XmlLayoutSerializer(Workspace).Serialize(saved); File.WriteAllText(DockLayoutPath+".tmp",saved.ToString()); File.Move(DockLayoutPath+".tmp",DockLayoutPath,true); }
             catch(Exception ex) { System.Diagnostics.Debug.WriteLine("Workspace layout: "+ex.Message); }
         };

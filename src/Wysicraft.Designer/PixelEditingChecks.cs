@@ -234,7 +234,71 @@ public partial class MainWindow
         frames.TestAnimate(false, 10); frames.TestSave("spinner"); Ok(!project.Assets.ContainsKey(spinner + ".mcmeta") && SheetFrames(spinner) == (2, 1, 2), "Turning it off makes it a sprite sheet again");
         frames.TestDiscard();
 
+        // ---- Soft brush and Smooth: art that isn't pixelated, drawn with the same editor ----
+        var softDoc = PixelDocument.FromFrames([new PixelImage(64, 64)]);
+        var soft = new PixelEditor(this, softDoc, null, "soft", r => SavePixelArt(r, null), null); soft.Show();
+        Ok(soft.TestHasTool("Soft brush") && soft.TestHasTool("Smooth") && soft.TestBrushPanel.Maximum == 64, "The pixel editor has no Soft brush and Smooth tools, or its brush stops short of 64");
+        const uint SoftWhite = 0xFFFFFFFF, SoftRed = 0xFFFF0000;
+        // A white ground, then one soft red stroke across it.
+        soft.TestColors(SoftWhite, 0); soft.TestTool("Fill"); soft.TestStroke(false, (5, 5));
+        soft.TestColors(SoftRed, 0); soft.TestTool("Brush"); soft.TestBrush(15, 60);
+        Ok(soft.TestBrushPanel.Size.Contains("15") && soft.TestBrushPanel.Soft.Contains("60%"), "The brush size and soft edge aren't shown: " + soft.TestBrushPanel.Size + " / " + soft.TestBrushPanel.Soft);
+        int softSteps = soft.TestUndoCount;
+        soft.TestStroke(false, (12, 32), (30, 32), (52, 32));
+        var stroke = soft.TestShown(0);
+        Ok(stroke.Get(32, 32) == SoftRed && stroke.Get(32, 10) == SoftWhite && stroke.Get(32, 54) == SoftWhite, "The soft brush didn't paint a band through its stroke: " + PixelArt.ToHex(stroke.Get(32, 32)));
+        uint fringe = stroke.Get(32, 38); Ok(fringe != SoftRed && fringe != SoftWhite && (fringe >> 16 & 0xFF) == 255 && (fringe >> 8 & 0xFF) is > 0 and < 255, "The stroke's edge isn't a blend of the two colors: " + PixelArt.ToHex(fringe));
+        Ok(stroke.Pixels.Distinct().Count() > 20 && soft.TestUndoCount == softSteps + 1, "A soft stroke should have many in-between colors and be one Undo step: " + stroke.Pixels.Distinct().Count());
+        soft.TestUndo(); Ok(soft.TestShown(0).Get(32, 32) == SoftWhite, "Undo didn't take the soft stroke back"); soft.TestRedo();
+        // Going back and forth over the same place within one stroke doesn't build up.
+        soft.TestUndo(); soft.TestStroke(false, (12, 32), (52, 32), (12, 32), (52, 32), (30, 32));
+        Ok(SamePixels(soft.TestShown(0), stroke), "A stroke that goes back over itself came out different from one pass");
+        // The transparent color erases softly.
+        soft.TestStroke(true, (32, 32));
+        uint hole = soft.TestShown(0).Get(32, 32); Ok(hole >> 24 == 0, "A soft brush with the transparent color didn't erase: " + PixelArt.ToHex(hole));
+        Ok(soft.TestShown(0).Get(32, 38) >> 24 is > 0 and < 255, "A soft eraser should fade out at its edge");
+        soft.TestUndo();
+        // Mirror paints both halves in one stroke.
+        soft.TestMirror(true); soft.TestBrush(7, 50); soft.TestStroke(false, (10, 8));
+        Ok(soft.TestShown(0).Get(10, 8) == SoftRed && soft.TestShown(0).Get(53, 8) == SoftRed, "Mirror didn't copy the soft dab to the other half");
+        soft.TestMirror(false); soft.TestUndo();
+        // With a selection, only the inside is painted.
+        soft.TestTool("Select"); soft.TestStroke(false, (0, 0), (63, 31)); soft.TestTool("Brush"); soft.TestBrush(15, 50); soft.TestStroke(false, (32, 52), (32, 28));
+        Ok(soft.TestShown(0).Get(32, 26) == SoftRed && stroke.Get(32, 26) != SoftRed, "The soft brush didn't paint inside the selection: " + PixelArt.ToHex(soft.TestShown(0).Get(32, 26)));
+        Ok(soft.TestShown(0).Get(32, 50) == stroke.Get(32, 50) && soft.TestShown(0).Get(32, 50) == SoftWhite, "The soft brush painted outside the selection");
+        soft.TestDeselect(); soft.TestUndo();
+        CaptureWindow(soft, output + ".softbrush.png");
+        soft.TestDiscard();
+
+        // Smooth: a hard-edged disc (every pixel solid or clear), then its outline softened.
+        var discDoc = PixelDocument.FromFrames([new PixelImage(48, 48)]);
+        var disc = new PixelEditor(this, discDoc, null, "disc", r => SavePixelArt(r, null), null); disc.Show();
+        disc.TestColors(SoftWhite, 0); disc.TestFilled(true); disc.TestTool("Ellipse"); disc.TestStroke(false, (8, 8), (39, 39));
+        int SoftCount(PixelImage p) => p.Pixels.Count(x => x >> 24 is > 0 and < 255);
+        Ok(SoftCount(disc.TestShown(0)) == 0 && disc.TestShown(0).Get(24, 24) == SoftWhite, "The disc should start with hard edges");
+        // The Smooth tool softens only where it's dragged: the top of the disc, not the bottom.
+        disc.TestTool("Smooth"); disc.TestBrush(9, 50); disc.TestStroke(false, (14, 12), (24, 8), (34, 12));
+        var top = disc.TestShown(0);
+        Ok(top.Get(24, 8) >> 24 is > 0 and < 255 && top.Get(24, 39) == SoftWhite && top.Get(24, 40) == 0 && top.Get(24, 24) == SoftWhite, "The Smooth tool should soften the edge it's dragged along and leave the rest: " + PixelArt.ToHex(top.Get(24, 8)));
+        Ok(top.Pixels.Where(x => x >> 24 != 0).All(x => (x & 0xFFFFFF) == 0xFFFFFF), "Smoothing next to clear pixels should keep the color (no dark fringe)");
+        disc.TestUndo(); Ok(SoftCount(disc.TestShown(0)) == 0, "Undo didn't take the smoothing back");
+        // Smooth edges: the whole layer in one step, and again for more.
+        int undoBefore = disc.TestUndoCount; disc.TestSmoothEdges();
+        int oncePixels = SoftCount(disc.TestShown(0));
+        Ok(oncePixels > 60 && disc.TestUndoCount == undoBefore + 1 && disc.TestShown(0).Get(24, 24) == SoftWhite && disc.TestShown(0).Get(0, 0) == 0, "Smooth edges should soften the whole outline in one Undo step: " + oncePixels);
+        disc.TestSmoothEdges(); Ok(SoftCount(disc.TestShown(0)) > oncePixels, "Pressing Smooth edges again should soften further");
+        CaptureWindow(disc, output + ".smooth.png");
+        disc.TestUndo(); disc.TestUndo();
+        // With a selection, only the inside.
+        disc.TestTool("Select"); disc.TestStroke(false, (0, 0), (47, 23)); disc.TestSmoothEdges();
+        Ok(disc.TestShown(0).Get(24, 8) >> 24 is > 0 and < 255 && disc.TestShown(0).Get(24, 39) == SoftWhite && disc.TestShown(0).Get(24, 40) == 0, "Smooth edges with a selection should only change the inside");
+        disc.TestDeselect();
+        // Nothing to smooth: no empty Undo step.
+        disc.TestTool("Select"); disc.TestStroke(false, (20, 20), (28, 28)); undoBefore = disc.TestUndoCount; disc.TestSmoothEdges();
+        Ok(disc.TestUndoCount == undoBefore && disc.TestNotice.Contains("no edges"), "Smoothing a flat area should change nothing and say so: " + disc.TestNotice);
+        disc.TestDiscard();
+
         dirty = false;
-        File.WriteAllText(output, "PASS: menus (Arrange and Align submenus, open sprites in the editors), frames (multi-pick, standard and mirrored duplicate, move left/right, delete, onion by default), pencil, fill with see-through colors, eraser, undo/redo, mirror, right-click color, rectangle preview; layers (new, opacity, hide, refuse hidden, nested groups, group opacity, undo, out of group, refused merge onto a group, delete group, merge down); select, move, put down, nudge, undo, copy/paste to another layer, move a layer and a group; blended and replacing colors; frames across layers, flip, filled ellipse; save as a transparent 24×8 sheet with layers kept (undoable, re-save updates, reopens, out-of-date detection, never exported); add to screen as a sprite; sprite sheet editor clicks/right-click/speed/once and single-step apply");
+        File.WriteAllText(output, "PASS: soft brush (a band with a blended edge, one Undo step, no build-up, erasing with the transparent color, mirror, selection) and Smooth (the tool along an edge, Smooth edges for a layer or a selection, no dark fringe, nothing when flat), menus (Arrange and Align submenus, open sprites in the editors), frames (multi-pick, standard and mirrored duplicate, move left/right, delete, onion by default), pencil, fill with see-through colors, eraser, undo/redo, mirror, right-click color, rectangle preview; layers (new, opacity, hide, refuse hidden, nested groups, group opacity, undo, out of group, refused merge onto a group, delete group, merge down); select, move, put down, nudge, undo, copy/paste to another layer, move a layer and a group; blended and replacing colors; frames across layers, flip, filled ellipse; save as a transparent 24×8 sheet with layers kept (undoable, re-save updates, reopens, out-of-date detection, never exported); add to screen as a sprite; sprite sheet editor clicks/right-click/speed/once and single-step apply");
     }
 }

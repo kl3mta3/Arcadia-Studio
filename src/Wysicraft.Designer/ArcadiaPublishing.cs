@@ -262,24 +262,32 @@ public partial class MainWindow
 
             // Leaderboard
             form.Children.Add(Heading("Leaderboard"));
-            leaderboard.IsChecked = s.Leaderboard; form.Children.Add(leaderboard);
+            // Scan sits beside the tick box: it suggests the score, the end of a run and extra columns, and ticks the box.
+            leaderboard.IsChecked = s.Leaderboard; leaderboard.VerticalAlignment = VerticalAlignment.Center;
+            var boardRow = new StackPanel { Orientation = Orientation.Horizontal }; boardRow.Children.Add(leaderboard); boardRow.Children.Add(scan);
+            form.Children.Add(boardRow);
             // The leaderboard page players see: the arcade's standard board, one made here, or a page imported as it is.
             var pageRow = new StackPanel();
             var pageButtons = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
             Button PageButton(string text, string tip) { var b = new Button { Content = text, ToolTip = tip, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 1, 8, 1) }; pageButtons.Children.Add(b); return b; }
             var createPage = PageButton("Create leaderboard…", "Design a leaderboard page in the editor: lists, a podium, rank boxes and more, filled from the game's board.");
             var importPage = PageButton("Import leaderboard…", "A .lb file, or a page. A page made in Arcadia Studio can be edited again; any other page is used as it is.");
-            var editPage = PageButton("Edit", "Open the chosen leaderboard page in the editor.");
+            var editPage = PageButton("Edit", "Open the chosen leaderboard page in the leaderboard creator.");
+            var removePage = PageButton("Remove", "Stop using a page of your own: the game goes back to the arcade's standard board from the next publish. A page you designed stays in the project; an imported page is taken out.");
             pageRow.Children.Add(boardPage); pageRow.Children.Add(pageButtons);
             form.Children.Add(Row("Leaderboard page", pageRow, "What players see when they open the game's leaderboard. Needs Keep a leaderboard."));
             FillBoardPages(s.LeaderboardPage);
-            createPage.Click += (_, _) => { var made = editor.CreateLeaderboard(); FillBoardPages("board:" + made.Id); editor.Activate(); };
+            // Create and Edit open the leaderboard creator, a window of its own; closing it comes back here with the page chosen.
+            createPage.Click += (_, _) => { try { Apply(); OpenCreator(editor.CreateLeaderboard(open: false)); } catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException) { status.Text = ex.Message; } };
             importPage.Click += (_, _) => { try { if (editor.ImportLeaderboard(open: false) is string choice) FillBoardPages(choice); } catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { status.Text = ex.Message; } };
-            editPage.Click += (_, _) => { if (Chosen(boardPage) is string c && c.StartsWith("board:") && editor.project.Leaderboards.FirstOrDefault(b => b.Id == c[6..]) is UiDefinition board) { editor.OpenLeaderboard(board); editor.Activate(); } };
-            boardPage.SelectionChanged += (_, _) => editPage.IsEnabled = Chosen(boardPage).StartsWith("board:");
-            editPage.IsEnabled = Chosen(boardPage).StartsWith("board:");
+            editPage.Click += (_, _) => { try { if (Chosen(boardPage) is string c && c.StartsWith("board:") && editor.project.Leaderboards.FirstOrDefault(b => b.Id == c[6..]) is UiDefinition board) { Apply(); OpenCreator(board); } } catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException) { status.Text = ex.Message; } };
+            removePage.Click += (_, _) => RemoveBoardPage();
+            // Edit needs a page made here; Remove needs a page of any kind to be set.
+            void PageButtons() { string chosen = Chosen(boardPage); editPage.IsEnabled = chosen.StartsWith("board:"); removePage.IsEnabled = chosen.StartsWith("board:") || chosen == "file"; }
+            boardPage.SelectionChanged += (_, _) => PageButtons();
+            PageButtons();
             // Pages made or changed in the editor meanwhile appear when the window is used again.
-            Activated += (_, _) => { if (!busy) FillBoardPages(null); };
+            Activated += (_, _) => { if (busy) return; if (Fingerprint(editor.project.Publishing) != shown) Reload(); else FillBoardPages(null); };
             form.Children.Add(scoresPanel);
             var c = s.Scores;
             label.Text = c.Label; Select(format, c.Format); Select(order, c.Order); Select(aggregate, c.Aggregate);
@@ -318,8 +326,10 @@ public partial class MainWindow
             open.Click += (_, _) => OpenInBrowser(openUrl);
             history.Click += async (_, _) => await Guard(History);
             loadDetails.Click += async (_, _) => await Guard(LoadDetails);
+            scan.Click += async (_, _) => await Guard(Scan);
             findings.MouseDoubleClick += (_, _) => OpenFinding();
             Closing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Wait for the upload to finish before closing."; return; } Apply(); };
+            shown = Fingerprint(editor.project.Publishing);
             Loaded += async (_, _) => await Guard(Refresh);
         }
 
@@ -359,6 +369,37 @@ public partial class MainWindow
             if (project.Publishing.LeaderboardHtml.Length > 0) boardPage.Items.Add(new ComboBoxItem { Content = $"Imported page ({project.Publishing.LeaderboardHtml.Length / 1024.0:0} KB, used as it is)", Tag = "file" });
             if (current == "") current = AutoBoardPage();
             Select(boardPage, current); if (boardPage.SelectedItem == null) boardPage.SelectedIndex = 0;
+        }
+        /// <summary>The leaderboard creator on a page; when it closes, the page is the one chosen here.</summary>
+        internal Func<UiDefinition, string>? CreatorForTest;
+        void OpenCreator(UiDefinition board)
+        {
+            string id = CreatorForTest != null ? CreatorForTest(board) : editor.OpenLeaderboardCreator(board, this);
+            FillBoardPages("board:" + id);
+            shown = Fingerprint(editor.project.Publishing);
+            Activate();
+            status.Text = "Leaderboard page: " + id + ". Publishing sends it as the game's leaderboard.";
+        }
+        /// <summary>Remove: the game stops using a page of its own. The dropdown goes back to the arcade's standard board,
+        /// so the next publish leaves leaderboardPage and the page's file out (the arcade then deletes the old page). A page
+        /// designed here stays in the project; an imported one is taken out of it.</summary>
+        internal Func<string, bool>? ConfirmForTest;
+        internal void RemoveBoardPage()
+        {
+            string chosen = Chosen(boardPage);
+            if (chosen == "file")
+            {
+                const string question = "Remove the imported leaderboard page from this project?\n\nThe game will use the arcade's standard board. You can import the page again later.";
+                if (!(ConfirmForTest != null ? ConfirmForTest(question) : MessageBox.Show(this, question, "Leaderboard page", MessageBoxButton.YesNo) == MessageBoxResult.Yes)) return;
+                Apply(); editor.RemoveImportedLeaderboard(); shown = Fingerprint(editor.project.Publishing);
+                FillBoardPages("standard");
+                status.Text = "The imported page was removed. The game uses the arcade's standard board from the next publish.";
+            }
+            else if (chosen.StartsWith("board:"))
+            {
+                FillBoardPages("standard");
+                status.Text = "The game uses the arcade's standard board from the next publish. Your page " + chosen[6..] + " is still in the project: choose it again here any time.";
+            }
         }
         string AutoBoardPage() => editor.project.Leaderboards.Count > 0 ? "board:" + editor.project.Leaderboards[0].Id : "standard";
         static void Select(ComboBox box, string value) { foreach (ComboBoxItem item in box.Items) if ((string)item.Tag == value) { box.SelectedItem = item; return; } }
@@ -430,13 +471,37 @@ public partial class MainWindow
             };
             return s;
         }
-        /// <summary>The form goes back into the project (one Undo step) when anything in it changed.</summary>
+        /// <summary>The form goes back into the project (one Undo step) when anything in it changed. If the project's
+        /// settings changed since the form last showed them (MCP, Undo, the itch.io hand-over), the form takes them
+        /// instead: a stale form never writes over newer settings.</summary>
         void Apply()
         {
+            if (Fingerprint(editor.project.Publishing) != shown) { Reload(); return; }
             var s = Collect();
             var was = editor.project.Publishing;
             if (Json.Write(s) == Json.Write(was) && ReferenceEquals(s.Cover, was.Cover) && s.Screenshots.Select(x => x.Bytes).SequenceEqual(was.Screenshots.Select(x => x.Bytes), ReferenceEqualityComparer.Instance) && ReferenceEquals(s.LeaderboardHtml, was.LeaderboardHtml)) return;
-            editor.Change(); editor.project.Publishing = s;
+            editor.Change(); editor.project.Publishing = s; shown = Fingerprint(s);
+        }
+        // Which settings the form is showing: their text and which pictures (by reference; picture bytes are never
+        // changed in place, only replaced).
+        string shown = "";
+        // The saved game IDs (Arcades) and itch.io settings are left out: the window updates those itself while publishing.
+        static string Fingerprint(PublishSettings p)
+        {
+            var form = Json.Clone(p); form.Arcades = []; form.Itch = new();
+            static int Id(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+            return Json.Write(form) + "|" + Id(p.Cover) + "|" + string.Join(",", p.Screenshots.Select(x => Id(x.Bytes))) + "|" + Id(p.LeaderboardHtml);
+        }
+        /// <summary>The whole form from the project's settings, as when the window opens.</summary>
+        internal void Reload()
+        {
+            var s = editor.project.Publishing;
+            FillDetails(s);
+            if (s.Title.Length == 0) title.Text = editor.project.Manifest.Name;
+            version.Text = s.Version.Length > 0 ? s.Version : version.Text;
+            aspect.Text = s.AspectRatio.Length > 0 ? s.AspectRatio : (string)aspect.Items[0]!;
+            FillBoardPages(s.LeaderboardPage);
+            shown = Fingerprint(s);
         }
 
         // ---- Account ----
@@ -451,7 +516,7 @@ public partial class MainWindow
         }
         void SetEnabled(bool on)
         {
-            foreach (var b in new[] { link, arcade, check, history }) b.IsEnabled = on;
+            foreach (var b in new[] { link, arcade, check, history, scan }) b.IsEnabled = on;
             publish.IsEnabled = on && CanPublish(out _);
             history.IsEnabled = on && key != null && editor.RememberedGameId(client.Host) != null;
             foreach (var line in new[] { mode, limit }) line.Visibility = line.Text.Length > 0 || line.Inlines.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -623,17 +688,18 @@ public partial class MainWindow
             gallery.Add(new PublishImage { Type = got.Type, Bytes = got.Bytes }); ShowShots();
             status.Text = $"Captured the Preview screen as screenshot {gallery.Count}.";
         }
-        /// <summary>A chosen picture ready to use: its bytes and type, fitted to 1280 × 800 when it's over 2 MB. Null (and
-        /// a note in problems) when it isn't really a PNG, JPEG or WebP.</summary>
-        static (byte[] Bytes, string Type)? ReadPicture(string file, List<string> problems, List<string> fitted)
+        /// <summary>A chosen picture ready to use: its bytes and type, fitted to the arcade's 1280 × 800 (the middle at 16:10,
+        /// as captures are) unless it already is that size. WebP is kept as it is (it can't be decoded here). Null (and a
+        /// note in problems) when it isn't really a PNG, JPEG or WebP.</summary>
+        internal static (byte[] Bytes, string Type)? ReadPicture(string file, List<string> problems, List<string> fitted)
         {
             var bytes = File.ReadAllBytes(file);
             string? type = ArcadiaPackage.ImageType(bytes);
             if (type == null) { problems.Add(Path.GetFileName(file) + " isn't really a PNG, JPEG or WebP picture."); return null; }
-            if (bytes.LongLength > ArcadiaPackage.MaxScreenshotBytes && type != "webp") { (bytes, type) = FitScreenshot(bytes); fitted.Add(Path.GetFileName(file)); }
+            if (type != "webp" && (ArcadiaPackage.ImageSize(bytes) != (ArcadiaPackage.ScreenshotWidth, ArcadiaPackage.ScreenshotHeight) || bytes.LongLength > ArcadiaPackage.MaxScreenshotBytes)) { (bytes, type) = FitScreenshot(bytes); fitted.Add(Path.GetFileName(file)); }
             return (bytes, type);
         }
-        static string Fitted(List<string> names) => names.Count == 0 ? "" : " " + string.Join(", ", names) + (names.Count == 1 ? " was" : " were") + " over 2 MB, so fitted to 1280 × 800.";
+        static string Fitted(List<string> names) => names.Count == 0 ? "" : " " + string.Join(", ", names) + (names.Count == 1 ? " was" : " were") + " fitted to 1280 × 800 (the middle at 16:10).";
         void Choose()
         {
             var dialog = new OpenFileDialog { Title = "Choose a cover", Filter = "Pictures (PNG, JPEG, WebP)|*.png;*.jpg;*.jpeg;*.webp" };
@@ -741,6 +807,7 @@ public partial class MainWindow
                     if (pre.Refused) { ShowFindings(local, pre.Findings); status.Text = "The arcade would refuse this upload: fix the problems marked red."; return; }
                     if (pre.Details is { Conflict: true } clash)
                     {
+                        LeaderboardQuestion = ArcadiaDetailsMerge.LeaderboardQuestion(clash, leaderboard.IsChecked == true);
                         bool? mine = ChooseDetails != null ? ChooseDetails(clash) : AskDetails(clash);
                         if (mine == null) { status.Text = "Nothing was published."; return; }
                         overwrite = mine; if (mine == false) keepArcade = clash.Arcade;
@@ -787,6 +854,10 @@ public partial class MainWindow
                 return;
             }
         }
+        /// <summary>What the last details prompt asked about the leaderboard, when it was a clash over having one at all.</summary>
+        internal string? LeaderboardQuestion;
+        /// <summary>Tests look at the prompt as it's shown; it then closes as Cancel.</summary>
+        internal Action<Window>? DetailsPromptForTest;
         /// <summary>Asks whose details to keep when they were changed on Arcadia since the last publish: true uses this
         /// project's, false keeps Arcadia's (the default), null publishes nothing.</summary>
         bool? AskDetails(ArcadiaDetails clash)
@@ -798,6 +869,11 @@ public partial class MainWindow
             window.SetResourceReference(StyleProperty, typeof(Window));
             var panel = new StackPanel { Margin = new Thickness(16) }; window.Content = panel;
             panel.Children.Add(Wrap(Brushes.White, $"Your game's details were changed on Arcadia{who}{when}{fields}."));
+            // A clash over having a leaderboard at all is spelled out: it adds or removes the game's board.
+            if (ArcadiaDetailsMerge.LeaderboardQuestion(clash, leaderboard.IsChecked == true) is string question)
+                panel.Children.Add(Wrap(Brushes.Khaki, question + (clash.Arcade?.Board != null
+                    ? " Use mine removes it. Keep Arcadia's keeps it, and ticks Keep a leaderboard here."
+                    : " Use mine turns it back on. Keep Arcadia's leaves it off, and unticks Keep a leaderboard here.")));
             panel.Children.Add(Wrap(Brushes.LightGray, "Keep Arcadia's, or replace them with the ones from Arcadia Studio? The game itself is updated either way. Keeping Arcadia's also copies them into this project, so you won't be asked again."));
             bool? answer = null;
             var bar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; panel.Children.Add(bar);
@@ -807,6 +883,7 @@ public partial class MainWindow
                 b.Click += (_, _) => { answer = value; window.Close(); }; bar.Children.Add(b);
             }
             Choice("Keep Arcadia's", false, isDefault: true); Choice("Use mine", true); Choice("Cancel", null, isCancel: true);
+            if (DetailsPromptForTest != null) window.ContentRendered += (_, _) => { DetailsPromptForTest(window); window.Close(); };
             window.ShowDialog();
             return answer;
         }
@@ -973,7 +1050,7 @@ public partial class MainWindow
     }
 
     // ---- MCP: prepare and check only; publishing is the person's own click ----
-    internal Task<string> McpArcadia(string action, string expected, string settings, string cover, string screenshots, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(async () =>
+    internal Task<string> McpArcadia(string action, string expected, string settings, string cover, string screenshots, CancellationToken cancellationToken, string leaderboardFile = "") => Dispatcher.InvokeAsync(async () =>
     {
         try
         {
@@ -994,6 +1071,19 @@ public partial class MainWindow
                 });
             }
             if (action is not ("prepare" or "check")) throw new InvalidOperationException("action is status, prepare or check.");
+            // A leaderboard page from a file, as Import leaderboard… does it: a .lb or a page made in Arcadia Studio becomes an
+            // editable page; any other page is used as it is. Either way it becomes the game's leaderboard page.
+            if (leaderboardFile.Trim().Length > 0)
+            {
+                CheckRevision(expected);
+                string file = leaderboardFile.Trim();
+                if (!Path.IsPathFullyQualified(file) || !File.Exists(file) || !(file.EndsWith(Leaderboards.Extension, StringComparison.OrdinalIgnoreCase) || file.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".htm", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidDataException("leaderboardFile is an absolute path to a .lb file or an .html page.");
+                string choice = ImportLeaderboardFile(file, open: false, confirm: _ => true) ?? "";
+                project.Publishing.LeaderboardPage = choice; arcadiaDialog?.Reload(); RefreshAll();
+                Log("MCP imported " + Path.GetFileName(file) + " as the game's leaderboard page (" + choice + ").");
+                expected = Revision(); // the import is this call's own change: settings below apply on top of it
+            }
             if (settings.Trim().Length > 0 || cover.Trim().Length > 0 || screenshots.Trim().Length > 0)
             {
                 CheckRevision(expected);
@@ -1007,8 +1097,9 @@ public partial class MainWindow
                         return FitScreenshot(await activePreview.CaptureScreenAsync());
                     }
                     if (!Path.IsPathFullyQualified(source) || !File.Exists(source)) throw new InvalidDataException(what + " is \"capture\" or an absolute path to a PNG, JPEG or WebP.");
-                    var bytes = File.ReadAllBytes(source);
-                    return (bytes, ArcadiaPackage.ImageType(bytes) ?? throw new InvalidDataException(Path.GetFileName(source) + " isn't really a PNG, JPEG or WebP picture."));
+                    // Fitted to 1280 × 800 like a picture chosen in the window, unless it already is that size.
+                    List<string> problems = [], fitted = [];
+                    return ArcadiaDialog.ReadPicture(source, problems, fitted) ?? throw new InvalidDataException(problems[0]);
                 }
                 if (settings.Trim().Length > 0)
                 {
@@ -1045,6 +1136,8 @@ public partial class MainWindow
                     s.Screenshots = list;
                 }
                 Change(); project.Publishing = s; RefreshAll();
+                // An open Publish window shows them at once (and so can't write its older form back over them).
+                arcadiaDialog?.Reload();
                 Log("MCP updated the Publish to Arcadia settings.");
             }
             var snapshot = Json.CloneProject(project); var settingsNow = snapshot.Publishing;
@@ -1074,7 +1167,7 @@ public partial class MainWindow
                 arcade = arcade == null ? null : new { arcade.Ok, arcade.WouldHold, arcade.Refused, arcade.Findings },
                 // Details edited on the website since the last publish: the person is asked in the Publish window whether to
                 // keep Arcadia's (the default) or use the project's. An assistant only reports it; it never chooses.
-                detailsChanged = arcade?.Details is { Conflict: true } clash ? new { fields = clash.Changed.Select(ArcadiaDetailsMerge.Name).ToList(), clash.EditedBy, clash.EditedAt, note = "These were changed on Arcadia since the last publish. When the person publishes, they choose whether to keep Arcadia's (the default) or replace them with the project's; Load details from Arcadia copies Arcadia's into the project." } : null,
+                detailsChanged = arcade?.Details is { Conflict: true } clash ? new { fields = clash.Changed.Select(ArcadiaDetailsMerge.Name).ToList(), clash.EditedBy, clash.EditedAt, leaderboard = ArcadiaDetailsMerge.LeaderboardQuestion(clash, settingsNow.Leaderboard), note = "These were changed on Arcadia since the last publish. When the person publishes, they choose whether to keep Arcadia's (the default) or replace them with the project's; Load details from Arcadia copies Arcadia's into the project." } : null,
                 revision = Revision(),
                 note = "Nothing was published. The person publishes from File → Publish to Arcadia."
             });
@@ -1086,6 +1179,6 @@ public partial class MainWindow
 
 public sealed partial class DesignerMcpTools
 {
-    [McpServerTool(Name = "arcadia_publish"), Description("Prepare a game for Arcadia (the web arcade) and check it. This never publishes: the person publishes from File → Publish to Arcadia. action: status (link, account, limits, current settings, score sources; read-only), prepare (build the package zip under LocalAppData/Arcadia Studio/McpExports and run the local upload rules), check (prepare, then the arcade's own dry run; needs this computer linked). settings (optional JSON, saved to the project as one Undo step): {title, description, genre: [up to 3], version, controls, aspectRatio, mobile: bool (plays on phones and tablets: touch controls and fits a small screen), videos: [up to 3 YouTube links: youtube.com/watch?v=, youtu.be/ or youtube.com/shorts/], leaderboard: bool, scores: {label, format: points|number|time, order: desc|asc, aggregate: best|sum, min, max, minSeconds, score: {variable, path}, triggers: [{variable, path, equals?}], stats: [{key, label, aggregate: max|min|sum, variable, path, check: false for a stat that doesn't grow over time, like accuracy %}], round: floor|none}}. A trigger without equals means 'is true'. cover (optional; required before publishing): \"capture\" takes it from the open Preview (fitted to 1280×800), or an absolute path to a PNG/JPEG/WebP. screenshots (optional): a JSON array of up to 8, each \"capture\" or an absolute path, replacing the gallery in that order ([] clears it). screenshot is the older name for cover. expectedRevision is needed when settings, cover or screenshots are given.")]
-    public Task<string> ArcadiaPublish(string action, string expectedRevision = "", string settings = "", string cover = "", string screenshots = "", string screenshot = "", CancellationToken cancellationToken = default) => editor.McpArcadia(action, expectedRevision, settings, cover.Length > 0 ? cover : screenshot, screenshots, cancellationToken);
+    [McpServerTool(Name = "arcadia_publish"), Description("Prepare a game for Arcadia (the web arcade) and check it. This never publishes: the person publishes from File → Publish to Arcadia. action: status (link, account, limits, current settings, score sources; read-only), prepare (build the package zip under LocalAppData/Arcadia Studio/McpExports and run the local upload rules), check (prepare, then the arcade's own dry run; needs this computer linked). settings (optional, saved to the project as one Undo step; only the fields given change): {title, description, genre, version, controls, aspectRatio, mobile, videos, leaderboard, scores, leaderboardPage}. cover (optional; required before publishing): \"capture\" takes it from the open Preview, or an absolute path to a PNG/JPEG/WebP. screenshots (optional): a list of up to 8, each \"capture\" or an absolute path ([] clears the gallery). screenshot is the older name for cover. leaderboardFile (optional): an absolute path to a .lb file or an .html leaderboard page to import. expectedRevision is needed when settings, cover or screenshots are given. Every settings field, the scores block and the leaderboard page choices: guide(topic:\"publish\").")]
+    public Task<string> ArcadiaPublish(string action, string expectedRevision = "", ArcadiaSettingsInput? settings = null, string cover = "", List<string>? screenshots = null, string screenshot = "", string leaderboardFile = "", CancellationToken cancellationToken = default) => editor.McpArcadia(action, expectedRevision, McpTypedInputs.ToJson(settings), cover.Length > 0 ? cover : screenshot, McpTypedInputs.List(screenshots), cancellationToken, leaderboardFile);
 }

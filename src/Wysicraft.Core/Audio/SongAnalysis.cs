@@ -193,7 +193,6 @@ public static class SongAnalysis
         }
         public double Bpm => 60 / Period;
         public int Count => times.Length;
-        public double TimeOf(int beat) => beat < 0 ? times[0] + beat * Period : beat >= times.Length ? times[^1] + (beat - times.Length + 1) * Period : times[beat];
         /// <summary>Song beat (bar lines on multiples of the beats per bar) for a time in seconds.</summary>
         public double BeatAt(double seconds)
         {

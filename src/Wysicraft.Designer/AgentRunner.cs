@@ -30,7 +30,7 @@ public static class Assistants
     // Every value here is from the tool's own documentation or its --help; nothing is guessed. Sources are in
     // docs/engine-upgrade-plan.md.
     static readonly Dictionary<string, string> None = [];
-    const string ServerShape = "{\"mcpServers\":{\"wysicraft\":{\"httpUrl\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"},\"trust\":true,\"includeTools\":[{toolList}]}}}";
+    const string ServerShape = "{\"mcpServers\":{\"arcadia-studio\":{\"httpUrl\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"},\"trust\":true,\"includeTools\":[{toolList}]}}}";
     public static readonly AssistantTool[] Known =
     [
         new("claude", "Claude Code", ["claude.exe", "claude"], ["--version"],
@@ -44,10 +44,10 @@ public static class Assistants
             "npm install -g @openai/codex", "Needs Node.js. Sign in with a ChatGPT account.",
             ["login"], ["login", "status"], true,
             ["exec", "--json", "--skip-git-repo-check", "-s", "workspace-write",
-             "-c", "mcp_servers.wysicraft.url=\"{url}\"", "-c", "mcp_servers.wysicraft.bearer_token_env_var=\"WYSICRAFT_MCP_TOKEN\"", "{prompt}"],
-            ["-c", "mcp_servers.wysicraft.url=\"{url}\"", "-c", "mcp_servers.wysicraft.bearer_token_env_var=\"WYSICRAFT_MCP_TOKEN\""],
+             "-c", "mcp_servers.arcadia-studio.url=\"{url}\"", "-c", "mcp_servers.arcadia-studio.bearer_token_env_var=\"ARCADIA_STUDIO_MCP_TOKEN\"", "{prompt}"],
+            ["-c", "mcp_servers.arcadia-studio.url=\"{url}\"", "-c", "mcp_servers.arcadia-studio.bearer_token_env_var=\"ARCADIA_STUDIO_MCP_TOKEN\""],
             "A ChatGPT Plus, Pro, Team or Enterprise plan.",
-            "", "", new() { ["WYSICRAFT_MCP_TOKEN"] = "{token}" }, "", ""),
+            "", "", new() { ["ARCADIA_STUDIO_MCP_TOKEN"] = "{token}" }, "", ""),
         new("gemini", "Gemini CLI (Google)", ["gemini.cmd", "gemini.exe", "gemini"], ["--version"],
             "npm install -g @google/gemini-cli", "Needs Node.js. Sign in with a Google account the first time it runs.",
             [], [], false,
@@ -68,9 +68,9 @@ public static class Assistants
             ["-p", "{prompt}", "--output-format", "text", "--yolo"],
             [],
             "A Kimi account.",
-            ".kimi-code/mcp.json", "{\"mcpServers\":{\"wysicraft\":{\"url\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"}}}}", None, "", ""),
+            ".kimi-code/mcp.json", "{\"mcpServers\":{\"arcadia-studio\":{\"url\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"}}}}", None, "", ""),
         new("opencode", "opencode", ["opencode.cmd", "opencode.exe", "opencode"], ["--version"],
-            "npm install -g opencode-ai", "Or: scoop install opencode, or choco install opencode. Supports MCP sampling.",
+            "npm install -g opencode-ai", "Or: scoop install opencode, or choco install opencode.",
             ["auth", "login"], [], false,
             ["run", "{prompt}"],
             [],
@@ -79,7 +79,7 @@ public static class Assistants
         new("copilot", "GitHub Copilot CLI", ["copilot.cmd", "copilot.exe", "copilot"], ["--version"],
             "npm install -g @github/copilot", "Or: winget install GitHub.Copilot. Run it once and use /login. The server is added to ~/.copilot/mcp-config.json, beside anything already there.",
             [], [], false,
-            ["-p", "{prompt}", "--output-format=json", "--allow-tool", "wysicraft"],
+            ["-p", "{prompt}", "--output-format=json", "--allow-tool", "arcadia-studio"],
             [],
             "A GitHub Copilot subscription.",
             "", "", None, ".copilot/mcp-config.json", "{\"type\":\"http\",\"url\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"}}"),
@@ -195,7 +195,7 @@ public partial class MainWindow
     {
         mcpServers = new Dictionary<string, object>
         {
-            ["wysicraft"] = new { type = "http", url = mcpUrl, headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + mcpToken } }
+            [McpServerKey] = new { type = "http", url = mcpUrl, headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + mcpToken } }
         }
     });
 
@@ -203,7 +203,7 @@ public partial class MainWindow
     /// stays one argument.</summary>
     string Fill(string template, string prompt, string config) => template
         .Replace("{prompt}", prompt).Replace("{mcpConfig}", config).Replace("{url}", mcpUrl).Replace("{token}", mcpToken)
-        .Replace("{tools}", string.Join(" ", Assistants.EditorTools.Select(t => "mcp__wysicraft__" + t)))
+        .Replace("{tools}", string.Join(" ", Assistants.EditorTools.Select(t => "mcp__" + McpServerKey + "__" + t)))
         .Replace("{toolList}", string.Join(",", Assistants.EditorTools.Select(t => "\"" + t + "\"")));
     string[] AssistantArguments(bool headless, string prompt, string config)
     {
@@ -238,7 +238,7 @@ public partial class MainWindow
             {
                 // opencode reads one config file named by OPENCODE_CONFIG; this one carries only the server.
                 string file = Path.Combine(work, "opencode.json");
-                File.WriteAllText(file, Json.Write(new { mcp = new Dictionary<string, object> { ["wysicraft"] = new { type = "remote", url = mcpUrl, enabled = true, headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + mcpToken } } } }));
+                File.WriteAllText(file, Json.Write(new { mcp = new Dictionary<string, object> { [McpServerKey] = new { type = "remote", url = mcpUrl, enabled = true, headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + mcpToken } } } }));
                 filled = file;
             }
             start.Environment[name] = filled;
@@ -247,7 +247,18 @@ public partial class MainWindow
         return work;
     }
     /// <summary>For a tool that only reads its own config in the profile: the server entry goes in beside whatever
-    /// is already there, under mcpServers.wysicraft, and nothing else in the file is touched.</summary>
+    /// is already there, under mcpServers.arcadia-studio, and nothing else in the file is touched, except the entry this
+    /// app wrote under its old name (mcpServers.wysicraft, pointing at this computer), which is taken out so the editor
+    /// isn't listed twice.</summary>
+    /// <summary>The name assistants know the editor's MCP server by: the key in every config the app hands out, and so
+    /// the prefix on its tools (mcp__arcadia-studio__get_project). It was "wysicraft" before the rename.</summary>
+    internal const string McpServerKey = "arcadia-studio", OldMcpServerKey = "wysicraft";
+    /// <summary>An entry this app wrote under the old name: its address is this computer's local server.</summary>
+    static bool IsOurOldEntry(System.Text.Json.Nodes.JsonNode? entry)
+    {
+        string address = (entry?["url"] ?? entry?["httpUrl"])?.ToString() ?? "";
+        return address.StartsWith("http://127.0.0.1:", StringComparison.Ordinal) && address.EndsWith("/mcp", StringComparison.Ordinal);
+    }
     void MergeHomeEntry(AssistantTool tool)
     {
         string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), tool.HomeFile.Replace('/', Path.DirectorySeparatorChar));
@@ -256,7 +267,8 @@ public partial class MainWindow
         try { root = File.Exists(file) ? System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file)) as System.Text.Json.Nodes.JsonObject ?? new() : new(); }
         catch (JsonException) { root = new(); }
         if (root["mcpServers"] is not System.Text.Json.Nodes.JsonObject servers) root["mcpServers"] = servers = new();
-        servers["wysicraft"] = System.Text.Json.Nodes.JsonNode.Parse(Fill(tool.HomeFileEntry, "", ""));
+        servers[McpServerKey] = System.Text.Json.Nodes.JsonNode.Parse(Fill(tool.HomeFileEntry, "", ""));
+        if (IsOurOldEntry(servers[OldMcpServerKey])) servers.Remove(OldMcpServerKey);
         File.WriteAllText(file, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
@@ -296,7 +308,7 @@ public partial class MainWindow
                 while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
                 {
                     lines.AppendLine(line);
-                    var m = System.Text.RegularExpressions.Regex.Match(line, "\"type\":\"tool_use\".{0,200}?\"name\":\"(?:mcp__wysicraft__)?([A-Za-z_]+)\"");
+                    var m = System.Text.RegularExpressions.Regex.Match(line, "\"type\":\"tool_use\".{0,200}?\"name\":\"(?:mcp__(?:arcadia-studio|wysicraft)__)?([A-Za-z_]+)\"");
                     if (m.Success) { calls++; progress?.Invoke($"Using {m.Groups[1].Value}… ({calls} tool call{(calls == 1 ? "" : "s")}, {started.Elapsed.TotalSeconds:0}s)"); }
                 }
             }, cancellationToken);
@@ -369,7 +381,7 @@ public partial class MainWindow
         assistantSessionWork = work;
         // Environment for the tool travels through the PowerShell that hosts it.
         var wanted = Assistants.Find(Prefs().AssistantTool)?.Environment.Keys.ToHashSet() ?? [];
-        string environment = string.Join(" ", prepared.Environment.Where(e => wanted.Contains(e.Key)).Select(e => "$env:" + e.Key + "=" + Quote(e.Value) + ";"));
+        string environment = string.Join(" ", prepared.Environment.Where(e => wanted.Contains(e.Key)).Select(e => "$env:" + e.Key + "=" + Quote(e.Value ?? "") + ";"));
         string command = environment + " & " + Quote(exe) + " " + string.Join(" ", AssistantArguments(false, "", assistantSessionConfig).Select(Quote));
         assistantSession = Process.Start(ConsoleWindow(command, work));
         Log("Assistant started in its own window, with this project's MCP server attached.");
@@ -405,7 +417,7 @@ public partial class MainWindow
         string command = "& " + Quote(exe) + (tool.LoginArguments.Length > 0 ? " " + string.Join(" ", tool.LoginArguments.Select(Quote)) : "");
         Process.Start(ConsoleWindow(command, null));
     }
-    /// <summary>The command a person would paste to start their assistant with Wysicraft attached, for the manual route.</summary>
+    /// <summary>The command a person would paste to start their assistant with Arcadia Studio attached, for the manual route.</summary>
     internal string AssistantChatCommand()
     {
         var exe = AgentCommand() ?? "<assistant>";

@@ -16,7 +16,7 @@ public partial class MainWindow
     static string ShortcutsPath => Wysicraft.Core.AppFolders.Path("keybindings.json");
 
     void RegisterCommands() {
-        void Add(string id,string category,string name,string gesture,Action run,bool typing=false,Func<bool>? isChecked=null)=>commands.Add(new(id,category,name,gesture,run,typing,isChecked));
+        void Add(string id,string category,string name,string gesture,Action run,bool typing=false,Func<bool>? isChecked=null)=>commands.Add(new(id,category,name,gesture,CreatorCommand(id,run),typing,isChecked));
         Add("file.new","File","New project","Ctrl+N",NewProject,true);
         Add("file.open","File","Open project or pack…","Ctrl+O",OpenProject,true);
         Add("file.recover","File","Recover unsaved project…","",RecoverProject);
@@ -82,6 +82,9 @@ public partial class MainWindow
         Add("advanced.particleMaker","Advanced","Particle maker…","",()=>OpenParticleMaker());
         Add("advanced.collider","Advanced","Collider editor for the selection…","",()=>{var e=ui.Elements.FirstOrDefault(x=>selected.Contains(x.Id));if(e==null||!(e.Type=="collider"||e.Body.Length>0))throw new InvalidOperationException("Select a collider, or a control with a physics body, first.");if(e.Collider!="polygon"){Change();e.Collider="polygon";if(e.ColliderPoints.Count<3)e.ColliderPoints=DefaultPolygon(e);}ShowColliderEditor(e);});
         Add("advanced.tilemap","Advanced","Tile painter for the selection…","",()=>{var e=ui.Elements.FirstOrDefault(x=>selected.Contains(x.Id));if(e==null||e.Type!="tilemap")throw new InvalidOperationException("Select a Tilemap control first.");ShowTilemapEditor(e);});
+        Add("advanced.createAudio","Advanced","Create audio from text…","",()=>ShowCreateAudio());
+        Add("advanced.createText","Advanced","Create text from audio…","",ShowCreateText);
+        Add("advanced.speechSettings","Advanced","Speech settings…","",ShowSpeechSettings);
         Add("advanced.toolbox","Advanced","Show / hide the Advanced toolbox","",ToggleAdvancedToolbox);
         Add("help.manual","Help","User manual","F1",OpenManual,true);
         Add("help.scriptApi","Help","Script API and snippets","",ShowScriptApi);
