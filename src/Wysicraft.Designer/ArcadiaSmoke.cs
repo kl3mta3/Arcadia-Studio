@@ -26,6 +26,8 @@ public partial class MainWindow
         bool clash = false;
         // The leaderboard turned off on the website: the arcade's details then say "scores": false.
         bool boardOff = false;
+        // The arcade failing to store the next upload (its submission ends "failed"), and the arcade being down.
+        bool failNext = false, arcadeDown = false;
         static bool UploadHasBoard(byte[] zip)
         {
             using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(zip));
@@ -72,6 +74,7 @@ public partial class MainWindow
                 case "GET /api/publish/me":
                     await Send(200, "{\"creator\":{\"name\":\"Smoke Studio\",\"slug\":\"smoke\",\"url\":\"u\",\"status\":\"active\",\"trusted\":false,\"autoPublish\":false},\"publishing\":{\"enabled\":true,\"maxUploadMb\":50},\"limits\":{\"newGame\":{\"available\":1,\"max\":1,\"nextAt\":null}},\"games\":[{\"id\":\"c-smoke\",\"title\":\"Smoke\",\"status\":\"live\",\"url\":\"u\",\"limits\":{\"available\":3,\"max\":3}}]}"); return;
                 case "POST /api/publish/check":
+                    if (arcadeDown) { await Send(503, "{\"error\":\"The arcade is restarting.\",\"code\":\"unavailable\"}"); return; }
                     if (deleted && http.Request.Query["game"] == "c-smoke") { await Send(404, "{\"error\":\"You deleted this game on Arcadia.\",\"code\":\"deleted\"}"); return; }
                     if (clash && http.Request.Query["game"].Count > 0)
                     {
@@ -100,6 +103,7 @@ public partial class MainWindow
                 case "GET /media/cover.png": case "GET /media/shot.png": case "GET /media/keep.png":
                     http.Response.ContentType = "image/png"; await http.Response.Body.WriteAsync(path.EndsWith("cover.png") ? mediaCover : mediaShot); return;
                 case "GET /api/publish/submissions/7":
+                    if (failNext) { failNext = false; await Send(200, submission("failed").Replace("\"message\":null", "\"message\":\"Something went wrong on the arcade's side (GitHub POST /repos/x/y/git/trees failed (422): Sorry, your request timed out.). It doesn't count against your limits; please upload again.\"")); return; }
                     await Send(200, submission(statusPolls++ == 0 ? "processing" : "live")); return;
             }
             await Send(404, "{\"error\":\"Not here.\",\"code\":\"not-found\"}");
@@ -114,7 +118,7 @@ public partial class MainWindow
         {
             dialog = new ArcadiaDialog(this, client); dialog.Show();
             dialog.PromptPictures = output;
-            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, on => boardOff = !on, mediaCover, mediaShot);
+            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, on => boardOff = !on, () => failNext = true, down => arcadeDown = down, mediaCover, mediaShot);
             // A picture of the window as it ended, scrolled to the screenshots and videos, beside the result, for a look at the layout.
             dialog.ShowGallery(); dialog.UpdateLayout();
             var shot = new System.Windows.Media.Imaging.RenderTargetBitmap((int)dialog.ActualWidth, (int)dialog.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); shot.Render(dialog);
@@ -140,11 +144,12 @@ public partial class MainWindow
         internal string PromptPictures = "";
         internal void ShowGallery() { UpdateLayout(); shots.BringIntoView(); }
         async Task Settle() { for (int i = 0; i < 400 && busy; i++) await Task.Delay(25); await Task.Delay(50); }
-        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, Action<bool> boardOnWebsite, byte[] mediaCover, byte[] mediaShot)
+        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, Action<bool> boardOnWebsite, Action failNextUpload, Action<bool> arcadeIsDown, byte[] mediaCover, byte[] mediaShot)
         {
             void Expect(bool ok, string what) { if (!ok) throw new Exception("Publish window: " + what + "\nStatus: " + status.Text + "\nAccount: " + account.Text + "\nCalls:\n" + string.Join("\n", calls)); }
             await Settle();
             Expect(key == null && account.Text.StartsWith("Not linked") && (string)link.Content == "Link to Arcadia…" && !publish.IsEnabled, "starts unlinked, with Publish off");
+            Expect(loadDetails.Visibility == Visibility.Collapsed && open.Visibility == Visibility.Collapsed, "with nothing uploaded yet there is no Load details from Arcadia and no Open in browser");
 
             // Linking: the link window polls until approved, and the key is stored for this arcade.
             var start = await client.StartLinkAsync(ArcadiaDeviceName());
@@ -187,8 +192,35 @@ public partial class MainWindow
             await Guard(Check);
             Expect(calls.Any(c => c.StartsWith("POST /api/publish/check [key] application/zip")) && status.Text.Contains("moderator") && findings.Items.Count > 0, "Check sends the zip and shows the arcade's findings");
 
+            // The arcade is down while checking: a pop-up, with Try again because that can pass.
+            var problems = new List<(string Text, bool CanRetry)>();
+            arcadeIsDown(true); ProblemForTest = (text, canRetry) => { problems.Add((text, canRetry)); return false; };
+            await Guard(Check, popUp: true);
+            Expect(problems.Count == 1 && problems[0].CanRetry && problems[0].Text.Contains("restarting") && status.Text.Contains("restarting"), "a Check the arcade can't answer shows a pop-up that offers Try again: " + (problems.Count > 0 ? problems[0].Text : "none"));
+            // Try again runs the same check; once the arcade is back it goes through with no second pop-up.
+            problems.Clear(); ProblemForTest = (text, canRetry) => { problems.Add((text, canRetry)); arcadeIsDown(false); return true; };
+            arcadeIsDown(true); await Guard(Check, popUp: true);
+            Expect(problems.Count == 1 && status.Text.Contains("moderator") && findings.Items.Count > 0, "Try again runs the check again, and it goes through: " + status.Text);
+
+            // The arcade fails to store the very first upload: a pop-up with what it said and Try again. Nothing is
+            // counted as sent (no version used, no Open in browser, no details on Arcadia to load); the game's ID is kept.
+            // This one goes through the real pop-up: its buttons are read, a picture is taken, and it is closed.
+            failNextUpload(); ProblemForTest = null; string popUpButtons = ""; LastProblem = null;
+            ProblemWindowForTest = w => { popUpButtons = string.Join(" | ", ((StackPanel)w.Content).Children.OfType<StackPanel>().SelectMany(b => b.Children.OfType<Button>()).Select(b => (string)b.Content)); MainWindow.CaptureWindow(w, PromptPictures + ".problem.png"); w.Close(); };
+            await Guard(Publish, popUp: true);
+            ProblemWindowForTest = null;
+            Expect(popUpButtons == "Try again | Close" && LastProblem != null && LastProblem.StartsWith("The upload didn't go through") && LastProblem.Contains("GitHub POST") && LastProblem.Contains("didn't use up"), "a failed upload shows a pop-up with what the arcade said, Try again and Close: " + popUpButtons + " / " + LastProblem);
+            Expect(status.Text.StartsWith("Not published") && !status.Text.Contains("Something went wrong on the arcade's side. Something"), "the status line says it once: " + status.Text);
+            Expect(open.Visibility == Visibility.Collapsed && loadDetails.Visibility == Visibility.Collapsed, "after a failed upload there is no Open in browser and no Load details from Arcadia");
+            Expect(version.Text == "1.0.0" && editor.RememberedGameId(client.Host) == "c-smoke" && editor.SavedGame(client.Host)!.LastVersion == "", "the version isn't used up, and the game's ID is kept for the next try: " + version.Text + " / " + editor.SavedGame(client.Host)!.LastVersion);
+            // Try again from the pop-up: the same version is sent again, to the same game, and goes live.
+            problems.Clear(); failNextUpload(); ProblemForTest = (text, canRetry) => { problems.Add((text, canRetry)); return true; };
+            await Guard(Publish, popUp: true);
+            Expect(problems.Count == 1 && calls.Count(c => c.StartsWith("POST /api/publish/games/c-smoke [key]")) == 2, "Try again uploads again without another click: " + problems.Count + " pop-ups, " + calls.Count(c => c.StartsWith("POST /api/publish/games/c-smoke [key]")) + " uploads to the game");
+            ProblemForTest = null;
+            Expect(loadDetails.Visibility == Visibility.Visible, "once it has gone through, Load details from Arcadia is offered");
+
             // Publish: processing, then live; the game ID is kept in the project.
-            await Guard(Publish);
             Expect(status.Text.Contains("is live") && open.Visibility == Visibility.Visible && openUrl.Contains("/#/play/c-smoke"), "Publish ends on live, with Open in browser");
             Expect(editor.project.Publishing.Arcades.TryGetValue(client.Host, out var game) && game.GameId == "c-smoke" && game.LastVersion == "1.0.0" && editor.RememberedGameId(client.Host) == "c-smoke", "the game ID and version are kept");
             Expect(version.Text == "1.0.1", "the next version is offered");
@@ -330,7 +362,7 @@ public partial class MainWindow
                 Expect(editor.ArcadiaKey(client.Host) == null && !editor.Prefs().ArcadiaKeys.ContainsKey("old.arcade.test"), "unlinking clears both addresses, so an old key can't come back");
             }
             finally { FormerHosts.Remove(client.Host); }
-            return "PASS: Publish to Arcadia window against a fake arcade: link (pending → approved), encrypted key, account and review mode, cover fitting, screenshots (reorder, order sent), YouTube-only video links (flagged as typed, refused before sending), mobile, Check, Publish (processing → live, game ID kept, next version), update to the same game (check?game=), a game deleted on the arcade (Check and Publish; No / Yes → new game at 1.0.0 with its details kept), a title already taken, revoked key, an arcade at a new address (link and game carried over; forgetting clears both), details edited on the website (checked before an update; Cancel, Use mine = overwrite=true, Keep Arcadia's = overwrite=false and copied into the project with its pictures, an unchanged picture not downloaded again), the leaderboard clash both ways (a board on the website and none here: \"Remove it?\"; turned off on the website and one here: \"Turn it back on?\"; Use mine, Keep Arcadia's ticking or unticking Keep a leaderboard), Keep a leaderboard off sent as \"scores\": false, Load details from Arcadia (unticks Keep a leaderboard when it's off on the website), pictures only from the arcade.";
+            return "PASS: Publish to Arcadia window against a fake arcade: link (pending → approved), encrypted key, account and review mode, cover fitting, screenshots (reorder, order sent), YouTube-only video links (flagged as typed, refused before sending), mobile, Check, Publish (processing → live, game ID kept, next version), update to the same game (check?game=), a game deleted on the arcade (Check and Publish; No / Yes → new game at 1.0.0 with its details kept), a title already taken, revoked key, an arcade at a new address (link and game carried over; forgetting clears both), details edited on the website (checked before an update; Cancel, Use mine = overwrite=true, Keep Arcadia's = overwrite=false and copied into the project with its pictures, an unchanged picture not downloaded again), problems in a pop-up (the arcade down during Check, a failed upload: Try again, no version used, no Open in browser or Load details until it has gone through), the leaderboard clash both ways (a board on the website and none here: \"Remove it?\"; turned off on the website and one here: \"Turn it back on?\"; Use mine, Keep Arcadia's ticking or unticking Keep a leaderboard), Keep a leaderboard off sent as \"scores\": false, Load details from Arcadia (unticks Keep a leaderboard when it's off on the website), pictures only from the arcade.";
         }
     }
 }

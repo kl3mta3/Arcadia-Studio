@@ -321,8 +321,9 @@ public partial class MainWindow
             arcade.Click += async (_, _) => await Guard(ChangeArcade);
             capture.Click += async (_, _) => await Guard(Capture);
             choose.Click += (_, _) => Choose();
-            check.Click += async (_, _) => await Guard(Check);
-            publish.Click += async (_, _) => await Guard(Publish);
+            check.Click += async (_, _) => await Guard(Check, popUp: true);
+            publish.Click += async (_, _) => await Guard(Publish, popUp: true);
+            loadDetails.Visibility = Visibility.Collapsed; // until the account is known and the game has been uploaded
             open.Click += (_, _) => OpenInBrowser(openUrl);
             history.Click += async (_, _) => await Guard(History);
             loadDetails.Click += async (_, _) => await Guard(LoadDetails);
@@ -505,20 +506,65 @@ public partial class MainWindow
         }
 
         // ---- Account ----
-        async Task Guard(Func<Task> action)
+        /// <summary>Runs one of the window's actions with its buttons off. With popUp (Check and Publish), a problem
+        /// from the arcade is shown in a pop-up, not only on the status line, and one that trying again can get past
+        /// (the arcade's own trouble, no connection, a timeout) offers Try again, which runs the action again.</summary>
+        async Task Guard(Func<Task> action, bool popUp = false)
         {
             if (busy) return;
-            busy = true; SetEnabled(false); work = new CancellationTokenSource();
-            try { await action(); }
-            catch (ArcadiaException ex) { await Failed(ex); }
-            catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or ArgumentException or IOException or NotSupportedException or FileFormatException) { status.Text = ex.Message; editor.Log("Arcadia: " + ex.Message); }
-            finally { busy = false; work = null; progress.Visibility = Visibility.Collapsed; SetEnabled(true); }
+            busy = true; SetEnabled(false);
+            try
+            {
+                for (int tries = 0; tries < 25; tries++)
+                {
+                    work = new CancellationTokenSource(); again = false;
+                    try { await action(); }
+                    catch (ArcadiaException ex) { await Failed(ex); if (popUp) again = ShowProblem(status.Text, "", Passing(ex)); }
+                    catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or ArgumentException or IOException or NotSupportedException or FileFormatException) { status.Text = ex.Message; editor.Log("Arcadia: " + ex.Message); }
+                    if (!again) break;
+                    status.Text = "Trying again…";
+                }
+            }
+            finally { busy = false; work = null; again = false; progress.Visibility = Visibility.Collapsed; SetEnabled(true); }
+        }
+        // Set by a problem pop-up's Try again: Guard runs the action once more.
+        bool again;
+        /// <summary>A problem that may well not be there next time: the arcade's own trouble, no connection, or no answer in time.</summary>
+        static bool Passing(ArcadiaException ex) => ex.Code is "timeout" or "offline" or "bad-answer" || ex.Status >= 500;
+        /// <summary>Whether this project's game has really reached this arcade: a version went through, or (for a project
+        /// that lost its saved game) its ID is still remembered. A first upload that failed doesn't count.</summary>
+        bool Uploaded => editor.SavedGame(client.Host) is ArcadeGame saved ? saved.LastVersion.Length > 0 : editor.RememberedGameId(client.Host) != null;
+        /// <summary>Self-checks answer the problem pop-up through this: the text, and whether Try again is offered; true tries again.</summary>
+        internal Func<string, bool, bool>? ProblemForTest;
+        internal string? LastProblem;
+        /// <summary>Self-checks look at the pop-up itself as it is shown, and close it.</summary>
+        internal Action<Window>? ProblemWindowForTest;
+        /// <summary>A problem while checking or publishing, in a pop-up. Returns true when the person chose Try again.</summary>
+        bool ShowProblem(string headline, string detail, bool canRetry)
+        {
+            LastProblem = headline + (detail.Length > 0 ? "\n" + detail : "");
+            if (ProblemForTest != null) return ProblemForTest(LastProblem, canRetry);
+            var window = new Window { Owner = this, Title = "Publish to Arcadia", Width = 520, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false };
+            window.SetResourceReference(StyleProperty, typeof(Window));
+            var panel = new StackPanel { Margin = new Thickness(16) }; window.Content = panel;
+            panel.Children.Add(Wrap(Brushes.White, headline));
+            // What the arcade said, word for word, for passing on to whoever runs it.
+            if (detail.Length > 0) panel.Children.Add(new ScrollViewer { MaxHeight = 160, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 8, 0, 0), Content = new TextBox { Text = detail, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Foreground = Brushes.LightGray, FontSize = 11 } });
+            bool retry = false;
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) }; panel.Children.Add(bar);
+            if (canRetry) { var tryAgain = new Button { Content = "Try again", IsDefault = true, FontWeight = FontWeights.SemiBold, Padding = new Thickness(14, 3, 14, 3), Margin = new Thickness(8, 0, 0, 0) }; tryAgain.Click += (_, _) => { retry = true; window.Close(); }; bar.Children.Add(tryAgain); }
+            var close = new Button { Content = "Close", IsCancel = true, IsDefault = !canRetry, Padding = new Thickness(14, 3, 14, 3), Margin = new Thickness(8, 0, 0, 0) }; close.Click += (_, _) => window.Close(); bar.Children.Add(close);
+            if (ProblemWindowForTest != null) window.ContentRendered += (_, _) => ProblemWindowForTest(window);
+            window.ShowDialog();
+            return retry;
         }
         void SetEnabled(bool on)
         {
             foreach (var b in new[] { link, arcade, check, history, scan }) b.IsEnabled = on;
             publish.IsEnabled = on && CanPublish(out _);
             history.IsEnabled = on && key != null && editor.RememberedGameId(client.Host) != null;
+            // There are details on Arcadia to load only once the game has really been uploaded there.
+            loadDetails.Visibility = key != null && Uploaded ? Visibility.Visible : Visibility.Collapsed; loadDetails.IsEnabled = on;
             foreach (var line in new[] { mode, limit }) line.Visibility = line.Text.Length > 0 || line.Inlines.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         async Task Refresh()
@@ -818,6 +864,7 @@ public partial class MainWindow
                 catch (ArcadiaException ex) when (ex.GameGone && gameId != null) { ShowFindings(local, []); if (!OfferNewGame(ex, gameId)) return; continue; }
                 catch (ArcadiaException ex) when (ex.Code == "title-taken") { ShowFindings(local, []); if (!OfferExistingGame(ex)) return; continue; }
                 // The game's permanent ID is kept at once, so publishing again updates this game rather than making another.
+                string versionBefore = editor.SavedGame(client.Host)?.LastVersion ?? "";
                 editor.RememberGame(client.Host, upload.Game.Id, s.Version);
                 editor.Log($"Uploaded {s.Title} {s.Version} to Arcadia ({client.Host}), game {upload.Game.Id}.");
                 // Arcadia's details were kept: they come into the project too, so the next publish doesn't ask again.
@@ -836,15 +883,27 @@ public partial class MainWindow
                     submission = await client.SubmissionAsync(key!, submission.Id, work.Token);
                 }
                 ShowFindings(local, submission.Findings);
-                // The arcade's own address for the game (it follows renames); never built here.
+                if (submission.Status == "failed")
+                {
+                    // The arcade couldn't store it. Nothing was used up: the version isn't counted as sent (the game's
+                    // ID is kept, so trying again goes to the same game), nothing is offered to open, and the
+                    // problem is put in front of the person with a way to try again.
+                    editor.RememberGame(client.Host, upload.Game.Id, versionBefore);
+                    open.Visibility = Visibility.Collapsed;
+                    status.Text = "Not published: something went wrong on the arcade's side. It didn't use up an upload.";
+                    editor.Log("Arcadia: " + status.Text + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message));
+                    again = ShowProblem("The upload didn't go through. Something went wrong on the arcade's side, and it didn't use up one of your uploads.", submission.Message?.Trim() ?? "", canRetry: true);
+                    return;
+                }
+                // The arcade's own address for the game (it follows renames); never built here. Offered only when the
+                // upload is there to see: live, waiting for review, or still being stored.
                 openUrl = OnArcade(client, submission.GameUrl.Length > 0 ? submission.GameUrl : upload.Game.Url, "#/me");
-                open.Visibility = Visibility.Visible;
+                open.Visibility = submission.Status is "live" or "held" or "processing" ? Visibility.Visible : Visibility.Collapsed;
                 status.Text = submission.Status switch
                 {
                     "live" => (keepArcade?.Title ?? s.Title) + " is live!" + kept,
                     "held" => "Waiting for review." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message) + " You'll get an email when a moderator approves or declines it.",
                     "declined" => "Not published." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message),
-                    "failed" => "Something went wrong on the arcade's side." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message) + " It didn't use up an upload: try again.",
                     "processing" => "The arcade is still storing it. Check Publishing history in a minute.",
                     _ => "Status: " + submission.Status + "."
                 };

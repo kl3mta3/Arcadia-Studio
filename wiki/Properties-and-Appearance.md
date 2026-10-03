@@ -45,6 +45,7 @@ Every section (Identity, Layout, Appearance and so on) folds: click its heading 
 | **Bold, Italic, Underline** | Styles. |
 | **Wrap text** | Web & desktop, labels and buttons: the text breaks into lines at the control's width (and at a typed `\n`) instead of being cut off. |
 | **Alignment** | Left, center or right: how the text sits inside the control. |
+| **Vertical alignment** | Web & desktop, labels and buttons: top, middle or bottom of the control's height. Wrapped text moves as a block. Minecraft puts text in the middle. |
 | **Text shadow** | On/off, with **Shadow color**, opacity, **Offset X / Y (px)** and **Blur (px)**. Minecraft approximates blur, so soft shadows look slightly different in-game. |
 
 The editor approximates Minecraft's font rendering; exact glyph shapes are only seen in the game.

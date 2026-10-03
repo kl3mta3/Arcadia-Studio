@@ -1,1 +1,16 @@
-<Project><PropertyGroup><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LangVersion>latest</LangVersion><IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion></PropertyGroup></Project>
+<Project>
+  <PropertyGroup><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LangVersion>latest</LangVersion><IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion></PropertyGroup>
+  <!-- The app's version lives in one place, version.txt (major.minor.patch); build-number.txt counts release builds
+       (Build-Release.ps1 raises it each time). The version is what people and the updater see; the build number is in
+       the file version (1.4.0.37) and Help → About, so any copy can be told apart from the next. -->
+  <PropertyGroup>
+    <ArcadiaVersionFile>$(MSBuildThisFileDirectory)version.txt</ArcadiaVersionFile>
+    <ArcadiaBuildFile>$(MSBuildThisFileDirectory)build-number.txt</ArcadiaBuildFile>
+    <ArcadiaVersion Condition="Exists('$(ArcadiaVersionFile)')">$([System.IO.File]::ReadAllText('$(ArcadiaVersionFile)').Trim())</ArcadiaVersion>
+    <ArcadiaBuild Condition="Exists('$(ArcadiaBuildFile)')">$([System.IO.File]::ReadAllText('$(ArcadiaBuildFile)').Trim())</ArcadiaBuild>
+    <ArcadiaBuild Condition="'$(ArcadiaBuild)' == ''">0</ArcadiaBuild>
+    <Version Condition="'$(ArcadiaVersion)' != ''">$(ArcadiaVersion)</Version>
+    <FileVersion Condition="'$(ArcadiaVersion)' != ''">$(ArcadiaVersion).$(ArcadiaBuild)</FileVersion>
+    <InformationalVersion Condition="'$(ArcadiaVersion)' != ''">$(ArcadiaVersion)+build.$(ArcadiaBuild)</InformationalVersion>
+  </PropertyGroup>
+</Project>

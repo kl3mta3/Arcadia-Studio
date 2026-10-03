@@ -46,6 +46,32 @@ public static class Itch
         return found;
     }
 
+    // What itch.io takes for a game played in the browser (itch.io/docs/creators/html5, read 2026-10-03): after
+    // extraction, at most 1,000 files, 500 MB in all, 200 MB for any one file, and 240 characters for a file's name
+    // with its folders. A game over any of them uploads but then won't play on its page.
+    public const int MaxWebFiles = 1000, MaxWebPath = 240;
+    public const long MaxWebBytes = 500L * 1024 * 1024, MaxWebFileBytes = 200L * 1024 * 1024;
+
+    /// <summary>Checks a build against itch.io's limits for a browser game. Only the web version has them: a Windows
+    /// app is a download, not played on the page.</summary>
+    public static List<ArcadiaFinding> CheckBuild(Build build)
+    {
+        var found = new List<ArcadiaFinding>();
+        if (build.Kind != "web") return found;
+        void Add(string level, string code, string message, string? file = null) => found.Add(new(level, code, message, file));
+        static string MB(long bytes) => (bytes / 1048576.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " MB";
+        int count = build.Files.Count; long total = build.Files.Sum(f => (long)f.Value.Length);
+        if (count > MaxWebFiles) Add("block", "itch-files", $"The web version has {count:N0} files. itch.io plays a browser game of at most {MaxWebFiles:N0}: take out pictures and sounds the game doesn't use.");
+        else if (count > MaxWebFiles * 9 / 10) Add("warn", "itch-files", $"The web version has {count:N0} files, close to the {MaxWebFiles:N0} itch.io plays in a browser game.");
+        if (total > MaxWebBytes) Add("block", "itch-size", $"The web version is {MB(total)}. itch.io plays a browser game of at most {MB(MaxWebBytes)}.");
+        foreach (var (path, bytes) in build.Files.OrderBy(f => f.Key, StringComparer.Ordinal))
+        {
+            if (bytes.Length > MaxWebFileBytes) Add("block", "itch-file", $"{path} is {MB(bytes.Length)}. itch.io takes files of at most {MB(MaxWebFileBytes)} in a browser game.", path);
+            if (path.Length > MaxWebPath) Add("block", "itch-path", $"A file's name with its folders is {path.Length} characters; itch.io takes at most {MaxWebPath} in a browser game: {path}", path);
+        }
+        return found;
+    }
+
     /// <summary>One upload: the channel it goes to and the files (paths relative to the upload's folder).</summary>
     public sealed record Build(string Kind, string Channel, Dictionary<string, byte[]> Files);
     /// <summary>The builds to send: the folder web export (index.html at the top, as itch.io plays it in the browser)

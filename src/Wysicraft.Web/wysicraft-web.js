@@ -7,7 +7,7 @@
   const DEFAULT_ELEMENT = {
     rowTemplate: '', rowAction: '', rowElements: [], horizontalAnchor: 'left', verticalAnchor: 'top', minWidth: 1, minHeight: 1,
     rowTemplateWidth: 0, rowHeight: 30, primaryLabel: '', secondaryLabel: '', showItemId: true, id: '', name: '', type: 'button',
-    text: '', tooltip: '', foreground: '#FFFFFF', background: '#40464F', alignment: 'left', texture: '', item: 'minecraft:stone',
+    text: '', tooltip: '', foreground: '#FFFFFF', background: '#40464F', alignment: 'left', verticalAlign: 'middle', texture: '', item: 'minecraft:stone',
     value: '0', visibleIf: '', enabledIf: '', parent: '', bounds: { x: 0, y: 0, width: 100, height: 20 }, visible: true, enabled: true,
     opacity: 1, fontScale: 1, minimum: 0, maximum: 100, font: 'minecraft:default', bold: false, italic: false, underline: false,
     textShadow: false, fillEnabled: true, borderColor: '#697382', shadowColor: '#000000', borderWidth: 0, shadowOpacity: 0.75,
@@ -377,9 +377,14 @@
     const k = ev.key;
     if (/^[a-zA-Z]$/.test(k)) return k.toLowerCase();
     if (/^[0-9]$/.test(k)) return k;
-    const map = { ' ': 'space', Enter: 'enter', Tab: 'tab', Backspace: 'backspace', ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', Escape: 'escape' };
+    // shift and ctrl are web & desktop only (Minecraft keeps them for itself).
+    const map = { ' ': 'space', Enter: 'enter', Tab: 'tab', Backspace: 'backspace', ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', Escape: 'escape', Shift: 'shift', Control: 'ctrl' };
     if (map[k]) return map[k];
     if (/^F([1-9]|1[0-2])$/.test(k)) return k.toLowerCase();
+    // With Shift held a digit key types a symbol. Its place on the keyboard still names it, so a digit pressed or let
+    // go while Shift is down is the same key, and is not left held.
+    const digit = typeof k === 'string' && k.length === 1 && /^(?:Digit|Numpad)([0-9])$/.exec(ev.code || '');
+    if (digit) return digit[1];
     return null;
   }
 
@@ -497,7 +502,11 @@
       this.mouse = { x: -1, y: -1, down: false }; this.heldKeys = new Set(); this.lastKey = 0;
       // The pointer a script sees (ctx.input.pointer()): the latest mouse or finger position, whether a press that did
       // not land on a control is held, and a count of such presses so a quick tap between two ticks is not missed.
-      this.pointer = { x: -1, y: -1, down: false, presses: 0, id: null };
+      // rightDown and rightPresses are the same for the right mouse button, which a press on a control with a
+      // right_click event does not count towards.
+      this.pointer = { x: -1, y: -1, down: false, presses: 0, id: null, rightDown: false, rightPresses: 0 };
+      // Shift and Ctrl as they were at the latest mouse or key event (ctx.input.shift(), ctx.input.ctrl()).
+      this.mods = { shift: false, ctrl: false };
       this.scroll = new Map(); this.focused = null; this.hovered = null; this.dragging = null; this.lastHover = 0;
       this.messages = []; this.closed = false; this.queue = []; this.busy = false; this.idleWaiters = []; this.navigations = 0;
       this.limits = Object.assign({ scriptOps: 128, tickMin: 50 }, project.limits || {});
@@ -736,16 +745,18 @@
       return fallback;
     }
     // Wrap: several lines, broken at spaces to fit the width and at line breaks (a real one, or \n typed as those two
-    // characters). The block sits in the middle of the control's height when it fits and starts at the top when it
-    // doesn't; lines that would fall below the control are left out. Each line is drawn as one line of text is.
+    // characters). The block sits where verticalAlign puts it in the control's height (the middle unless it says top
+    // or bottom) when it fits and starts at the top when it doesn't; lines that would fall below the control are left
+    // out. Each line is drawn as one line of text is.
     textBlock(e, x, y, w, h, value) {
       const text = String(value ?? ''); if (!text) return;
       const g = this.g, scale = e.fontScale, lineHeight = 12 * scale;
       g.font = this.font(e, scale);
       const lines = this.wrapLines(e, text, g.font, Math.max(1, w - 4 * scale));
       const shown = Math.min(lines.length, Math.max(1, Math.floor(h / lineHeight)));
-      const top = lines.length * lineHeight <= h ? y + (h - lines.length * lineHeight) / 2 : y;
-      const one = Object.create(e); one.wrap = false;
+      const spare = h - lines.length * lineHeight;
+      const top = spare < 0 || e.verticalAlign === 'top' ? y : e.verticalAlign === 'bottom' ? y + spare : y + spare / 2;
+      const one = Object.create(e); one.wrap = false; one.verticalAlign = 'middle';
       for (let i = 0; i < shown; i++) if (lines[i]) this.text(one, x, top + i * lineHeight, w, lineHeight, lines[i]);
     }
     // The lines are worked out when the text, the font or the width changes, not every frame.
@@ -772,14 +783,16 @@
       if (cache.size > 4000) cache.clear();
       cache.set(name, { key, lines }); return lines;
     }
-    // One line of text, clipped to the width (DynamicScreen.text).
+    // One line of text, clipped to the width (DynamicScreen.text). It sits in the middle of the height unless
+    // verticalAlign says top or bottom (web & desktop), where it takes the place a line of wrapped text would.
     text(e, x, y, w, h, value) {
       if (e.wrap) { this.textBlock(e, x, y, w, h, value); return; }
       const g = this.g, scale = e.fontScale; let text = String(value ?? '');
       g.font = this.font(e, scale); g.textBaseline = 'middle';
       const max = Math.max(1, w - 4 * scale); if (g.measureText(text).width > max) { while (text && g.measureText(text).width > max) text = text.slice(0, -1); }
       if (!text) return;
-      const tw = g.measureText(text).width, dx = e.alignment === 'center' ? (w - tw) / 2 : e.alignment === 'right' ? w - tw - 2 : 2, cy = y + h / 2;
+      const tw = g.measureText(text).width, dx = e.alignment === 'center' ? (w - tw) / 2 : e.alignment === 'right' ? w - tw - 2 : 2;
+      const half = Math.min(h / 2, 6 * scale), cy = e.verticalAlign === 'top' ? y + half : e.verticalAlign === 'bottom' ? y + h - half : y + h / 2;
       if (e.textShadow && e.shadowOpacity > 0) {
         g.save(); g.fillStyle = color(e.shadowColor, e.opacity * e.shadowOpacity);
         if (e.shadowBlur > 0) { g.filter = `blur(${e.shadowBlur / 2 * this.scale * this.dpr}px)`; }
@@ -1042,10 +1055,21 @@
     }
     bindInput() {
       const c = this.canvas;
-      c.addEventListener('mousemove', ev => { const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; this.pointAt(p); if (this.dragging) this.slide(this.dragging, p.x); });
+      c.addEventListener('mousemove', ev => { this.mod(ev); const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; this.pointAt(p); if (this.dragging) this.slide(this.dragging, p.x); });
       c.addEventListener('mouseleave', () => { this.mouse.x = this.mouse.y = -1; });
-      c.addEventListener('mousedown', ev => { c.focus(); if (ev.button !== 0) return; const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y; if (!this.controlAt(p.x, p.y)) this.pointerDown(p, 'mouse'); this.click(p.x, p.y); ev.preventDefault(); });
-      window.addEventListener('mouseup', () => { this.dragging = null; if (this.virtualInputs) this.virtualInputs.clear(); if (this.pointer.id === 'mouse') this.pointerUp(); });
+      c.addEventListener('mousedown', ev => {
+        c.focus(); this.mod(ev); if (ev.button !== 0 && ev.button !== 2) return;
+        const p = this.point(ev); this.mouse.x = p.x; this.mouse.y = p.y;
+        // The right button: the control under it gets right_click, and anywhere else it is a right press for scripts.
+        if (ev.button === 2) { if (!this.rightClick(p.x, p.y)) { this.pointAt(p); this.pointer.rightDown = true; this.pointer.rightPresses++; } ev.preventDefault(); return; }
+        if (!this.controlAt(p.x, p.y)) this.pointerDown(p, 'mouse'); this.click(p.x, p.y); ev.preventDefault();
+      });
+      // The game has the right button, so the browser's own menu stays away from it.
+      c.addEventListener('contextmenu', ev => ev.preventDefault());
+      window.addEventListener('mouseup', ev => {
+        if (ev && ev.button === 2) { this.pointer.rightDown = false; return; }
+        this.dragging = null; if (this.virtualInputs) this.virtualInputs.clear(); if (this.pointer.id === 'mouse') this.pointerUp();
+      });
       c.addEventListener('touchstart', ev => {
         c.focus();
         for (const t of ev.changedTouches) {
@@ -1077,9 +1101,9 @@
       c.addEventListener('touchend', lift); c.addEventListener('touchcancel', lift);
       c.addEventListener('wheel', ev => { const p = this.point(ev); if (this.wheel(p.x, p.y, -Math.sign(ev.deltaY))) ev.preventDefault(); }, { passive: false });
       c.addEventListener('keydown', ev => this.keyDown(ev));
-      c.addEventListener('keyup', ev => { this.heldKeys.delete(ev.code); const name = keyName(ev); if (name) this.keyHeld(name, false); });
+      c.addEventListener('keyup', ev => { this.mod(ev); this.heldKeys.delete(ev.code); const name = keyName(ev); if (name) this.keyHeld(name, false); });
       c.addEventListener('paste', ev => { if (!this.focused) return; const v = (ev.clipboardData.getData('text') || '').replace(/[\x00-\x1f\x7f]/g, ''); this.focused.value = (this.focused.value + v).slice(0, 1024); this.fire(this.focused, 'text_changed', this.focused.value); ev.preventDefault(); });
-      window.addEventListener('blur', () => { this.heldKeys.clear(); if (this.keyNamesDown) this.keyNamesDown.clear(); });
+      window.addEventListener('blur', () => { this.heldKeys.clear(); if (this.keyNamesDown) this.keyNamesDown.clear(); this.mods.shift = this.mods.ctrl = false; this.pointer.rightDown = false; });
       setTimeout(() => c.focus(), 0);
     }
     // The control a press lands on, or null when it lands on the floor. Used to tell a tap on a button from a drag on
@@ -1098,6 +1122,22 @@
     pointAt(p) { this.pointer.x = Math.round((p.x - this.originX) * 10) / 10; this.pointer.y = Math.round((p.y - this.originY) * 10) / 10; }
     pointerDown(p, id) { this.pointAt(p); this.pointer.down = true; this.pointer.id = id; this.pointer.presses++; }
     pointerUp() { this.pointer.down = false; this.pointer.id = null; }
+    mod(ev) { this.mods.shift = !!ev.shiftKey; this.mods.ctrl = !!ev.ctrlKey; }
+    // The right mouse button on a control: the one a left click would land on gets right_click (a list gives the row
+    // as the value). True when a control took it, so it is not also a right press on the floor.
+    rightClick(mx, my) {
+      if (this.closed || !this.ui) return true;
+      for (const e of this.ui.elements.slice().reverse()) if (!UNSEEN.has(e.type) && this.visible(e) && this.enabled(e) && this.inside(e, mx, my)) {
+        if (!e.events || !e.events.right_click) return false;
+        let value = '';
+        if (e.type === 'item_list') {
+          const local = this.localPoint(e, mx, my), rh = Math.min(128, Math.max(24, e.rowHeight)), index = Math.floor((local[1] - this.y(e) + this.listScroll(e.id)) / rh);
+          if (index >= 0 && index < this.rows(e).length) value = String(index);
+        }
+        this.fire(e, 'right_click', value); return true;
+      }
+      return false;
+    }
     click(mx, my) {
       if (this.closed) { if (!this.host.onClose) { this.messages = []; this.open(this.ui.id); } return; }
       this.focused = null;
@@ -1146,6 +1186,7 @@
       return false;
     }
     keyDown(ev) {
+      this.mod(ev);
       if (this.focused) {
         const f = this.focused;
         if (ev.key === 'Backspace') { f.value = f.value.slice(0, -1); this.fire(f, 'text_changed', f.value); ev.preventDefault(); return; }
@@ -1294,7 +1335,7 @@
       const saveGen = this.scripts.generation + ':' + this.saveVersion;
       if (this.saveSent !== saveGen) { delta.save = this.saveData; this.saveSent = saveGen; }
       const result = await this.scripts.run(Object.assign(delta, { source, sourceKey: this.sourceKey(handler, source), fn: handler.function || '', isServer, element: element ? element.id : '', value: String(value ?? ''), repeat: !!repeat, player, maxOps: this.limits.scriptOps,
-        keep: !!this.project.keepScriptState && this.project.target === 'web', target: this.project.target || 'both', spawnSeq: this.instanceSeq, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, pointer: { x: this.pointer.x, y: this.pointer.y, down: this.pointer.down, presses: this.pointer.presses }, touching: this.touchingMap ? this.touchingMap() : {} }));
+        keep: !!this.project.keepScriptState && this.project.target === 'web', target: this.project.target || 'both', spawnSeq: this.instanceSeq, inputs, axes: Object.assign({}, this.inputAxes), touch: !!this.isTouch, pointer: { x: this.pointer.x, y: this.pointer.y, down: this.pointer.down, presses: this.pointer.presses, rightDown: this.pointer.rightDown, rightPresses: this.pointer.rightPresses }, shift: this.mods.shift, ctrl: this.mods.ctrl, touching: this.touchingMap ? this.touchingMap() : {} }));
       for (const line of result.logs || []) this.log(line.level, '[' + handler.script + '] ' + line.text);
       if (result.error) { this.log('error', 'Script ' + name + ': ' + result.error); return; }
       if (result.save) { this.saveData = result.save; this.storeSave(); }
@@ -1552,7 +1593,7 @@
       this.separateDefaults = new Map(); this.instances = new Map(); this.instanceSeq = 1; this.instanceTime = performance.now(); this.instancesVersion = 0; this.instanceCapWarned = false;
       this.spriteClock = new Map(); this.graphStates = new Map(); this.velocity = new Map(); this.contacts = new Set(); this.overlaps = new Set(); this.stayTimes = new Map(); this.playing = new Map();
       this.virtualInputs = new Set(); this.inputsDown = new Set(); this.inputAxes = {}; this.stick = null; this.physicsTime = performance.now(); this.children = null;
-      if (this.pointer) { this.pointer.down = false; this.pointer.id = null; }
+      if (this.pointer) { this.pointer.down = false; this.pointer.id = null; this.pointer.rightDown = false; }
       for (const a of this.ui.animations || []) if (a.autoplay) this.playing.set(a.id, { anim: a, start: performance.now() });
     },
     // Sprites: the clip in value plays from when it was chosen; frames count left to right, top to bottom.
@@ -2834,10 +2875,12 @@
       message: v => emit('message', '', v), save,
       // playSound(id, volume): volume 0-1 is optional (web and desktop; Minecraft plays at its own volume).
       client: Object.freeze({ sendMessage: v => emit('message', '', v), playSound: (v, volume) => emit('play_sound', volume === undefined ? '' : String(Math.min(1, Math.max(0, Number(volume) || 0))), v) }),
-      // pointer(): { x, y, down, presses } in screen coordinates. down while a press that missed the controls is held;
-      // presses counts those presses, so a tap between two ticks still shows as a change.
+      // pointer(): { x, y, down, presses, rightDown, rightPresses } in screen coordinates. down while a press that
+      // missed the controls is held; presses counts those presses, so a tap between two ticks still shows as a change.
+      // rightDown and rightPresses are the right mouse button. shift() and ctrl(): whether the key is held.
       input: Object.freeze({ isDown: name => !!(r.inputs && r.inputs[name]), axis: name => (r.axes && r.axes[name]) || 0, isTouch: () => !!r.touch,
-        pointer: () => Object.freeze(Object.assign({ x: -1, y: -1, down: false, presses: 0 }, r.pointer)) }),
+        shift: () => !!r.shift, ctrl: () => !!r.ctrl,
+        pointer: () => Object.freeze(Object.assign({ x: -1, y: -1, down: false, presses: 0, rightDown: false, rightPresses: 0 }, r.pointer)) }),
       // What a control is touching when the event started: solid contacts and trigger overlaps.
       physics: Object.freeze({
         touching: id => ((r.touching && r.touching[id]) || []).slice(),

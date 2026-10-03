@@ -154,12 +154,14 @@ The timeline slider previews the animation on the canvas. Everything snaps back 
 
 ## Inputs
 
-**Advanced → Inputs** defines named inputs such as `jump` or `left`. Each can be pressed by keys, gamepad buttons and a stick direction.
+**Advanced → Inputs** defines named inputs such as `jump` or `left`. Each can be pressed by keys, gamepad buttons and a stick direction. **Shift** and **Ctrl** can be keys too (hold Shift to run).
 
 - **Presets:** Keyboard, Xbox, PlayStation and Generic gamepad add the usual inputs (left, right, up, down, jump, action, pause…).
 - **Gamepads:** Xbox, PlayStation and generic pads use the same standard button layout; only the names differ. Choose how buttons are labelled with **Show gamepad buttons as**.
 - **Screen events:** the screen's `input_pressed` and `input_released` events run with the input's name as the value.
 - **Scripts:** `ctx.input.isDown('jump')` and `ctx.input.axis('left')` (0–1, how far the stick is pushed that way). For tap-to-move, `ctx.input.pointer()` gives `x`, `y` (screen coordinates), `down` (a press on the floor is held) and `presses` (how many there have been), from a finger or the mouse. Presses on buttons and other controls don't count; sprites, images, labels and panels are scenery.
+- **Right mouse button:** `ctx.input.pointer()` also gives `rightDown` and `rightPresses`, the same for the right button. A control's `right_click` event takes the press instead when it has one (see [[Events and actions|Events-and-Actions]]).
+- **Shift and Ctrl in scripts:** `ctx.input.shift()` and `ctx.input.ctrl()` say whether the key is held, for things like Shift+click. Ctrl with a letter can still be the browser's own shortcut (Ctrl+W closes the tab), so use Ctrl alone or with the mouse.
 - **On-screen controls:** give a button or shape a **Presses input** in Properties to make an on-screen control. Pressing it presses the input *as well as* running its own click, hover, enter and exit events.
 
 Clicks, hover and the Key event work exactly as before; inputs only add to them.

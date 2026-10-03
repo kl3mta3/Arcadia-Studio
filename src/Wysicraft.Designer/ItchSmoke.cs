@@ -108,6 +108,19 @@ public partial class MainWindow
             Expect(findings.Items.OfType<ListBoxItem>().Any(i => i.Tag is ArcadiaFinding { Level: "block", Code: "channel" }) && log().Count == before, "two uploads on one channel are refused before butler is asked");
             Set(n => n.WindowsChannel = "windows");
 
+            // itch.io's limits for a browser game: a web build over one is shown in red, and butler is asked nothing.
+            version.Text = "1.0.0";
+            ExtraWebFilesForTest = Enumerable.Range(0, Itch.MaxWebFiles).ToDictionary(i => $"assets/extra{i}.png", _ => new byte[1]);
+            before = log().Count;
+            await Guard(Check);
+            Expect(findings.Items.OfType<ListBoxItem>().Any(i => i.Tag is ArcadiaFinding { Level: "block", Code: "itch-files" }) && log().Count == before && status.Text.StartsWith("itch.io wouldn't play this"), "Check refuses a web build with more than 1,000 files before butler is asked");
+            await Guard(Publish);
+            Expect(findings.Items.OfType<ListBoxItem>().Any(i => i.Tag is ArcadiaFinding { Level: "block", Code: "itch-files" }) && log().Count == before && status.Text.StartsWith("Not uploaded") && string.IsNullOrEmpty(S.LastVersion), "Publish uploads nothing when the web build is over itch.io's limits");
+            ExtraWebFilesForTest = new() { ["assets/" + new string('a', Itch.MaxWebPath) + ".png"] = new byte[1] };
+            await Guard(Check);
+            Expect(findings.Items.OfType<ListBoxItem>().Any(i => i.Tag is ArcadiaFinding { Level: "block", Code: "itch-path" }) && log().Count == before, "and one whose file name is too long");
+            ExtraWebFilesForTest = null;
+
             // Check: butler's preview of each upload, with the key in its environment only.
             version.Text = "1.0.0";
             await Guard(Check);

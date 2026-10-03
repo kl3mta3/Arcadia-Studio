@@ -1,4 +1,5 @@
-﻿param([string]$JavaHome=$env:JAVA_HOME,[switch]$Installer)
+﻿# -Bump patch|minor|major raises version.txt first (1.4.0 -> 1.4.1 / 1.5.0 / 2.0.0). Every run raises build-number.txt.
+param([string]$JavaHome=$env:JAVA_HOME,[switch]$Installer,[ValidateSet('','patch','minor','major')][string]$Bump='')
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent
 Push-Location $repo
@@ -7,9 +8,21 @@ try {
     & ./wysicraft-runtime/gradlew.bat -p wysicraft-runtime jar
     if($LASTEXITCODE){throw 'Runtime build failed'}
     $runtimeVersion=[regex]::Match((Get-Content wysicraft-runtime/build.gradle -Raw),"version = '([^']+)'").Groups[1].Value
-    $version=[regex]::Match((Get-Content src/Wysicraft.Designer/Wysicraft.Designer.csproj -Raw),'<Version>([^<]+)</Version>').Groups[1].Value
-    if(!$version){$version=$runtimeVersion}
+    # The version is version.txt's (Directory.Build.props gives it to every project); the build number counts release builds.
+    $version=(Get-Content version.txt -Raw).Trim()
+    if($version -notmatch '^\d+\.\d+\.\d+$'){throw "version.txt should be major.minor.patch, e.g. 1.4.0 (it says '$version')."}
+    if($Bump){
+        $v=[int[]]$version.Split('.')
+        switch($Bump){ 'major' {$v=@(($v[0]+1),0,0)} 'minor' {$v=@($v[0],($v[1]+1),0)} 'patch' {$v=@($v[0],$v[1],($v[2]+1))} }
+        $version=$v -join '.'; Set-Content version.txt $version -Encoding ascii
+    }
+    $build=if(Test-Path build-number.txt){[int](Get-Content build-number.txt -Raw).Trim()}else{0}
+    $build++; Set-Content build-number.txt $build -Encoding ascii
+    Write-Output "Building Arcadia Studio $version (build $build)"
     $release=Join-Path $repo "artifacts/ArcadiaStudio-$version"
+    # The app's folder is published from empty, so a file an earlier build put there and this one doesn't make
+    # (a dropped library, the unused language folders) never rides along into the installer.
+    if(Test-Path "$release/Designer"){ Remove-Item "$release/Designer" -Recurse -Force }
     & dotnet publish src/Wysicraft.Designer -c Release -r win-x64 --self-contained true -o "$release/Designer"
     if($LASTEXITCODE){throw 'Designer build failed'}
     # Docs is rebuilt from scratch each time: the user manual plus third-party notices, nothing else.
@@ -40,6 +53,12 @@ try {
     # The same butler for development runs (the editor looks in artifacts/butler too).
     Copy-Item "$release/Butler/butler.exe" 'artifacts/butler/butler.exe' -Force
     Copy-Item 'docs/third-party/butler-LICENSE.txt' "$release/Butler/LICENSE.txt" -Force
+    # FFmpeg (LGPL build) and the speech models and voices, checked by SHA-256 and kept in artifacts between builds.
+    & "$PSScriptRoot/Get-MediaTools.ps1"
+    if($LASTEXITCODE){throw 'Fetching FFmpeg and the speech models failed'}
+    foreach($folder in 'FFmpeg','Speech'){ if(Test-Path "$release/$folder"){ Remove-Item "$release/$folder" -Recurse -Force } }
+    Copy-Item 'artifacts/ffmpeg/bin' "$release/FFmpeg" -Recurse -Force
+    Copy-Item 'artifacts/speech' "$release/Speech" -Recurse -Force
     # The user manual: one offline HTML page generated from the wiki pages (developer notes in docs/ are not shipped).
     & dotnet run --project tools/Wysicraft.ManualBuilder -c Release -- wiki "$release/Docs/Arcadia-Studio-Manual.html" $version
     if($LASTEXITCODE){throw 'Manual build failed'}
@@ -56,7 +75,7 @@ try {
     $runtimeHash=(Get-FileHash src/Wysicraft.Web/wysicraft-web.js -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content "artifacts/ArcadiaStudio-$version-runtime-SHA256.txt" "$runtimeHash  wysicraft/wysicraft-web.js (Arcadia Studio $version web runtime)" -Encoding ascii
     Write-Output "Web runtime SHA-256: $runtimeHash"
-    if($Installer){ & "$PSScriptRoot/Build-Installer.ps1" -ReleaseDir $release -Version $version; Write-Checksum "artifacts/ArcadiaStudio-$version-Setup.exe" }
-    Write-Output "Release: $release (editor tests and exports use Runtime/wysicraft-$runtimeVersion.jar)"
+    if($Installer){ & "$PSScriptRoot/Build-Installer.ps1" -ReleaseDir $release -Version $version -Build $build; Write-Checksum "artifacts/ArcadiaStudio-$version-Setup.exe" }
+    Write-Output "Release: $release, Arcadia Studio $version build $build (editor tests and exports use Runtime/wysicraft-$runtimeVersion.jar)"
 } finally {Pop-Location}
 

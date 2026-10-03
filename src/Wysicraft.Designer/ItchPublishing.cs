@@ -346,8 +346,16 @@ public partial class MainWindow
         {
             editor.SaveScriptText(); Apply();
             var project = Json.CloneProject(editor.project); var s = Json.Clone(S); string? host = s.Windows ? editor.AppHostExe() : null;
-            return Task.Run(() => Itch.Builds(project, s, host));
+            var extra = ExtraWebFilesForTest;
+            return Task.Run(() =>
+            {
+                var builds = Itch.Builds(project, s, host);
+                if (extra != null) foreach (var build in builds.Where(b => b.Kind == "web")) foreach (var (path, bytes) in extra) build.Files[path] = bytes;
+                return builds;
+            });
         }
+        /// <summary>The self-test's way to make a web build that is over itch.io's limits.</summary>
+        internal Dictionary<string, byte[]>? ExtraWebFilesForTest;
         string BuildFolder(Itch.Build build) => Wysicraft.Core.AppFolders.Path("ItchBuilds", editor.project.Manifest.Id + "-" + build.Kind);
         void ShowFindings(IEnumerable<ArcadiaFinding> found, IEnumerable<string> notes)
         {
@@ -369,6 +377,9 @@ public partial class MainWindow
             var builds = await Builds();
             var notes = new List<string>();
             foreach (var build in builds) notes.Add($"{build.Kind}: {build.Files.Count} files, {build.Files.Sum(f => (long)f.Value.Length) / 1048576.0:0.0} MB → {S.Target}:{build.Channel}");
+            // itch.io's limits for a game played in the browser, before anything is sent.
+            foreach (var build in builds) local.AddRange(Itch.CheckBuild(build));
+            if (local.Any(f => f.Level == "block")) { ShowFindings(local, notes); status.Text = "itch.io wouldn't play this in the browser: see the red lines."; return; }
             if (key == null) { ShowFindings(local, notes); status.Text = "Checked here. Sign in to itch.io to see what an upload would change."; return; }
             foreach (var build in builds)
             {
@@ -389,6 +400,10 @@ public partial class MainWindow
             if (local.Any(f => f.Level == "block")) { ShowFindings(local, []); status.Text = "Fix the problems marked red before publishing."; return; }
             status.Text = "Making the builds…";
             var builds = await Builds();
+            // Nothing is uploaded when a build is over itch.io's limits for a browser game.
+            foreach (var build in builds) local.AddRange(Itch.CheckBuild(build));
+            if (local.Any(f => f.Level == "block")) { ShowFindings(local, []); status.Text = "Not uploaded: itch.io wouldn't play this in the browser. See the red lines."; return; }
+            if (local.Any(f => f.Code.StartsWith("itch-"))) ShowFindings(local, []);
             var done = new List<string>(); string v = version.Text.Trim();
             foreach (var build in builds)
             {
@@ -463,6 +478,7 @@ public partial class MainWindow
             if (!local.Any(f => f.Level == "block"))
             {
                 var builds = await Task.Run(() => Itch.Builds(snapshot, settingsNow, settingsNow.Windows ? AppHostExe() : null), cancellationToken);
+                foreach (var build in builds) local.AddRange(Itch.CheckBuild(build)); // itch.io's limits for a browser game
                 foreach (var build in builds)
                 {
                     string folder = Wysicraft.Core.AppFolders.Path("McpExports", Guid.NewGuid().ToString("N"), "itch-" + build.Kind);

@@ -31,6 +31,8 @@ Choose **play_sound** as an action and a sound picker appears. Pick one of the p
 
 With [[advanced tools|Advanced-Tools]] a screen also has `input_pressed`, `input_released` and `animation_end`, and physics bodies have `collide`, `collide_stay` and `collide_end`, plus `trigger_enter`, `trigger_stay` and `trigger_exit` for [[triggers|Advanced-Tools]]. Stay events repeat every 250 ms. They run on the player's screen only.
 
+Every control also has **`right_click`**: it runs when the control is clicked with the right mouse button, and the control isn't clicked as well. It goes to the control a left click would land on; in an item list the script's value is the row. A touch screen has no right click, so give touch players another way to do the same thing.
+
 ## Client and Server
 
 Every event has two sides:

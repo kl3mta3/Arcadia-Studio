@@ -109,7 +109,7 @@ public partial class MainWindow : Window {
 			ui = ResolveUi(ui);
 			dirty = true;
 			RefreshAll();
-		}, Json.CloneProject);
+		}, Json.CloneProject, pack: (value, before) => Json.Pack(value, before as Json.PackedProject), unpack: kept => Json.Unpack((Json.PackedProject)kept));
 		BuildMenus();
         InitializeAssetBrowsers(); InitializeComponents();
 		InitializeDocking(); InitializeZoom(); InitializeOutsideMarquee();
@@ -1656,7 +1656,7 @@ public partial class MainWindow : Window {
 				Text = ((e.Type == "item") ? ("◇ " + e.Item) : e.Wrap ? WrappedText(e.Text) : e.Text), TextWrapping = e.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
 				Foreground = Brush(e.Foreground),
 				Background = ((e.Type == "label") ? Brushes.Transparent : Brush(e.Background)),
-				VerticalAlignment = VerticalAlignment.Center,
+				VerticalAlignment = TextVertical(e),
 				FontSize = Math.Clamp(e.FontScale * 14.0, 6.0, 96.0),
 				TextAlignment = ((e.Alignment == "center") ? TextAlignment.Center : ((e.Alignment == "right") ? TextAlignment.Right : TextAlignment.Left))
 			};

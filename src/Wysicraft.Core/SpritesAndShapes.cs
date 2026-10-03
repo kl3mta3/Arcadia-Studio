@@ -4,9 +4,10 @@ namespace Wysicraft.Core;
 
 public static partial class Validation
 {
-    /// <summary>Key names used by the Key event and inputs (same as the runtimes' KeyNames).</summary>
+    /// <summary>Key names used by the Key event and inputs (same as the runtimes' KeyNames). shift and ctrl are web
+    /// and desktop only: Minecraft keeps them for itself.</summary>
     public static readonly HashSet<string> KeyNames = [.. Enumerable.Range('a', 26).Select(c => ((char)c).ToString()), .. Enumerable.Range(0, 10).Select(d => d.ToString()),
-        "space", "enter", "escape", "tab", "backspace", "left", "right", "up", "down", .. Enumerable.Range(1, 12).Select(n => "f" + n)];
+        "space", "enter", "escape", "tab", "backspace", "left", "right", "up", "down", "shift", "ctrl", .. Enumerable.Range(1, 12).Select(n => "f" + n)];
 }
 
 /// <summary>Sprite clips, written "idle: 0; run: 1-6 @12; jump: 7,8,9 @8 once". Frames are numbered left to right,

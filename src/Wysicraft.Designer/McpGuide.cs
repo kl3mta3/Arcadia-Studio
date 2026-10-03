@@ -62,6 +62,10 @@ public partial class MainWindow
             - Bounds are pixels inside the screen's own size, top-left origin.
             - New IDs should be simple and readable (button1, star1). `rename_element` fixes up children, event targets
               and animation tracks; editing an ID by hand does not.
+            - Read `get_schema` → `controls` before deciding the engine lacks something. A list longer than its box is a
+              `scroll_panel`: controls with `parent` = the scroll panel, placed on down past its bottom edge, are clipped
+              to it and scroll with the mouse wheel. There are also `checkbox`, `slider`, `dropdown`, `textbox`,
+              `progress` and `item_list`.
             - After editing, `validate_project` tells you what the editor thinks is wrong, including what would block a
               Minecraft export while leaving web and desktop fine.
             """),
@@ -362,6 +366,13 @@ public partial class MainWindow
 
             - `upsert_input` with `key` = a name you choose and `data` = {keys, buttons, axis}, so one name covers
               keyboard and gamepad. Scripts read the name, not the key.
+            - Shift and Ctrl: the key names `shift` and `ctrl` can be an input's keys (hold Shift to run), and
+              `ctx.input.shift()` / `ctx.input.ctrl()` say whether they are held, for Shift+click in a click handler.
+              Ctrl with a letter can still be the browser's own shortcut, so use Ctrl alone or with the mouse.
+            - Right mouse button: give a control a `right_click` event (`set_event`, like `click`). The control a left
+              click would land on gets it and nothing is clicked; an `item_list` gives the row as the value. A right
+              press anywhere else shows in `ctx.input.pointer()` as `rightDown` and `rightPresses`, beside `down` and
+              `presses` for the left button. A touch screen has no right click, so give touch players another way.
             - `upsert_animation` with `data` = {duration, loop, autoplay, tracks:[{target, property, keys:[{time, value, ease}]}]}.
               Properties: x, y, width, height, opacity, rotation, scale.
 
@@ -418,6 +429,9 @@ public partial class MainWindow
               particle emitters, cameras and colliders are never turned.
             - Wrapped text: a label or button with `wrap: true` breaks its text into lines at its width, and at \n,
               instead of cutting it off. Make the control tall enough: lines that don't fit below are left out.
+            - Text at the top or bottom: a label or button with `verticalAlign` = "top" or "bottom" (the default is
+              "middle"). Wrapped text moves as a block. With `alignment` (left, center, right) that places text in
+              any corner of the control: a card's title top-left, its cost bottom-right.
             - From scripts: `ui.setRotation(id, degrees)`, `ui.setScale(id, scale)`, `ui.setOpacity(id, 0-1)`, and
               `ctx.ui.getElement(id)` reads rotation, scale and opacity back.
             - Draw order from scripts (later is on top): `ui.bringToFront(id)`, `ui.sendToBack(id)`,

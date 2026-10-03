@@ -47,8 +47,8 @@ public static class Registry
         Register("camera", "Camera", [], [], advanced: true);
     }
     public static void Register(string type, string name, string[] properties, string[] events, bool advanced = false) => Controls.Add(type, new(type, name, properties, [.. events, "hover", "mouse_enter", "mouse_leave", .. AdvancedElementEvents], advanced));
-    // Web and desktop only: physics collisions and inputs.
-    public static readonly string[] AdvancedElementEvents = ["tick", "collide", "collide_stay", "collide_end", "trigger_enter", "trigger_stay", "trigger_exit", "state_changed"];
+    // Web and desktop only: physics collisions, inputs and the right mouse button.
+    public static readonly string[] AdvancedElementEvents = ["tick", "collide", "collide_stay", "collide_end", "trigger_enter", "trigger_stay", "trigger_exit", "state_changed", "right_click"];
     public static readonly string[] ScreenEvents = ["open", "close", "tick", "key"];
     public static readonly string[] AdvancedScreenEvents = ["input_pressed", "input_released", "animation_end"];
     // Standard gamepad buttons (the same layout for Xbox, PlayStation and generic pads; only the labels differ).
@@ -61,16 +61,22 @@ public static class Registry
     // Stick directions: "left_x-" is the left stick pushed left, "left_y+" pushed down, and so on.
     public static readonly string[] GamepadAxes = ["left_x-", "left_x+", "left_y-", "left_y+", "right_x-", "right_x+", "right_y-", "right_y+"];
 }
-public sealed class History<T>(Func<T> capture, Action<T> restore, Func<T,T>? clone = null, int limit = 200)
+/// <summary>Undo and Redo. Each step is the whole value as it was. By default a step is a full copy (clone); with
+/// <paramref name="pack"/> and <paramref name="unpack"/> a step is kept packed instead (for a project: compressed, with
+/// its assets shared), which is what keeps two hundred steps of a big project small. pack is given the step before,
+/// to share what hasn't changed.</summary>
+public sealed class History<T>(Func<T> capture, Action<T> restore, Func<T,T>? clone = null, int limit = 200, Func<T, object?, object>? pack = null, Func<object, T>? unpack = null)
 {
     // Oldest entries are dropped past `limit` so long sessions don't grow without bound.
-    readonly LinkedList<T> undo = new(), redo = new();
+    readonly LinkedList<object> undo = new(), redo = new();
     readonly Func<T,T> copy = clone ?? Json.Clone;
+    object Keep(LinkedList<object> stack) => pack != null && unpack != null ? pack(capture(), stack.Last?.Value) : copy(capture())!;
+    T Back(object kept) => pack != null && unpack != null ? unpack(kept) : (T)kept;
     public int UndoCount => undo.Count;
-    public void Checkpoint() { Push(undo, copy(capture())); redo.Clear(); }
-    public void Undo() { if (undo.Count == 0) return; Push(redo, copy(capture())); restore(Pop(undo)); }
-    public void Redo() { if (redo.Count == 0) return; Push(undo, copy(capture())); restore(Pop(redo)); }
+    public void Checkpoint() { Push(undo, Keep(undo)); redo.Clear(); }
+    public void Undo() { if (undo.Count == 0) return; Push(redo, Keep(redo)); restore(Back(Pop(undo))); }
+    public void Redo() { if (redo.Count == 0) return; Push(undo, Keep(undo)); restore(Back(Pop(redo))); }
     public void Clear() { undo.Clear(); redo.Clear(); }
-    void Push(LinkedList<T> stack, T value) { stack.AddLast(value); while (stack.Count > Math.Max(1, limit)) stack.RemoveFirst(); }
-    static T Pop(LinkedList<T> stack) { var value = stack.Last!.Value; stack.RemoveLast(); return value; }
+    void Push(LinkedList<object> stack, object value) { stack.AddLast(value); while (stack.Count > Math.Max(1, limit)) stack.RemoveFirst(); }
+    static object Pop(LinkedList<object> stack) { var value = stack.Last!.Value; stack.RemoveLast(); return value; }
 }

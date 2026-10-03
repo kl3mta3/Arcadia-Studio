@@ -135,6 +135,7 @@ public partial class MainWindow
         if (key >= Key.D0 && key <= Key.D9) return ((char)('0' + (key - Key.D0))).ToString();
         if (key >= Key.NumPad0 && key <= Key.NumPad9) return ((char)('0' + (key - Key.NumPad0))).ToString();
         if (key >= Key.F1 && key <= Key.F12) return "f" + (key - Key.F1 + 1);
-        return key switch { Key.Space => "space", Key.Enter => "enter", Key.Tab => "tab", Key.Back => "backspace", Key.Left => "left", Key.Right => "right", Key.Up => "up", Key.Down => "down", _ => null };
+        return key switch { Key.Space => "space", Key.Enter => "enter", Key.Tab => "tab", Key.Back => "backspace", Key.Left => "left", Key.Right => "right", Key.Up => "up", Key.Down => "down",
+            Key.LeftShift or Key.RightShift => "shift", Key.LeftCtrl or Key.RightCtrl => "ctrl", _ => null };
     }
 }

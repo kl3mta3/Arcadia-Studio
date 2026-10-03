@@ -228,6 +228,15 @@ public partial class MainWindow
         var align = new ComboBox { ItemsSource = new[] { "left", "center", "right" }, SelectedItem = e.Alignment };
         align.SelectionChanged += (_, _) => { if (align.SelectedItem is string value && value != e.Alignment) { Change(); e.Alignment = value; Draw(); } };
         alignRow.Children.Add(align); Properties.Children.Add(alignRow);
+        // Web & desktop: where the text sits in the control's height. The arcade draws leaderboard pages itself, in the middle.
+        if (AdvancedAllowed && !ui.IsLeaderboard && e.Type is "label" or "button")
+        {
+            var verticalRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2), ToolTip = "Where the text sits in the control's height. Web and desktop only: Minecraft puts it in the middle." };
+            verticalRow.Children.Add(new TextBlock { Text = "Vertical alignment", Width = FieldLabelWidth, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4) });
+            var vertical = new ComboBox { ItemsSource = new[] { "top", "middle", "bottom" }, SelectedItem = e.VerticalAlign };
+            vertical.SelectionChanged += (_, _) => { if (vertical.SelectedItem is string value && value != e.VerticalAlign) { Change(); e.VerticalAlign = value; Draw(); } };
+            verticalRow.Children.Add(vertical); Properties.Children.Add(verticalRow);
+        }
         Properties.Children.Add(new TextBlock { Text = FontNote(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.LightGray });
         Heading(Properties, "Text shadow");
         Field(Properties, "Enabled", e, "TextShadow"); Field(Properties, "Shadow color", e, "ShadowColor");
@@ -276,7 +285,7 @@ public partial class MainWindow
     Border DecorateControl(FrameworkElement content, Element e)
     {
         if (content is Control control) { control.Background = Brushes.Transparent; control.BorderThickness = new Thickness(0); }
-        if (content is TextBlock text) { text.Background = Brushes.Transparent; text.VerticalAlignment = VerticalAlignment.Center; }
+        if (content is TextBlock text) { text.Background = Brushes.Transparent; text.VerticalAlignment = e.Type == "label" ? TextVertical(e) : VerticalAlignment.Center; }
         bool drawsOwn = e.Type is "shape" or "collider" or "camera"; // shapes draw their own fill and outline
         var frame = new Border { Tag = "appearance", Background = drawsOwn ? Brushes.Transparent : FrameBrush(e), BorderBrush = Brush(e.BorderColor), BorderThickness = new Thickness(drawsOwn ? 0 : Math.Clamp(e.BorderWidth, 0, 32) * Zoom), CornerRadius = new CornerRadius(Math.Clamp(e.CornerRadius, 0, 128) * Zoom), Child = content };
         if (content is System.Windows.Controls.Image or Grid) content.SizeChanged += (_, _) => { double r = Math.Max(0, e.CornerRadius - e.BorderWidth) * Zoom; content.Clip = new RectangleGeometry(new Rect(0, 0, Math.Max(0, content.ActualWidth), Math.Max(0, content.ActualHeight)), r, r); };
@@ -292,13 +301,15 @@ public partial class MainWindow
         border.SetValue(Border.PaddingProperty, new Thickness(4, 0, 4, 0));
         var content = new FrameworkElementFactory(typeof(ContentPresenter));
         content.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
-        content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        content.SetValue(FrameworkElement.VerticalAlignmentProperty, TextVertical(e));
         border.AppendChild(content);
         var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
         var hover = new Trigger { Property = Button.IsMouseOverProperty, Value = true }; hover.Setters.Add(new Setter(UIElement.OpacityProperty, .9, "Skin")); template.Triggers.Add(hover);
         var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true }; pressed.Setters.Add(new Setter(UIElement.OpacityProperty, .65, "Skin")); template.Triggers.Add(pressed);
         return template;
     }
+    /// <summary>Where a label's or button's text sits in its height (Element.VerticalAlign).</summary>
+    static VerticalAlignment TextVertical(Element e) => e.VerticalAlign == "top" ? VerticalAlignment.Top : e.VerticalAlign == "bottom" ? VerticalAlignment.Bottom : VerticalAlignment.Center;
     TextBlock StyledText(Element e)
     {
         var text = new TextBlock { Text = e.Wrap ? WrappedText(e.Text) : e.Text, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = e.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap }; ApplyFont(text, e); return text;

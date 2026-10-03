@@ -205,6 +205,7 @@ public partial class MainWindow
         "trigger_enter" => "Web & desktop: runs when something enters a trigger (or this control enters one). The script's value is the other control's ID.",
         "trigger_stay" => "Web & desktop: runs every 250 ms while it stays inside the trigger. The script's value is the other control's ID.",
         "trigger_exit" => "Web & desktop: runs when it leaves the trigger. The script's value is the other control's ID.",
+        "right_click" => "Web & desktop: runs when the control is clicked with the right mouse button. In an item list, the script's value is the row.",
         _ => null
     };
 }

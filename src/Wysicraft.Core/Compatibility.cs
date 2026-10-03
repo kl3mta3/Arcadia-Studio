@@ -83,6 +83,7 @@ public static class Compatibility
                 if (e.Body.Length > 0) Add(ui.Id, e.Id, e.Body + " physics body");
                 if (e.Rotation != 0 || e.Scale != 1) Add(ui.Id, e.Id, e.Rotation != 0 && e.Scale != 1 ? "rotation and scale" : e.Rotation != 0 ? "rotation" : "scale");
                 if (e.Wrap) Add(ui.Id, e.Id, "wrapped text (Minecraft draws one line)");
+                if (e.VerticalAlign != "middle") Add(ui.Id, e.Id, $"text at the {e.VerticalAlign} (Minecraft puts it in the middle)");
                 if (e.Input.Length > 0) Add(ui.Id, e.Id, $"presses input \"{e.Input}\"");
                 if (e.Bounds.Width > m.ScreenSize || e.Bounds.Height > m.ScreenSize) Add(ui.Id, e.Id, $"size {e.Bounds.Width:0} × {e.Bounds.Height:0} (Minecraft allows up to {m.ScreenSize})");
                 foreach (var name in e.Events.Keys.Where(Registry.AdvancedElementEvents.Contains)) Add(ui.Id, e.Id, $"{name} event");

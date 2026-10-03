@@ -108,7 +108,9 @@ Double-click a finding in one of your scripts to open that script.
 | **Live** | It's on the arcade. **Open in browser** shows it. |
 | **Waiting for review** | A moderator looks first; the reason is shown, and you get an email when they approve or decline it. |
 | **Not published** | A moderator sent it back, with their reason. An earlier live version stays live. |
-| **Something went wrong** | A problem on the arcade's side. It doesn't use up an upload: try again. |
+| **Something went wrong** | A problem on the arcade's side. A pop-up says what the arcade reported and has **Try again**, which sends the same version again. It doesn't use up an upload or the version number. |
+
+**Open in browser** appears once an upload has gone through (live, waiting for review, or still being stored), not after one that failed or was declined. Other problems while checking or publishing (no connection, the arcade not answering, a limit reached) also come up in a pop-up; **Try again** is offered when trying again can help.
 
 Everything in the window is saved with the project, including the game's permanent ID on each arcade, so the next publish is one click and updates the same game. The previous version stays live until the new one is.
 
@@ -131,7 +133,7 @@ When the difference is whether the game has a leaderboard at all, the question s
 | **The arcade has a leaderboard set up on the website. Remove it?** (the website has one; **Keep a leaderboard** is unticked here) | Removes the game's leaderboard. | Keeps it, and ticks **Keep a leaderboard** here with the website's setup. |
 | **The leaderboard was turned off on the website. Turn it back on?** (the website has none; **Keep a leaderboard** is ticked here) | Turns it back on with this window's setup. | Leaves it off, and unticks **Keep a leaderboard** here. Your setup stays filled in for later. |
 
-**Load details from Arcadia** copies the game's current details from Arcadia into the window at any time, for example after editing them on the website. If the leaderboard was turned off there, it unticks **Keep a leaderboard**.
+**Load details from Arcadia** copies the game's current details from Arcadia into the window at any time, for example after editing them on the website. The button is there once the game has been uploaded to Arcadia. If the leaderboard was turned off there, it unticks **Keep a leaderboard**.
 
 **Publishing history…** lists the last 20 uploads and can download any stored version (or what's live) as a zip.
 

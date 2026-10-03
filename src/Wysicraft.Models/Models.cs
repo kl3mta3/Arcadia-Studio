@@ -9,6 +9,52 @@ public static class Json
     public static string Write<T>(T value) => JsonSerializer.Serialize(value, Options);
     public static T Read<T>(string value) => JsonSerializer.Deserialize<T>(value, Options) ?? throw new InvalidDataException("Empty JSON");
     public static T Clone<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Compact), Compact) ?? throw new InvalidDataException("Empty JSON");
+    /// <summary>A project as Undo keeps it: its screens, scripts and settings as compressed JSON, and its asset and
+    /// picture bytes by reference (they are never changed in place, only replaced). A full copy of a big project is
+    /// megabytes of objects; this is a small fraction of that, so two hundred Undo steps stay small.</summary>
+    public sealed class PackedProject
+    {
+        internal byte[] Body = [];
+        internal Dictionary<string, byte[]> Assets = [];
+        internal byte[] Cover = [], LeaderboardHtml = [];
+        internal List<byte[]> Screenshots = [];
+        /// <summary>What this step holds beyond the shared assets, in bytes.</summary>
+        public int Size => Body.Length;
+    }
+    /// <summary>Packs a project for Undo. <paramref name="previous"/> is the step before, whose asset list is shared
+    /// when no asset was added, removed or replaced since.</summary>
+    public static PackedProject Pack(Project project, PackedProject? previous = null)
+    {
+        var assets = project.Assets; project.Assets = [];
+        byte[] body;
+        try
+        {
+            using var stream = new MemoryStream();
+            using (var packed = new System.IO.Compression.DeflateStream(stream, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+                JsonSerializer.Serialize(packed, project, Compact);
+            body = stream.ToArray();
+        }
+        finally { project.Assets = assets; }
+        bool same = previous != null && previous.Assets.Count == assets.Count;
+        if (same) foreach (var (path, bytes) in assets) if (!previous!.Assets.TryGetValue(path, out var had) || !ReferenceEquals(had, bytes)) { same = false; break; }
+        return new PackedProject
+        {
+            Body = body, Assets = same ? previous!.Assets : new Dictionary<string, byte[]>(assets),
+            Cover = project.Publishing.Cover, LeaderboardHtml = project.Publishing.LeaderboardHtml,
+            Screenshots = project.Publishing.Screenshots.Select(s => s.Bytes).ToList()
+        };
+    }
+    /// <summary>The project a packed step holds, as a fresh copy.</summary>
+    public static Project Unpack(PackedProject packed)
+    {
+        using var stream = new System.IO.Compression.DeflateStream(new MemoryStream(packed.Body), System.IO.Compression.CompressionMode.Decompress);
+        var project = JsonSerializer.Deserialize<Project>(stream, Compact) ?? throw new InvalidDataException("Empty JSON");
+        // Its own asset list: the live project adds to and replaces entries, and the packed step may be shared.
+        project.Assets = new Dictionary<string, byte[]>(packed.Assets);
+        project.Publishing.Cover = packed.Cover; project.Publishing.LeaderboardHtml = packed.LeaderboardHtml;
+        for (int i = 0; i < project.Publishing.Screenshots.Count && i < packed.Screenshots.Count; i++) project.Publishing.Screenshots[i].Bytes = packed.Screenshots[i];
+        return project;
+    }
     // Deep copy of everything except asset bytes, which are never modified in place and so can be shared.
     // Avoids base64-encoding every texture on each undo checkpoint, autosave and staging copy.
     public static Project CloneProject(Project project) {
@@ -432,6 +478,9 @@ public sealed class Element
     public double ShadowBlur { get; set; }
     public double CornerRadius { get; set; }
     public string Alignment { get; set; } = "left";
+    // Web & desktop: where the text sits in the control's height: "top", "middle" or "bottom". Minecraft and
+    // leaderboard pages put it in the middle.
+    public string VerticalAlign { get; set; } = "middle";
     public string Texture { get; set; } = "";
     public string Item { get; set; } = "minecraft:stone";
     public string Value { get; set; } = "0";

@@ -65,8 +65,10 @@ public partial class MainWindow
         Expect(fields.Contains("ROTATION (°)") && fields.Contains("SCALE"), "a control's Properties have Rotation and Scale: " + string.Join("|", fields.Take(30)));
         selected.Clear(); selected.Add("strike_text"); RefreshInspector();
         Expect(InspectorText().Contains("WRAP TEXT"), "a label's Properties have Wrap text");
+        bool HasVertical() => InspectorText().Any(t => t.Equals("Vertical alignment", StringComparison.OrdinalIgnoreCase));
+        Expect(HasVertical(), "a label's Properties have Vertical alignment: " + string.Join("|", InspectorText().Take(60)));
         project.Manifest.Target = "minecraft"; RefreshInspector();
-        Expect(!InspectorText().Contains("WRAP TEXT") && !InspectorText().Contains("ROTATION (°)"), "a project made for Minecraft doesn't offer them");
+        Expect(!InspectorText().Contains("WRAP TEXT") && !InspectorText().Contains("ROTATION (°)") && !HasVertical(), "a project made for Minecraft doesn't offer them");
         project.Manifest.Target = "web"; RefreshInspector();
         bool refused = false; try { E("strike").Scale = 0; Validation.Check(project); refused = Validation.Errors(project).Count > 0; } finally { E("strike").Scale = 1; }
         Expect(refused, "a scale of nothing is an error");
@@ -74,6 +76,19 @@ public partial class MainWindow
         // The canvas shows them as the game draws them: the card turned, and what's attached inside it along with it.
         selected.Clear(); Draw(); UpdateLayout();
         Border On(string id) => Surface.Children.OfType<Border>().First(b => (b.Tag as string) == id);
+        // Text at the top or bottom of a label, as the game draws it.
+        static T? Inside<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
+        {
+            for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+            { var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i); if (child is T hit) return hit; if (Inside<T>(child) is T deeper) return deeper; }
+            return null;
+        }
+        Expect(Inside<TextBlock>(On("strike_text"))?.VerticalAlignment == VerticalAlignment.Center, "the canvas puts a label's text in the middle to start with");
+        E("strike_text").VerticalAlign = "top"; Draw(); UpdateLayout();
+        Expect(Inside<TextBlock>(On("strike_text"))?.VerticalAlignment == VerticalAlignment.Top, "and at the top when the label says so");
+        E("strike_text").VerticalAlign = "bottom"; Draw(); UpdateLayout();
+        Expect(Inside<TextBlock>(On("strike_text"))?.VerticalAlignment == VerticalAlignment.Bottom, "or at the bottom");
+        E("strike_text").VerticalAlign = "middle"; Draw(); UpdateLayout();
         Matrix M(string id) => On(id).RenderTransform.Value;
         double degrees = Math.Atan2(M("strike").M12, M("strike").M11) * 180 / Math.PI;
         Expect(Math.Abs(degrees + 8) < 0.01 && Math.Abs(Math.Sqrt(M("defend").M11 * M("defend").M11 + M("defend").M12 * M("defend").M12) - 1.1) < 0.001, $"the canvas turns the card by its rotation and scale: {degrees:0.##}°");

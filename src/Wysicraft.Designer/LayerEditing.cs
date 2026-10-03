@@ -60,10 +60,20 @@ public partial class MainWindow
     }
     void UngroupLayers(IEnumerable<string> roots) {Change();foreach(var group in roots) {string parent=ui.GroupParents.GetValueOrDefault(group,"");foreach(var e in ui.Elements.Where(e=>e.LayerGroup==group))e.LayerGroup=parent;foreach(var key in ui.GroupParents.Keys.ToArray())if(ui.GroupParents[key]==group)ui.GroupParents[key]=parent;ui.GroupParents.Remove(group);}Draw();RefreshInspector();
     }
+    // What each row was built from, by row: a row whose signature hasn't changed is left as it is. The signature holds
+    // everything the row shows and the very controls its buttons act on (an Undo swaps those for new objects).
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<ListBoxItem,string> layerRowBuilt=new();
+    static int Same(object o)=>System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+    bool RowUnchanged(ListBoxItem item,string signature) {
+        if(layerRowBuilt.TryGetValue(item,out var built) && built==signature) return true;
+        layerRowBuilt.AddOrUpdate(item,signature); return false;
+    }
     void RefreshLayerRows() {
         syncingLayers=true;
         try {
             var keys=new List<string>(); var seen=new HashSet<string>(); var panelDepth=new Dictionary<string,int>();
+            // Looked up by ID once here: searching the list for every row made a refresh grow with the square of the screen.
+            var byId=new Dictionary<string,Element>(); foreach(var known in ui.Elements) byId.TryAdd(known.Id,known);
             foreach(var (e,depth) in LayerTreeOrder(LayerGroups.Ordered(ui,ui.Elements.AsEnumerable().Reverse().ToList()))) {
                 panelDepth[e.Id]=depth;
                 var path=LayerGroups.Path(ui,e.LayerGroup).Reverse().ToArray();bool hidden=false;
@@ -77,11 +87,13 @@ public partial class MainWindow
             }
             foreach(ListBoxItem item in Layers.Items) {
                 string key=(string)item.Tag;
-                bool available=isolatedGroup.Length==0 || (key.StartsWith(GroupPrefix)?LayerGroups.Contains(ui,isolatedGroup,key[GroupPrefix.Length..]):InIsolation(ui.Elements.First(e=>e.Id==key)));
+                bool available=isolatedGroup.Length==0 || (key.StartsWith(GroupPrefix)?LayerGroups.Contains(ui,isolatedGroup,key[GroupPrefix.Length..]):InIsolation(byId[key]));
                 item.IsEnabled=available;item.Opacity=available?1:.3;
                 if(key.StartsWith(GroupPrefix)) {
                     string group=key[GroupPrefix.Length..]; var ids=LayerRowIds(key).ToList();
                     var members=ui.Elements.Where(x=>ids.Contains(x.Id)).ToList();
+                    item.IsSelected=false;
+                    if(RowUnchanged(item,"g|"+Same(ui)+"|"+group+"|"+collapsedGroups.Contains(group)+"|"+LayerGroups.Path(ui,group).Count()+"|"+ids.All(selected.Contains)+"|"+string.Join(",",members.Select(m=>Same(m)+(m.Visible?"v":"h")+(m.Locked?"l":"u"))))) continue;
                     var row=new DockPanel {LastChildFill=true};
                     AddLayerToggles(row,members);
                     var toggle=new Button {Content=collapsedGroups.Contains(group)?"▸":"▾",Padding=new Thickness(2,0,2,0),Margin=new Thickness(0),ToolTip="Expand / collapse group",Style=(Style)FindResource("IconButton")};
@@ -97,7 +109,9 @@ public partial class MainWindow
                     Add("Move group to top level",()=>{Change();ui.GroupParents[group]="";SetLayerOrder(ui.Elements.AsEnumerable().Reverse().ToList());Draw();RefreshInspector();});
                     Add("Ungroup",()=>UngroupLayers(new[]{group}));Add("Duplicate",Duplicate);Add("Delete group and elements",Delete); item.ContextMenu=menu;
                 } else {
-                    var e=ui.Elements.First(e=>e.Id==key); int depth=panelDepth.GetValueOrDefault(e.Id); bool elsewhere=e.Parent.Length>0 && depth==0;
+                    var e=byId[key]; int depth=panelDepth.GetValueOrDefault(e.Id); bool elsewhere=e.Parent.Length>0 && depth==0;
+                    item.IsSelected=selected.Contains(e.Id);
+                    if(RowUnchanged(item,"e|"+Same(e)+"|"+e.Id+"|"+e.Type+"|"+e.Parent+"|"+depth+"|"+LayerGroups.Path(ui,e.LayerGroup).Count()+"|"+e.Visible+"|"+e.Locked+"|"+(e.Name.Length>0?e.Name:e.Text))) continue;
                     var row=new DockPanel {LastChildFill=true};AddLayerToggles(row,new List<Element>{e});
                     var label=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(LayerGroups.Path(ui,e.LayerGroup).Count()*12+depth*14,0,0,0)};
                     if(depth>0)label.Children.Add(new TextBlock {Text="↳ ",Foreground=Brushes.Gray,VerticalAlignment=VerticalAlignment.Center});
@@ -106,13 +120,20 @@ public partial class MainWindow
                     label.Children.Add(new TextBlock {Text="  "+e.Type+(elsewhere?"  (in "+e.Parent+")":""),Foreground=Brushes.Gray,VerticalAlignment=VerticalAlignment.Center});
                     if(!e.Visible)label.Opacity=.5;
                     row.Children.Add(label);item.HorizontalContentAlignment=HorizontalAlignment.Stretch;item.Content=row;
-                    item.ToolTip=e.Name.Length>0?e.Name:e.Text; item.IsSelected=selected.Contains(e.Id); item.ContextMenu=ElementMenu(e);
+                    item.ToolTip=e.Name.Length>0?e.Name:e.Text; item.IsSelected=selected.Contains(e.Id);
+                    // Filled when it is opened (Layers' ContextMenuOpening, below): a full menu for every row on every redraw
+                    // was most of what a redraw cost on a big screen (about a second with 700 controls).
+                    var rowMenu=new ContextMenu(); rowMenu.Opened+=delegate { if(rowMenu.Items.Count==0) FillElementMenu(rowMenu,e); }; item.ContextMenu=rowMenu;
                 }
             }
         } finally {syncingLayers=false;}
     }
     void InitializeLayerDragging() {
         Layers.AllowDrop=true;
+        // A control row's menu is filled each time it is asked for, so it always matches the selection and the control as they are now.
+        Layers.ContextMenuOpening+=(_,e)=> {
+            if(ItemsControl.ContainerFromElement(Layers,e.OriginalSource as DependencyObject) is ListBoxItem { Tag: string id, ContextMenu: ContextMenu menu } && !id.StartsWith(GroupPrefix) && ui.Elements.FirstOrDefault(x=>x.Id==id) is Element element) FillElementMenu(menu,element);
+        };
         Layers.MouseDoubleClick+=(_,e)=>{var row=ItemsControl.ContainerFromElement(Layers,e.OriginalSource as DependencyObject) as ListBoxItem;if(row?.Tag is string key && key.StartsWith(GroupPrefix)){IsolateGroup(key[GroupPrefix.Length..]);e.Handled=true;}else if(row?.Tag is string id && ui.Elements.FirstOrDefault(x=>x.Id==id) is Element element && !InsideButton(e.OriginalSource as DependencyObject)){e.Handled=true;Guard(()=>RenameElement(element));}};
         Layers.PreviewMouseLeftButtonDown+=(_,e)=> {
             pendingLayerClick=null;

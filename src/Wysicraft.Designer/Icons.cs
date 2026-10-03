@@ -88,12 +88,17 @@ static class Icons
         ["sound"]=("M2,6 L5,6 L9,2.5 L9,13.5 L5,10 L2,10 Z M11.5,5 A4,4 0 0 1 11.5,11 M13,3 A6.5,6.5 0 0 1 13,13",""),
     };
     public static bool Has(string name) => Shapes.ContainsKey(name);
+    // A shape is parsed once and shared (frozen): lists draw the same few icons hundreds of times.
+    static readonly Dictionary<string,Geometry> Parsed=new();
+    static Geometry Shape(string data) { if(!Parsed.TryGetValue(data,out var g)) { g=Geometry.Parse(data); g.Freeze(); Parsed[data]=g; } return g; }
+    static readonly Brush DefaultInk=Frozen(new SolidColorBrush(Color.FromRgb(0xC9,0xD1,0xDC)));
+    static Brush Frozen(Brush b) { b.Freeze(); return b; }
     public static FrameworkElement Get(string name,Brush? brush=null,double size=14) {
-        var ink=brush ?? new SolidColorBrush(Color.FromRgb(0xC9,0xD1,0xDC));
+        var ink=brush ?? DefaultInk;
         var canvas=new Canvas {Width=16,Height=16};
         if(Shapes.TryGetValue(name,out var shape)) {
-            if(shape.Fill.Length>0)canvas.Children.Add(new Path {Data=Geometry.Parse(shape.Fill),Fill=ink});
-            if(shape.Stroke.Length>0)canvas.Children.Add(new Path {Data=Geometry.Parse(shape.Stroke),Stroke=ink,StrokeThickness=1.4,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round});
+            if(shape.Fill.Length>0)canvas.Children.Add(new Path {Data=Shape(shape.Fill),Fill=ink});
+            if(shape.Stroke.Length>0)canvas.Children.Add(new Path {Data=Shape(shape.Stroke),Stroke=ink,StrokeThickness=1.4,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round});
         }
         return new Viewbox {Width=size,Height=size,Child=canvas,SnapsToDevicePixels=true,VerticalAlignment=VerticalAlignment.Center};
     }

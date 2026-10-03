@@ -14,6 +14,7 @@
   "snap": true,
   "target": "both",
   "keepScriptState": false,
+  "smoothImages": false,
   "gameVariables": {},
   "savedVariables": [],
   "inputs": [],
