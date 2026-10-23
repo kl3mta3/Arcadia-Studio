@@ -42,6 +42,8 @@ public static class Registry
         Register("lb_periods", "Period tabs", ["Board.Periods", "Board.PeriodLabels"], [], advanced: true);
         Register("tilemap", "Tilemap", ["Texture", "TileWidth", "TileHeight", "Columns", "Rows", "Tiles", "Solid"], [], advanced: true);
         Register("particles", "Particles", ["Effect", "Autoplay"], [], advanced: true);
+        // A picture scripts draw on, pixel by pixel: Columns × Rows pixels, starting as Texture (or see-through).
+        Register("canvas", "Canvas", ["Texture", "Columns", "Rows"], ["click"], advanced: true);
         Register("collider", "Collider", ["Collider"], [], advanced: true);
         // The view: only what is inside the first visible camera is shown, scaled to fill the screen. Draws nothing.
         Register("camera", "Camera", [], [], advanced: true);
@@ -55,6 +57,8 @@ public static class Registry
     public static readonly string[] GamepadButtons = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "back", "start", "ls", "rs", "dpad_up", "dpad_down", "dpad_left", "dpad_right", "home"];
     /// <summary>A tag is lowercase letters, digits, underscore or dash, up to 24 characters; a control carries at most 8.</summary>
     public const int MaxTags = 8;
+    /// <summary>A Canvas control's picture is at most this many pixels each way (the web runtime's MAX_CANVAS).</summary>
+    public const int MaxCanvas = 1024;
     public static bool Tag(string value) => value.Length is > 0 and <= 24 && value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' || c is '_' or '-');
     // Touch: what a finger does to press an input. A drag reports its distance as a strength, like a stick.
     public static readonly string[] TouchActions = ["drag_left", "drag_right", "drag_up", "drag_down"];

@@ -154,7 +154,8 @@ public partial class MainWindow
 
             - `ctx.ui` — setText, setVisible, setPosition, setSize, setVelocity, getElement (x, y, width, height, vx, vy), play (sprite clips).
               Web and desktop also: setOpacity, setRotation, setScale, bringToFront, sendToBack, moveAbove, moveBelow
-              (guide topic "games", Illustrated art).
+              (guide topic "games", Illustrated art), setTint/clearTint, and drawing on a Canvas control with setPixel,
+              setPixels, fillRect, drawLine, stamp, clearCanvas and pixelAt (guide topic "games", Tints and the Canvas control).
             - `ctx.client` — playSound and other client actions; `get_schema.clientActions` lists them.
             - `ctx.physics` — touching(id), isTouching(a, b) for bodies and colliders.
             - Screen variables persist between handlers while the screen is open. Game variables (Project settings, or set_project gameVariables) also carry across screens, and savedVariables come back next visit.
@@ -189,6 +190,11 @@ public partial class MainWindow
             ```
 
             `read_pixel_art` reads an image back (by frame or layer) so you can check your work or edit what is there.
+
+            Art that comes in several colours (web and desktop): draw it once in white or light grey and give the
+            control a `tint` instead of drawing a copy per colour. Pictures that change while the game runs (paint,
+            drawing, marks left behind) belong on a Canvas control that scripts draw on. Both are in guide topic
+            "games", Tints and the Canvas control. pixel_art makes pictures in the editor; the canvas is drawn in the game.
 
             # Sprites
 
@@ -271,8 +277,8 @@ public partial class MainWindow
 
             - `sound_effect` — a retro effect from a preset (coin, jump, laser, explosion, powerup, hurt, blip, random)
               plus `settings` that patch any of its parameters (wave, frequency, slide, decay, punch, lowPass…).
-            - `compose_music` — a layered chiptune song written as note text.
-            - `song_from_audio` — turns a real recording into an 8-bit cover.
+            - `compose_music` — a layered song written as note text: chip sounds, or sampled instruments from a SoundFont.
+            - `song_from_audio` — turns a real recording into an 8-bit cover (or, with `soundFont`, one on sampled instruments).
             - `speech` add_sound — a spoken line (a character, narrator or menu voice). See guide(topic:"speech").
 
             All three save a project sound with an ID (`projectid:name`) for Sound controls, play_sound actions and
@@ -298,6 +304,37 @@ public partial class MainWindow
             - Changing a song: pass `sound` = its ID and only the fields to change. `addTracks` adds layers instead of
               replacing them. A sound that was not made here is replaced, keeping its ID, so the game needs no change.
 
+            # Real instruments (SoundFonts)
+
+            Chip sounds suit pixel art and retro games. For piano, strings, guitars, brass or a real drum kit, play the
+            song through a SoundFont: a bank of sampled instruments. Only the finished sound goes into the game, so the
+            font adds nothing to its size.
+
+            ```json
+            {"expectedRevision": "…", "name": "village",
+             "song": {"bpm": 96, "key": "G", "scale": "major", "loop": true, "soundFont": "GeneralUser GS", "tracks": [
+               {"name": "Melody", "fontInstrument": "Flute", "notes": "D5 q B4 e G4 e A4 q B4 q | D5 h B4 h"},
+               {"name": "Chords", "fontInstrument": "Nylon Guitar", "volume": 0.6, "notes": "G3+B3+D4 h D3+F#3+A3 h | G3+B3+D4 w"},
+               {"name": "Bass", "fontInstrument": "33", "notes": "G2 h D2 h | G2 w"},
+               {"name": "Drums", "fontInstrument": "128:0", "notes": "C2+F#2 q F#2 q D2+F#2 q F#2 q | C2+F#2 q F#2 q D2+F#2 q F#2 q"}]}}
+            ```
+
+            - `get_schema` → `soundFonts.installed` names the fonts on this computer, each with its licence. "GeneralUser
+              GS" comes with the app (over 250 instruments and 13 drum kits, free in anything). Tell the user about a licence
+              that asks for a credit or advises against commercial use before publishing with it.
+            - `read_music` with `soundFont` = a font's name (and no `sound`) lists its instruments as "number name". Names
+              differ from font to font, so read the list rather than guessing; a part of a name works when only one
+              instrument has it.
+            - `fontInstrument` takes a name, a MIDI program number 0-127 ("40" is a violin in any General MIDI font), or
+              bank:program. Bank 128 is the drum kits ("128:0" the standard kit), played with the same drum notes.
+            - A layer with no `fontInstrument` plays the font's nearest match to its chip `instrument`, so adding
+              `"soundFont": "GeneralUser GS"` to an existing song (with `sound` = its ID) is enough to hear it on real
+              instruments, and `"soundFont": ""` takes it back to chip sounds.
+            - `instrumentSettings` shape the chip sound only, apart from `octave` and `volume`. With a font, change the
+              instrument instead.
+            - You can't download a font: the user adds them in the Music maker (Sounds → Get more soundfonts…). `soundFonts.canBeAdded`
+              says what is on offer and how big each is.
+
             # From a recording
 
             `song_from_audio` takes `file` (a path on this computer) or `sound` (a project sound). It follows the beat,
@@ -307,7 +344,7 @@ public partial class MainWindow
             the rest first, which is far more accurate.
             """),
 
-        ("games", "Physics, cameras, inputs and animation for 2D games.", """
+        ("games", "Physics, cameras, inputs, animation, tints and the Canvas control for 2D games.", """
             # Web and desktop only
 
             These are the advanced features: they run in web and desktop exports, and Minecraft exports refuse them.
@@ -392,6 +429,45 @@ public partial class MainWindow
             256×256 map costs about what a screen-sized one does. Scripts use `ui.getTile(id, column, row)`,
             `ui.setTile`, `ui.fillTiles(id, column, row, width, height, index)`, `ui.tileAt(id, x, y)` and
             `ui.tileSize(id)`. A body that lands on the map gets a `collide` event naming the tilemap.
+
+            # Tints and the Canvas control (web and desktop)
+
+            Tint: `image`, `texture_region`, `sprite`, `tilemap` and `canvas` controls have `tint` = "#RRGGBB" ("" for
+            none). The picture is multiplied by the colour, so white is no change: a tint darkens or shifts colours and
+            never brightens them. Draw what will be recoloured in white or light grey — a car body, a team shirt, a
+            paint job — and tint it; keep the parts that must not change (outlines, windows, skin) on a second picture
+            on top, untinted. One picture then serves every colour instead of a copy per colour.
+
+            - In the editor: Properties → Tint. With `apply_edits`: `upsert_element` with `data` = {tint: "#3080FF"}.
+            - From scripts: `ui.setTint(id, '#FF4040')` and `ui.clearTint(id)`; `getElement(id).tint` reads it back.
+              A hurt flash is setTint on the hit, clearTint a few ticks later.
+
+            Canvas: the `canvas` control is a picture scripts draw on, pixel by pixel — a paint program, a drawing game,
+            footprints, scorch marks, a minimap, pixel text that isn't on a tile grid. `columns`/`rows` is its size in
+            pixels (1-1024 each way), stretched over the control with hard edges: the toolbox makes 64 × 64 pixels shown
+            at 128 × 128, so each canvas pixel is 2 × 2 on screen. `texture` is the picture it starts as (scaled to
+            columns × rows); with none it starts see-through. `tint` and `opacity` apply to it like any picture.
+
+            Positions are canvas pixels from its top-left corner. A colour is "#RRGGBB" or "#AARRGGBB"; "" rubs out.
+
+            - `ui.setPixel(id, x, y, colour)`
+            - `ui.setPixels(id, [[x, y, colour], ...])` — up to 65536 pixels in one call, counted as one screen change,
+              so a big picture fits in one script run where 65536 setPixel calls would not.
+            - `ui.fillRect(id, x, y, width, height, colour)` and `ui.drawLine(id, x1, y1, x2, y2, colour)`
+            - `ui.clearCanvas(id)` (all see-through again) or `ui.clearCanvas(id, x, y, width, height)`
+            - `ui.stamp(id, pictureId, x, y)` lays a picture from the project on at its own size, its see-through
+              parts letting the canvas show: brushes, stickers, letters from a font sheet.
+            - `ui.pixelAt(id, screenX, screenY)` → {x, y, inside}: the canvas pixel under a point, so painting is
+              `var p = ctx.input.pointer(), at = ctx.ui.pixelAt('paper', p.x, p.y); if (p.down && at.inside) ctx.ui.setPixel('paper', at.x, at.y, colour);`
+              on the screen's tick. It ignores rotation and scale.
+            - `getElement(id)` gives `columns` and `rows`.
+
+            Pixels are replaced, not blended (stamp is the exception), and anything off the canvas is ignored. Scripts
+            can't read pixels back: keep what the game needs to know (which cells are painted, how much is covered) in
+            script state. What is drawn lasts until the screen opens again; to keep a drawing across visits, keep the
+            strokes (or a compact grid) in `ctx.save` and draw them again on `open`. A full 1024 × 1024 canvas changing
+            every frame is cheap to draw; what costs is the number of calls, so prefer fillRect, drawLine and setPixels
+            over thousands of setPixel calls. For anything on a grid of whole tiles, a tilemap is still the better tool.
 
             # State graphs
 

@@ -118,7 +118,7 @@ public partial class MainWindow
     void PublishToArcadia()
     {
         SaveScriptText();
-        if (arcadiaDialog != null) { arcadiaDialog.Activate(); return; }
+        if (arcadiaDialog != null) { arcadiaDialog.Surface(); arcadiaDialog.Activate(); return; }
         arcadiaDialog = new ArcadiaDialog(this); arcadiaDialog.Closed += (_, _) => arcadiaDialog = null; arcadiaDialog.Show();
     }
 
@@ -131,6 +131,18 @@ public partial class MainWindow
         string? key;
         ArcadiaMe? me;
         bool busy;
+        // A Publish in three parts: sending the game (Cancel stops it and nothing is published), then, once the
+        // arcade has answered, the arcade storing it (onArcade: it carries on there whatever happens here, so Cancel
+        // becomes Stop waiting). Closing the window never stops either: it works on out of sight (hiddenBusy) and
+        // comes back with the result.
+        bool uploading, onArcade, stopWaiting, hiddenBusy;
+        CancellationTokenSource? waiting;
+        /// <summary>True while a game is being sent and hasn't reached the arcade yet: quitting the app would stop it.</summary>
+        internal bool UploadInFlight => busy && uploading && !onArcade;
+        /// <summary>How often the arcade is asked whether it has stored the upload, and for how long (self-checks shorten both).</summary>
+        internal TimeSpan PollEvery = TimeSpan.FromSeconds(2.5);
+        internal Func<int, TimeSpan> StoreWait = ArcadiaPackage.StoreWait;
+        readonly Button cancel = new() { Content = "Cancel", Visibility = Visibility.Collapsed, ToolTip = "Stops a check or an upload that hasn't reached the arcade yet. Once the arcade has the upload it stores it; this then only stops waiting for it." };
         CancellationTokenSource? work;
         byte[] cover; string coverType;
         readonly List<PublishImage> gallery;
@@ -170,7 +182,22 @@ public partial class MainWindow
         string openUrl = "";
         // Self-checks answer the window's yes/no questions through this instead of a message box.
         internal Func<string, bool>? Confirm;
-        bool Ask(string question) => Confirm?.Invoke(question) ?? MessageBox.Show(this, question, "Publish to Arcadia", MessageBoxButton.YesNo) == MessageBoxResult.Yes;
+        bool Ask(string question) { if (Confirm != null) return Confirm(question); Surface(); return MessageBox.Show(this, question, "Publish to Arcadia", MessageBoxButton.YesNo) == MessageBoxResult.Yes; }
+        /// <summary>Brings the window back when it was closed while it worked: to ask something, or to show how it ended.</summary>
+        internal void Surface()
+        {
+            if (IsVisible) return;
+            hiddenBusy = false; bool activate = ShowActivated;
+            ShowActivated = false; Show(); ShowActivated = activate; // without taking the keyboard from what the person is doing
+        }
+        /// <summary>The Cancel button. Before the arcade has the upload it stops the work, and nothing is published.
+        /// After that the arcade stores the upload whatever happens here, so it only stops the waiting.</summary>
+        internal void CancelWork()
+        {
+            if (!busy) return;
+            if (onArcade) { stopWaiting = true; waiting?.Cancel(); } else work?.Cancel();
+        }
+        async Task<T> Uploading<T>(Func<Task<T>> send) { uploading = true; try { return await send(); } finally { uploading = false; } }
         // Self-checks answer the "details were changed on Arcadia" question through this: false keeps Arcadia's, true
         // uses the project's, null cancels.
         internal Func<ArcadiaDetails, bool?>? ChooseDetails;
@@ -208,7 +235,7 @@ public partial class MainWindow
             var bottom = new StackPanel { Margin = new Thickness(0, 8, 0, 0) }; DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom);
             bottom.Children.Add(Heading("Check")); bottom.Children.Add(findings); bottom.Children.Add(progress); bottom.Children.Add(status);
             var buttons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) }; bottom.Children.Add(buttons);
-            foreach (var b in new[] { check, publish, open, history, loadDetails }) { b.Margin = new Thickness(0, 0, 8, 0); b.Padding = new Thickness(12, 3, 12, 3); buttons.Children.Add(b); }
+            foreach (var b in new[] { check, publish, cancel, open, history, loadDetails }) { b.Margin = new Thickness(0, 0, 8, 0); b.Padding = new Thickness(12, 3, 12, 3); buttons.Children.Add(b); }
             var form = new StackPanel(); root.Children.Add(new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
 
             // Account
@@ -329,7 +356,15 @@ public partial class MainWindow
             loadDetails.Click += async (_, _) => await Guard(LoadDetails);
             scan.Click += async (_, _) => await Guard(Scan);
             findings.MouseDoubleClick += (_, _) => OpenFinding();
-            Closing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Wait for the upload to finish before closing."; return; } Apply(); };
+            cancel.Click += (_, _) => CancelWork();
+            // Closing the window never stops what it is doing: it carries on out of sight, and the window comes back
+            // with the result (or sooner, if there is something to ask).
+            Closing += (_, e) =>
+            {
+                if (!busy) { Apply(); return; }
+                e.Cancel = true; hiddenBusy = true; Hide();
+                editor.Log("Arcadia: " + (onArcade ? "the arcade is still storing the upload." : "still working.") + " The Publish to Arcadia window comes back when it's done.");
+            };
             shown = Fingerprint(editor.project.Publishing);
             Loaded += async (_, _) => await Guard(Refresh);
         }
@@ -513,19 +548,26 @@ public partial class MainWindow
         {
             if (busy) return;
             busy = true; SetEnabled(false);
+            cancel.Content = "Cancel"; cancel.Visibility = popUp ? Visibility.Visible : Visibility.Collapsed;
             try
             {
                 for (int tries = 0; tries < 25; tries++)
                 {
                     work = new CancellationTokenSource(); again = false;
                     try { await action(); }
+                    catch (OperationCanceledException) when (work is { IsCancellationRequested: true }) { status.Text = "Cancelled. Nothing was published."; editor.Log("Arcadia: cancelled before anything was published."); }
                     catch (ArcadiaException ex) { await Failed(ex); if (popUp) again = ShowProblem(status.Text, "", Passing(ex)); }
                     catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or ArgumentException or IOException or NotSupportedException or FileFormatException) { status.Text = ex.Message; editor.Log("Arcadia: " + ex.Message); }
                     if (!again) break;
                     status.Text = "Trying again…";
                 }
             }
-            finally { busy = false; work = null; again = false; progress.Visibility = Visibility.Collapsed; SetEnabled(true); }
+            finally
+            {
+                busy = false; work = null; again = false; uploading = onArcade = stopWaiting = false; waiting = null;
+                progress.IsIndeterminate = false; progress.Visibility = Visibility.Collapsed; cancel.Visibility = Visibility.Collapsed; SetEnabled(true);
+                if (hiddenBusy) Surface(); // closed while it worked: here is how it ended
+            }
         }
         // Set by a problem pop-up's Try again: Guard runs the action once more.
         bool again;
@@ -544,6 +586,7 @@ public partial class MainWindow
         {
             LastProblem = headline + (detail.Length > 0 ? "\n" + detail : "");
             if (ProblemForTest != null) return ProblemForTest(LastProblem, canRetry);
+            Surface();
             var window = new Window { Owner = this, Title = "Publish to Arcadia", Width = 520, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false };
             window.SetResourceReference(StyleProperty, typeof(Window));
             var panel = new StackPanel { Margin = new Thickness(16) }; window.Content = panel;
@@ -854,13 +897,14 @@ public partial class MainWindow
                     if (pre.Details is { Conflict: true } clash)
                     {
                         LeaderboardQuestion = ArcadiaDetailsMerge.LeaderboardQuestion(clash, leaderboard.IsChecked == true);
+                        if (ChooseDetails == null) Surface();
                         bool? mine = ChooseDetails != null ? ChooseDetails(clash) : AskDetails(clash);
                         if (mine == null) { status.Text = "Nothing was published."; return; }
                         overwrite = mine; if (mine == false) keepArcade = clash.Arcade;
                     }
                 }
                 ArcadiaUpload upload;
-                try { upload = await client.UploadAsync(key!, gameId, zip, Sending("Uploading:"), work!.Token, overwrite); }
+                try { upload = await Uploading(() => client.UploadAsync(key!, gameId, zip, Sending("Uploading:"), work!.Token, overwrite)); }
                 catch (ArcadiaException ex) when (ex.GameGone && gameId != null) { ShowFindings(local, []); if (!OfferNewGame(ex, gameId)) return; continue; }
                 catch (ArcadiaException ex) when (ex.Code == "title-taken") { ShowFindings(local, []); if (!OfferExistingGame(ex)) return; continue; }
                 // The game's permanent ID is kept at once, so publishing again updates this game rather than making another.
@@ -876,12 +920,22 @@ public partial class MainWindow
                     catch (Exception ex) when (ex is ArcadiaException or InvalidDataException or System.Net.Http.HttpRequestException or TaskCanceledException) { kept += " The details couldn't be copied into this project (" + ex.Message + "): use Load details from Arcadia."; }
                 }
                 var submission = upload.Submission;
-                status.Text = "Publishing…";
-                for (int i = 0; submission.Status == "processing" && i < 90; i++)
+                // The arcade has the upload and stores it whatever happens here. How long that takes goes by the
+                // number of files, so the wait does too. A look that gets no answer (no connection, a timeout, the
+                // arcade busy) doesn't end the wait: uploading again would only send the same game twice.
+                int files = ArcadiaPackage.FileCount(zip); var wait = StoreWait(files); var clock = System.Diagnostics.Stopwatch.StartNew(); bool reached = true;
+                onArcade = true; cancel.Content = "Stop waiting"; progress.IsIndeterminate = true; progress.Visibility = Visibility.Visible;
+                string storing = $"Storing on Arcadia… {files:N0} file{(files == 1 ? "" : "s")}, which can take up to about {Math.Ceiling(wait.TotalMinutes):0} minutes";
+                status.Text = storing + ". You can close this window: the arcade carries on.";
+                while (submission.Status == "processing" && clock.Elapsed < wait && !stopWaiting)
                 {
-                    await Task.Delay(2500, work!.Token);
-                    submission = await client.SubmissionAsync(key!, submission.Id, work.Token);
+                    waiting = new CancellationTokenSource();
+                    try { await Task.Delay(PollEvery, waiting.Token); } catch (OperationCanceledException) { break; }
+                    status.Text = storing + $" ({(int)clock.Elapsed.TotalMinutes}:{clock.Elapsed.Seconds:00} so far). You can close this window: the arcade carries on.";
+                    try { submission = await client.SubmissionAsync(key!, submission.Id, work!.Token); reached = true; }
+                    catch (ArcadiaException ex) when (Passing(ex)) { reached = false; }
                 }
+                progress.IsIndeterminate = false; progress.Visibility = Visibility.Collapsed; cancel.Visibility = Visibility.Collapsed;
                 ShowFindings(local, submission.Findings);
                 if (submission.Status == "failed")
                 {
@@ -904,7 +958,9 @@ public partial class MainWindow
                     "live" => (keepArcade?.Title ?? s.Title) + " is live!" + kept,
                     "held" => "Waiting for review." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message) + " You'll get an email when a moderator approves or declines it.",
                     "declined" => "Not published." + (string.IsNullOrWhiteSpace(submission.Message) ? "" : " " + submission.Message),
-                    "processing" => "The arcade is still storing it. Check Publishing history in a minute.",
+                    "processing" => stopWaiting ? "Stopped waiting. The arcade is still storing it: Publishing history shows when it's done."
+                        : !reached ? "The upload reached the arcade, but the arcade couldn't be reached since to see how it went. Check Publishing history in a minute."
+                        : "The arcade is still storing it. Check Publishing history in a minute.",
                     _ => "Status: " + submission.Status + "."
                 };
                 editor.Log("Arcadia: " + status.Text);

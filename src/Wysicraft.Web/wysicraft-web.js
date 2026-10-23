@@ -12,7 +12,7 @@
     opacity: 1, fontScale: 1, minimum: 0, maximum: 100, font: 'minecraft:default', bold: false, italic: false, underline: false,
     textShadow: false, fillEnabled: true, borderColor: '#697382', shadowColor: '#000000', borderWidth: 0, shadowOpacity: 0.75,
     shadowOffsetX: 1, shadowOffsetY: 1, shadowBlur: 0, cornerRadius: 0, textureX: 0, textureY: 0, textureWidth: 256, textureHeight: 256,
-    options: [], events: {}, sound: '', autoplay: true, delay: 0, volume: 1, repeat: 1, loop: false, frameWidth: 16, frameHeight: 16, clips: '', shape: 'rectangle', body: '', collider: 'box', colliderPoints: [], bounce: 0, friction: 0.2, trigger: false, input: '', tileWidth: 16, tileHeight: 16, columns: 20, rows: 12, tiles: '', solid: ''
+    options: [], events: {}, sound: '', autoplay: true, delay: 0, volume: 1, repeat: 1, loop: false, frameWidth: 16, frameHeight: 16, clips: '', shape: 'rectangle', body: '', collider: 'box', colliderPoints: [], bounce: 0, friction: 0.2, trigger: false, input: '', tileWidth: 16, tileHeight: 16, columns: 20, rows: 12, tiles: '', solid: '', tint: ''
   };
   const DEFAULT_UI = { tickInterval: 0, keyRepeat: 150, responsive: false, showFrame: false, dimBackground: false, fitToScreen: true, clipToScreen: false,
     id: '', title: '', size: { width: 320, height: 200 }, variables: {}, events: {}, elements: [], gravity: 0, animations: [], stateGraphs: [], shader: '' };
@@ -111,6 +111,8 @@
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       this.textures = new Map();      // image element -> GL texture
+      // Canvas controls: always hard pixel edges, and uploaded again whenever their pixels change.
+      this.crisp = new WeakSet(); this.uploaded = new WeakMap();
       // Quads in the order they were pushed, as runs that share a texture and blend: a run is one draw call.
       // Keeping submission order is what keeps the draw order; grouping by texture instead once let a floor
       // picture first seen on floor 2 be painted over every sprite already known.
@@ -141,12 +143,22 @@
       // CORS) is remembered, so the control using it is drawn on canvas2D instead of as a white quad.
       try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
       catch (ex) { gl.deleteTexture(tex); this.refused.add(img); return this.white; }
-      const filter = this.smooth ? gl.LINEAR : gl.NEAREST;
+      const filter = this.smooth && !this.crisp.has(img) ? gl.LINEAR : gl.NEAREST;
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.textures.set(img, tex);
       return tex;
     }
+    // A picture whose pixels change (a Canvas control) is uploaded again when its version has moved on since the last
+    // upload. One that has no texture yet gets it, with these pixels, the first time it is drawn.
+    refresh(img, version) {
+      if (this.uploaded.get(img) === version) return;
+      const tex = this.textures.get(img);
+      if (tex) { const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
+      this.uploaded.set(img, version);
+    }
+    // A picture that will not be drawn again (a canvas from a screen that has closed) gives its texture back.
+    forget(img) { const tex = this.textures.get(img); if (tex) { this.gl.deleteTexture(tex); this.textures.delete(img); } this.uploaded.delete(img); }
     begin() {
       this.runs.length = 0;
       this.total = 0;
@@ -166,7 +178,7 @@
       d[at] = x; d[at + 1] = y; d[at + 2] = w; d[at + 3] = h;
       // Smooth sampling reads neighbouring texels, so a frame cut from a sheet is taken half a texel inside its
       // edges: otherwise the frame next door bleeds into its border.
-      const inset = this.smooth && img ? 0.5 : 0;
+      const inset = this.smooth && img && !this.crisp.has(img) ? 0.5 : 0;
       d[at + 4] = (sx + inset) / iw; d[at + 5] = (sy + inset) / ih; d[at + 6] = (sx + sw - inset) / iw; d[at + 7] = (sy + sh - inset) / ih;
       d[at + 8] = r; d[at + 9] = g; d[at + 10] = b; d[at + 11] = a;
       d[at + 12] = rot || 0;
@@ -660,7 +672,7 @@
     glTurned(e, img, sx, sy, sw, sh, x, y, w, h) {
       const s = scaleOf(e);
       if (s !== 1) { x += w * (1 - s) / 2; y += h * (1 - s) / 2; w *= s; h *= s; }
-      this.glQuad(img, sx, sy, sw, sh, x, y, w, h, null, e.opacity, (e.rotation || 0) * Math.PI / 180, false);
+      this.glQuad(img, sx, sy, sw, sh, x, y, w, h, tintOf(e), e.opacity, (e.rotation || 0) * Math.PI / 180, false);
     }
     inside(e, mx, my) {
       const cam = this._cam; if (cam && (mx < this.x(cam) || mx >= this.x(cam) + cam.bounds.width || my < this.y(cam) || my >= this.y(cam) + cam.bounds.height)) return false;
@@ -701,11 +713,30 @@
     fill(x, y, w, h, r, style) { if (w <= 0 || h <= 0) return; this.g.fillStyle = style; this.roundPath(x, y, w, h, r); this.g.fill(); }
     clip(x, y, w, h) { this.g.save(); this.g.beginPath(); this.g.rect(x, y, w, h); this.g.clip(); }
     unclip() { this.g.restore(); }
-    drawTexture(tex, x, y, w, h, radius, opacity) {
+    // img, when given, is the picture to draw in place of tex.img (a tinted copy of it, the same size).
+    drawTexture(tex, x, y, w, h, radius, opacity, img) {
       const g = this.g; let sx = 0, sy = 0, sw = tex.img.naturalWidth, sh = tex.img.naturalHeight;
       if (tex.anim) { const i = tex.anim.frameAt(performance.now()); sx = (i % tex.anim.columns) * tex.anim.fw; sy = Math.floor(i / tex.anim.columns) * tex.anim.fh; sw = tex.anim.fw; sh = tex.anim.fh; }
       g.save(); g.globalAlpha = opacity; if (radius > 0) { this.roundPath(x, y, w, h, radius); g.clip(); }
-      this.pixelImage(tex.img, sx, sy, sw, sh, x, y, w, h); g.restore();
+      this.pixelImage(img || tex.img, sx, sy, sw, sh, x, y, w, h); g.restore();
+    }
+    // A tinted picture for canvas2D: the picture multiplied by the control's tint, as the batch's vertex colour does,
+    // with its own transparency kept. Made once per picture and tint (and per version, for a Canvas control's pixels).
+    tinted(img, e, version) {
+      const tint = tintOf(e); if (!tint) return img;
+      const cache = this._tinted || (this._tinted = new WeakMap());
+      let byTint = cache.get(img); if (!byTint) { byTint = new Map(); cache.set(img, byTint); }
+      const had = byTint.get(e.tint), key = version || 0;
+      if (had && had.key === key) return had.canvas;
+      const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      const canvas = had ? had.canvas : document.createElement('canvas'); canvas.width = w; canvas.height = h;
+      const g = canvas.getContext('2d');
+      g.drawImage(img, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`; g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(img, 0, 0); g.globalCompositeOperation = 'source-over';
+      if (!had && byTint.size >= 16) byTint.clear();
+      byTint.set(e.tint, { key, canvas });
+      return canvas;
     }
     // Pictures are drawn with their edges on whole device pixels. At in-between scales (a 1.25 display, a fitted
     // window, a zoomed camera) neighbours then meet exactly, with no hairline seam between tiles or backdrop halves.
@@ -720,7 +751,7 @@
     skin(e, x, y, w, h) {
       if (!e.fillEnabled || UNSEEN.has(e.type)) return; // sounds play, cameras frame the view and emitters throw particles: none is drawn
       if (e.type === 'shape' || e.type === 'collider') return; // they fill their own outline
-      if (!e.texture || e.type === 'image' || e.type === 'texture_region' || e.type === 'sprite') { this.fill(x, y, w, h, e.cornerRadius, color(e.background, e.opacity)); return; }
+      if (!e.texture || e.type === 'image' || e.type === 'texture_region' || e.type === 'sprite' || e.type === 'canvas') { this.fill(x, y, w, h, e.cornerRadius, color(e.background, e.opacity)); return; }
       const tex = this.texture(e.texture);
       if (tex) this.drawTexture(tex, x, y, w, h, e.cornerRadius, e.opacity); else this.fill(x, y, w, h, e.cornerRadius, color(e.background, e.opacity));
     }
@@ -844,10 +875,11 @@
           }
           if (e.type === 'texture_region') {
             const kx = tex.img.naturalWidth / e.textureWidth, ky = tex.img.naturalHeight / e.textureHeight;
-            g.save(); g.globalAlpha = e.opacity; this.pixelImage(tex.img, e.textureX * kx, e.textureY * ky, e.bounds.width * kx, e.bounds.height * ky, x, y, w, h); g.restore();
-          } else this.drawTexture(tex, x, y, w, h, 0, e.opacity);
+            g.save(); g.globalAlpha = e.opacity; this.pixelImage(this.tinted(tex.img, e), e.textureX * kx, e.textureY * ky, e.bounds.width * kx, e.bounds.height * ky, x, y, w, h); g.restore();
+          } else this.drawTexture(tex, x, y, w, h, 0, e.opacity, this.tinted(tex.img, e));
           break;
         }
+        case 'canvas': this.drawCanvas(e, x, y, w, h); break;
         case 'item_list': this.drawList(e, x, y, w, h); break;
         case 'sprite': this.drawSprite(e, x, y, w, h); break;
         case 'shape': this.drawShape(e, x, y, w, h, hover); break;
@@ -869,26 +901,111 @@
       const r0 = Math.max(0, Math.floor((vy - y) / th)), r1 = Math.min(rows - 1, Math.ceil((vy + vh - y) / th));
       if (c1 < c0 || r1 < r0) return;
       if (this.batched) {
-        this.glMark();
+        this.glMark(); const tint = tintOf(e);
         // One instance per visible tile, all in one draw call.
         for (let r = r0; r <= r1; r++) {
           const line = r * columns;
           for (let c = c0; c <= c1; c++) {
             const index = grid[line + c]; if (index < 0) continue;
-            this.glQuad(tex.img, (index % sheet) * tw, Math.floor(index / sheet) * th, tw, th, x + c * tw, y + r * th, tw, th, null, e.opacity, 0, false);
+            this.glQuad(tex.img, (index % sheet) * tw, Math.floor(index / sheet) * th, tw, th, x + c * tw, y + r * th, tw, th, tint, e.opacity, 0, false);
           }
         }
         return;
       }
-      const g = this.g; g.save(); g.globalAlpha = e.opacity;
+      const g = this.g, sheetImg = this.tinted(tex.img, e); g.save(); g.globalAlpha = e.opacity;
       for (let r = r0; r <= r1; r++) {
         const line = r * columns;
         for (let c = c0; c <= c1; c++) {
           const index = grid[line + c]; if (index < 0) continue;
-          this.pixelImage(tex.img, (index % sheet) * tw, Math.floor(index / sheet) * th, tw, th, x + c * tw, y + r * th, tw, th);
+          this.pixelImage(sheetImg, (index % sheet) * tw, Math.floor(index / sheet) * th, tw, th, x + c * tw, y + r * th, tw, th);
         }
       }
       g.restore();
+    }
+    // ---- Canvas controls: pixels drawn by scripts ----
+    // Each Canvas control has its own picture, columns × rows pixels, stretched over the control with hard edges. It
+    // starts as the control's texture (scaled to fit) or transparent, and keeps what scripts draw until the screen
+    // opens again. version counts changes, so the batch uploads it and canvas2D re-tints it only when it has changed.
+    canvasOf(e) {
+      if (!this.canvases) this.canvases = new Map();
+      let c = this.canvases.get(e.id);
+      if (!c) {
+        const columns = Math.min(MAX_CANVAS, Math.max(1, e.columns | 0)), rows = Math.min(MAX_CANVAS, Math.max(1, e.rows | 0));
+        const cv = document.createElement('canvas'); cv.width = columns; cv.height = rows;
+        c = { cv, g: cv.getContext('2d'), columns, rows, version: 1, seeded: !e.texture };
+        c.g.imageSmoothingEnabled = false;
+        if (this.glLayer.ok) this.glLayer.crisp.add(cv);
+        this.canvases.set(e.id, c);
+      }
+      // The starting picture goes underneath whatever has been drawn already, as soon as it has loaded.
+      if (!c.seeded) {
+        const tex = this.texture(e.texture);
+        if (tex) {
+          const sw = tex.anim ? tex.anim.fw : tex.img.naturalWidth, sh = tex.anim ? tex.anim.fh : tex.img.naturalHeight;
+          c.g.save(); c.g.globalCompositeOperation = 'destination-over'; c.g.drawImage(tex.img, 0, 0, sw, sh, 0, 0, c.columns, c.rows); c.g.restore();
+          c.seeded = true; c.version++;
+        }
+      }
+      return c;
+    }
+    // Lets go of every canvas picture (and its GL texture): a screen opening again starts them afresh.
+    dropCanvases() {
+      if (this.canvases && this.glLayer.ok) for (const c of this.canvases.values()) this.glLayer.forget(c.cv);
+      this.canvases = new Map();
+    }
+    drawCanvas(e, x, y, w, h) {
+      const c = this.canvasOf(e);
+      if (this.batched) { this.glLayer.refresh(c.cv, c.version); this.glMark(); this.glTurned(e, c.cv, 0, 0, c.columns, c.rows, x, y, w, h); return; }
+      const g = this.g; g.save(); g.globalAlpha = e.opacity; g.imageSmoothingEnabled = false;
+      this.pixelImage(this.tinted(c.cv, e, c.version), 0, 0, c.columns, c.rows, x, y, w, h); g.restore();
+    }
+    // A script's drawing on a canvas. Pixels are replaced, not blended: a see-through colour leaves a see-through pixel,
+    // and '' rubs pixels out. stamp is the exception: it lays a picture over what is there, as painting it on would.
+    canvasOp(type, e, value) {
+      if (!e || e.type !== 'canvas') { this.log('warn', type.replace('_', ' ') + ': ' + (e ? e.id + ' is not a Canvas control' : 'there is no such control')); return; }
+      const c = this.canvasOf(e), g = c.g;
+      const rect = (x, y, w, h, colour) => {
+        const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(c.columns, x + w), y1 = Math.min(c.rows, y + h);
+        if (x1 <= x0 || y1 <= y0) return;
+        g.clearRect(x0, y0, x1 - x0, y1 - y0);
+        if (colour) { g.fillStyle = colour; g.fillRect(x0, y0, x1 - x0, y1 - y0); }
+      };
+      const colourOf = text => { const colour = pixelColour(text); if (colour === null) this.log('warn', type.replace('_', ' ') + ' on ' + e.id + ': "' + text + '" is not a colour (#RRGGBB, #AARRGGBB, or \'\' to rub out)'); return colour; };
+      const parts = value.split(','), n = parts.map(p => Math.floor(Number(p)));
+      switch (type) {
+        case 'set_pixel': { const colour = colourOf(parts.slice(2).join(',')); if (colour !== null && Number.isFinite(n[0]) && Number.isFinite(n[1])) rect(n[0], n[1], 1, 1, colour); break; }
+        case 'fill_rect': { const colour = colourOf(parts.slice(4).join(',')); if (colour !== null && n.slice(0, 4).every(Number.isFinite)) rect(n[0], n[1], n[2], n[3], colour); break; }
+        case 'draw_line': {
+          const colour = colourOf(parts.slice(4).join(',')); if (colour === null || !n.slice(0, 4).every(Number.isFinite)) break;
+          // Bresenham: every pixel the line passes through, end points included, and no more.
+          let x = n[0], y = n[1]; const x2 = n[2], y2 = n[3], dx = Math.abs(x2 - x), dy = -Math.abs(y2 - y), sx = x < x2 ? 1 : -1, sy = y < y2 ? 1 : -1;
+          let err = dx + dy;
+          for (let steps = 0; steps <= MAX_CANVAS * 2; steps++) {
+            rect(x, y, 1, 1, colour); if (x === x2 && y === y2) break;
+            const e2 = 2 * err; if (e2 >= dy) { err += dy; x += sx; } if (e2 <= dx) { err += dx; y += sy; }
+          }
+          break;
+        }
+        case 'clear_canvas':
+          if (!value) { g.clearRect(0, 0, c.columns, c.rows); c.seeded = true; } // a starting picture still loading stays away too
+          else if (n.slice(0, 4).every(Number.isFinite)) rect(n[0], n[1], n[2], n[3], '');
+          break;
+        case 'set_pixels':
+          for (const one of value.split(';')) {
+            const p = one.split(','), px = Math.floor(Number(p[0])), py = Math.floor(Number(p[1])), colour = colourOf(p.slice(2).join(','));
+            if (colour !== null && Number.isFinite(px) && Number.isFinite(py)) rect(px, py, 1, 1, colour);
+          }
+          break;
+        case 'stamp': {
+          const resource = parts.slice(2).join(','), tex = this.texture(resource);
+          if (!tex) { this.log('warn', 'stamp on ' + e.id + ': no picture ' + resource + ' (or it has not loaded yet)'); return; }
+          if (!Number.isFinite(n[0]) || !Number.isFinite(n[1])) return;
+          const sw = tex.anim ? tex.anim.fw : tex.img.naturalWidth, sh = tex.anim ? tex.anim.fh : tex.img.naturalHeight;
+          g.drawImage(tex.img, 0, 0, sw, sh, n[0], n[1], sw, sh);
+          break;
+        }
+      }
+      c.version++;
     }
     drawList(e, x, y, w, h) {
       const g = this.g, rows = this.rows(e), rh = Math.min(128, Math.max(24, e.rowHeight));
@@ -939,6 +1056,8 @@
       if (this.parents(e).length) return false;
       const usable = resource => { const tex = this.texture(resource); return !!tex && this.glLayer.usable(tex.img); };
       if (e.type === 'tilemap') return !e.texture || !this.texture(e.texture) || usable(e.texture);
+      // A canvas is a picture made here, so WebGL always accepts it, smooth pictures or not (it keeps hard edges).
+      if (e.type === 'canvas') return true;
       if (e.type === 'particles') { const fx = this.effectOf(e); return !(fx && fx.shape === 'texture' && fx.texture && this.texture(fx.texture)) || usable(fx.texture); }
       // With smooth pictures, pictures and sprites are drawn on canvas2D: it shrinks a large drawing properly (each
       // screen pixel an average of what it covers) and blends see-through edges without a dark fringe. The batch
@@ -1404,6 +1523,8 @@
           else this.log('warn', 'setState: no state "' + value + '" in graph ' + target);
           return;
         }
+        case 'set_tint': if (element) element.tint = /^#[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : ''; return;
+        case 'set_pixel': case 'set_pixels': case 'fill_rect': case 'draw_line': case 'clear_canvas': case 'stamp': this.canvasOp(type, element, value); return;
         case 'set_tile': if (element && element.type === 'tilemap' && nums.length === 3 && nums.every(Number.isFinite)) this.setTileAt(element, nums[0], nums[1], nums[2]); return;
         case 'fill_tiles':
           if (element && element.type === 'tilemap' && nums.length === 5 && nums.every(Number.isFinite))
@@ -1582,7 +1703,7 @@
         const url = this.project.sounds[e.sound];
         for (const [id, a] of this.playingSounds) if (a.loop && !a.paused && a.wysicraftUrl === url && ![...carried.values()].includes(a)) { carried.set(e.id, a); this.playingSounds.delete(id); break; }
       }
-      this.stopAllSounds(); this.resetParticles();
+      this.stopAllSounds(); this.resetParticles(); this.dropCanvases();
       for (const [id, a] of carried) {
         const e = this.ui.elements.find(x => x.id === id);
         if (!this.controlAudio) this.controlAudio = new Map();
@@ -1605,7 +1726,7 @@
       // glElement counted this sprite as batched, so it must go into the batch: drawn on the 2D canvas instead, it
       // would land under whatever the batch still holds (a backdrop drawn before it) when that is composited.
       if (this.batched) { this.glMark(); this.glTurned(e, tex.img, sx, sy, fw, fh, x, y, w, h); return; }
-      const g = this.g; g.save(); g.globalAlpha = e.opacity; this.pixelImage(tex.img, sx, sy, fw, fh, x, y, w, h); g.restore();
+      const g = this.g; g.save(); g.globalAlpha = e.opacity; this.pixelImage(this.tinted(tex.img, e), sx, sy, fw, fh, x, y, w, h); g.restore();
     },
     spriteClockFor(e) {
       let clock = this.spriteClock.get(e.id); const now = performance.now();
@@ -2223,11 +2344,13 @@
         const kind = (e.body || (e.type === 'collider' ? 'static' : '')) + (e.trigger ? '/trigger' : '') + (e.collider === 'circle' ? '/circle' : '');
         if (!reset && sent.tags.get(id) !== tagKey) tagsChanged = true;
         sent.tags.set(id, tagKey);
-        const b = sent.bodies.get(id), r = e.bounds, rotation = e.rotation || 0, scale = scaleOf(e), opacity = e.opacity === undefined ? 1 : e.opacity;
+        const b = sent.bodies.get(id), r = e.bounds, rotation = e.rotation || 0, scale = scaleOf(e), opacity = e.opacity === undefined ? 1 : e.opacity, tint = e.tint || '';
+        // A canvas's own pixel size, for ui.pixelAt; 0 for anything else.
+        const canvas = e.type === 'canvas', columns = canvas ? Math.min(MAX_CANVAS, Math.max(1, e.columns | 0)) : 0, rows = canvas ? Math.min(MAX_CANVAS, Math.max(1, e.rows | 0)) : 0;
         if (reset || !b || b.x !== r.x || b.y !== r.y || b.width !== r.width || b.height !== r.height || b.vx !== vx || b.vy !== vy || b.visible !== e.visible
-            || b.rotation !== rotation || b.scale !== scale || b.opacity !== opacity
+            || b.rotation !== rotation || b.scale !== scale || b.opacity !== opacity || b.tint !== tint || b.columns !== columns || b.rows !== rows
             || b.frame !== frame || b.clip !== clipName || b.clipStep !== step || b.clipDone !== done || b.state !== state || b.tagKey !== tagKey || b.kind !== kind) {
-          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, rotation, scale, opacity, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice(), kind };
+          const body = { x: r.x, y: r.y, width: r.width, height: r.height, vx, vy, visible: e.visible, rotation, scale, opacity, tint, columns, rows, frame, clip: clipName, clipStep: step, clipDone: done, state, tags: tags.slice(), kind };
           (bodies = bodies || {})[id] = body; sent.bodies.set(id, Object.assign({ tagKey }, body));
         }
         if (e.type === 'tilemap') {
@@ -2571,6 +2694,26 @@
     return ramp[ramp.length - 1].rgb;
   }
   function rgbOf(hex) { const n = parseInt(String(hex || '').replace('#', ''), 16); return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : [0, 0, 0]; }
+  // A control's tint as [r, g, b], or null for none. Its picture is multiplied by it, as the batch's vertex colour
+  // does: white leaves the picture as drawn, so a tint darkens or shifts colours and never brightens them.
+  const tints = new Map();
+  function tintOf(e) {
+    const t = e && e.tint; if (!t) return null;
+    let rgb = tints.get(t);
+    if (rgb === undefined) { rgb = /^#[0-9a-fA-F]{6}$/.test(t) ? rgbOf(t) : null; if (tints.size > 256) tints.clear(); tints.set(t, rgb); }
+    return rgb;
+  }
+  // Canvas controls are at most this many pixels each way (4 MB of picture at the most).
+  const MAX_CANVAS = 1024;
+  // A pixel colour on a canvas: '#RRGGBB', or '#AARRGGBB' as colours are written everywhere else in a project, as
+  // something canvas2D fills with; '' for none (rubbing out). null when it isn't a colour at all.
+  function pixelColour(text) {
+    const v = String(text === undefined || text === null ? '' : text).trim();
+    if (v === '' || v.toLowerCase() === 'transparent') return '';
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+    if (/^#[0-9a-fA-F]{8}$/.test(v)) return color(v, 1);
+    return null;
+  }
   const CONTACT_EVENTS = new Set(['collide', 'collide_stay', 'collide_end', 'trigger_enter', 'trigger_stay', 'trigger_exit']);
   // Do these two bodies look at each other's layer? collidesWith is a bit mask over layers 0-15, and -1 (the default)
   // means every layer, which is how everything behaved before layers existed.
@@ -2795,6 +2938,19 @@
     const unsupported = () => { throw new Error('Use a built-in Server event action for navigation or server commands'); };
     const setItem = (id, resource) => { if (typeof resource !== 'string' || !/^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(resource)) throw new Error('setItem requires a namespaced item ID, e.g. minecraft:diamond'); emit('set_item', id, resource); };
     const getVariable = n => (n in vars ? vars[n] : (r.vars[n] === undefined ? '' : r.vars[n]));
+    // Canvas and tint arguments, checked here so a mistake is an error in the script that made it.
+    const whole = v => { const n = Math.floor(Number(v)); if (!Number.isFinite(n)) throw new Error('A pixel position or size must be a number, not ' + JSON.stringify(v)); return n; };
+    const paintText = c => {
+      if (c === undefined) throw new Error('Give a colour: #RRGGBB, #AARRGGBB, or \'\' to rub out');
+      const v = c === null ? '' : String(c).trim();
+      if (v === '' || v.toLowerCase() === 'transparent' || /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)) return v;
+      throw new Error('"' + v + '" is not a colour: use #RRGGBB, #AARRGGBB, or \'\' to rub out');
+    };
+    const tintText = c => {
+      const v = c === undefined || c === null ? '' : String(c).trim();
+      if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) return v;
+      throw new Error('"' + v + '" is not a tint: use #RRGGBB (white is no change), or ui.clearTint(id)');
+    };
     const ui = Object.freeze({
       setText: (id, v) => emit('set_text', id, v), setValue: (id, v) => emit('set_value', id, v), setItem,
       setItems: (id, items) => emit('set_value', id, JSON.stringify(items)),
@@ -2822,8 +2978,31 @@
         return { column, row, tile: inside ? t.g[row * t.m.columns + column] : -1 };
       },
       tileSize: id => { const t = grid(id); return t ? { columns: t.m.columns, rows: t.m.rows, tileWidth: t.m.tileWidth, tileHeight: t.m.tileHeight } : null; },
+      // Web & desktop: a picture's tint, '#RRGGBB' (the picture is multiplied by it: white is no change), and back to none.
+      setTint: (id, colour) => emit('set_tint', id, tintText(colour)), clearTint: id => emit('set_tint', id, ''),
+      // Canvas controls (web & desktop): pixels counted in the canvas's own columns × rows from its top-left corner.
+      // A colour is '#RRGGBB' or '#AARRGGBB'; '' rubs pixels out. Pixels outside the canvas are left alone.
+      setPixel: (id, x, y, colour) => emit('set_pixel', id, whole(x) + ',' + whole(y) + ',' + paintText(colour)),
+      // Many pixels as one change: [[x, y, colour], ...] or [{x, y, color}, ...].
+      setPixels: (id, pixels) => {
+        if (!Array.isArray(pixels)) throw new Error('setPixels takes a list of [x, y, colour] (or {x, y, color})');
+        if (pixels.length > 65536) throw new Error('setPixels takes at most 65536 pixels at a time');
+        emit('set_pixels', id, pixels.map(p => Array.isArray(p) ? whole(p[0]) + ',' + whole(p[1]) + ',' + paintText(p[2]) : whole(p && p.x) + ',' + whole(p && p.y) + ',' + paintText(p && (p.color !== undefined ? p.color : p.colour))).join(';'));
+      },
+      fillRect: (id, x, y, width, height, colour) => emit('fill_rect', id, [whole(x), whole(y), whole(width), whole(height), paintText(colour)].join(',')),
+      drawLine: (id, x1, y1, x2, y2, colour) => emit('draw_line', id, [whole(x1), whole(y1), whole(x2), whole(y2), paintText(colour)].join(',')),
+      // The whole canvas, or a rectangle of it, back to see-through.
+      clearCanvas: (id, x, y, width, height) => emit('clear_canvas', id, x === undefined ? '' : [whole(x), whole(y), whole(width), whole(height)].join(',')),
+      // A picture laid onto the canvas at x, y at its own size, over what is there (its see-through parts let it show).
+      stamp: (id, image, x, y) => { image = String(image); if (!/^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(image)) throw new Error('stamp takes a picture ID, e.g. myproject:textures/gui/image/brush.png'); emit('stamp', id, whole(x) + ',' + whole(y) + ',' + image); },
+      // The canvas pixel under a point in screen coordinates (ctx.input.pointer()), for painting where the player points.
+      pixelAt: (id, x, y) => {
+        const b = r.bodies && r.bodies[String(id)]; if (!b || !b.columns) return { x: -1, y: -1, inside: false };
+        const px = Math.floor((x - b.x) * b.columns / Math.max(1, b.width)), py = Math.floor((y - b.y) * b.rows / Math.max(1, b.height));
+        return { x: px, y: py, inside: px >= 0 && py >= 0 && px < b.columns && py < b.rows };
+      },
       hasTag: (id, tag) => { const b = r.bodies && r.bodies[id]; return !!(b && b.tags && b.tags.indexOf(String(tag)) >= 0); },
-      getElement: id => { const b = (r.bodies && r.bodies[id]) || {}; return Object.freeze({ id, text: r.texts[id] === undefined ? '' : r.texts[id], x: b.x, y: b.y, width: b.width, height: b.height, vx: b.vx, vy: b.vy, visible: b.visible, rotation: b.rotation || 0, scale: b.scale === undefined ? 1 : b.scale, opacity: b.opacity === undefined ? 1 : b.opacity, frame: b.frame || 0, clip: b.clip || '', clipStep: b.clipStep || 0, clipDone: !!b.clipDone, state: b.state || '', tags: (b.tags || []).slice(), setText: v => emit('set_text', id, v), setItem: v => setItem(id, v) }); },
+      getElement: id => { const b = (r.bodies && r.bodies[id]) || {}; return Object.freeze({ id, text: r.texts[id] === undefined ? '' : r.texts[id], x: b.x, y: b.y, width: b.width, height: b.height, vx: b.vx, vy: b.vy, visible: b.visible, rotation: b.rotation || 0, scale: b.scale === undefined ? 1 : b.scale, opacity: b.opacity === undefined ? 1 : b.opacity, tint: b.tint || '', columns: b.columns || 0, rows: b.rows || 0, frame: b.frame || 0, clip: b.clip || '', clipStep: b.clipStep || 0, clipDone: !!b.clipDone, state: b.state || '', tags: (b.tags || []).slice(), setText: v => emit('set_text', id, v), setItem: v => setItem(id, v) }); },
       // Opening a screen: server scripts everywhere, and client scripts in web & desktop projects (in Minecraft a
       // client can't be trusted to navigate, so those use an open_ui action).
       close: () => emit('close_ui', '', ''),

@@ -26,6 +26,7 @@ public partial class MainWindow
          ("collider:polygon", "collider_polygon", "Polygon collider", "An invisible collision area of any outline. Double-click it (or Advanced → Collider editor) to draw its points over a trace image."),
          ("tilemap", "tilemap", "Tilemap", "A grid painted from one tile sheet: floors, walls, whole levels. Only the tiles on screen cost anything, so the map can be far bigger than the view. Double-click it (or Advanced → Tile painter) to paint, and set Solid to say which tiles stop a body."),
          ("particles", "particles", "Particles", "Throws a named particle effect from its middle: sparks, smoke, rain, an explosion. The control itself is invisible. Make effects in Advanced → Particle maker."),
+         ("canvas", "canvas", "Canvas", "A picture your scripts draw on, pixel by pixel: paint, drawing games, pixel text, damage marks. Columns × Rows is its size in pixels; Texture is the picture it starts as. Scripts use ui.setPixel, ui.fillRect, ui.drawLine, ui.stamp and ui.clearCanvas."),
          ("camera", "camera", "Camera", "The view: only what is inside the camera is shown, scaled to fill the game (a smaller camera zooms in). Move or resize it from scripts (ui.setPosition, ui.setSize) or animations to scroll and zoom. Grab it by its edge or in Layers.")];
 
     string toolboxTarget = "";
@@ -128,6 +129,11 @@ public partial class MainWindow
                 element.Id = Unique("camera"); element.Text = ""; element.FillEnabled = false; element.BorderWidth = 0;
                 element.Bounds.X = 0; element.Bounds.Y = 0; element.Bounds.Width = ui.Size.Width; element.Bounds.Height = ui.Size.Height;
                 break;
+            case "canvas":
+                // 64 × 64 pixels shown at twice their size, and no fill: what scripts haven't drawn on is see-through.
+                element.Id = Unique("canvas"); element.Text = ""; element.Value = ""; element.FillEnabled = false; element.BorderWidth = 0;
+                element.Columns = 64; element.Rows = 64; element.Bounds.Width = 128; element.Bounds.Height = 128;
+                break;
             case "tilemap":
                 // Sized to its own grid, and no fill: the empty cells have to show what is behind them.
                 element.Id = Unique("tilemap"); element.Text = ""; element.FillEnabled = false; element.BorderWidth = 0;
@@ -157,6 +163,7 @@ public partial class MainWindow
         if (!Toolbox.Items.OfType<ListBoxItem>().Any(i => i.Tag as string == "collider:polygon")) throw new Exception("Advanced toolbox missing");
         foreach (var tag in new[] { "shape:star", "shape:ellipse", "sprite", "collider:polygon", "collider:box", "sound", "camera", "particles" }) { AddControl(tag, 20, 20); Draw(); RefreshInspector(); }
         VerifyParticles();
+        VerifyCanvasAndTint();
         engineCaptureTo = System.IO.Path.GetDirectoryName(output);
         VerifyEngineEditors();
         VerifyComponentCards();
@@ -173,6 +180,6 @@ public partial class MainWindow
         project.Manifest.Target = "minecraft"; RefreshAll();
         if (Toolbox.Items.OfType<ListBoxItem>().Any(i => i.Tag as string == "collider:box") || advancedMenu?.Visibility == Visibility.Visible) throw new Exception("Advanced tools shown for a Minecraft-only project");
         prefs.AdvancedOpen = wasOpen; dirty = false;
-        System.IO.File.WriteAllText(output, "PASS: toolbox sections, new control presets (camera, particles and tilemap) and properties, particle effects and maker, the Tile painter, State graphs and Shaders windows, the raised element cap and its advice, collapsible Properties sections that remember, component cards (Collider, Rigidbody, script components with editable tunables, removal), advanced hidden for Minecraft projects, Minecraft export check");
+        System.IO.File.WriteAllText(output, "PASS: toolbox sections, new control presets (camera, particles, tilemap and canvas) and properties, tints, particle effects and maker, the Tile painter, State graphs and Shaders windows, the raised element cap and its advice, collapsible Properties sections that remember, component cards (Collider, Rigidbody, script components with editable tunables, removal), advanced hidden for Minecraft projects, Minecraft export check");
     }
 }

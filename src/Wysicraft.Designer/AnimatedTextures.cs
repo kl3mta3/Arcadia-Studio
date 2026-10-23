@@ -25,15 +25,15 @@ public partial class MainWindow
     }
     static Int32Rect FramePixels(TextureAnimation a,int index)=>new(a.Column(index)*a.FrameWidth,a.Row(index)*a.FrameHeight,a.FrameWidth,a.FrameHeight);
 
-    // An Image control for a texture; animated textures cycle their frames.
-    Image TextureImage(string resource,byte[] png)
+    // An Image control for a texture; animated textures cycle their frames. tint (#RRGGBB) multiplies it, as in the game.
+    Image TextureImage(string resource,byte[] png,string tint="")
     {
-        var image=new Image {Stretch=Stretch.Fill};SetImageTexture(image,resource,png);return image;
+        var image=new Image {Stretch=Stretch.Fill};SetImageTexture(image,resource,png,tint);return image;
     }
-    void SetImageTexture(Image image,string resource,byte[] png)
+    void SetImageTexture(Image image,string resource,byte[] png,string tint="")
     {
         image.BeginAnimation(Image.SourceProperty,null);image.Tag=resource;
-        BitmapSource source=DecodeTexture(png);var a=AnimationOf(resource,png);
+        BitmapSource source=Tinted(DecodeTexture(png),tint);var a=AnimationOf(resource,png);
         if(a==null){image.Source=source;return;}
         var frames=new Dictionary<int,BitmapSource>();BitmapSource Frame(int i){if(!frames.TryGetValue(i,out var f)){f=new CroppedBitmap(source,FramePixels(a,i));f.Freeze();frames[i]=f;}return f;}
         var animation=new ObjectAnimationUsingKeyFrames {Duration=TimeSpan.FromMilliseconds(a.TotalTicks*50.0),RepeatBehavior=RepeatBehavior.Forever};

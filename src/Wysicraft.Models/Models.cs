@@ -463,6 +463,9 @@ public sealed class Element
     // A panel carries everything attached inside it. Physics bodies and colliders are not turned.
     public double Rotation { get; set; }
     public double Scale { get; set; } = 1;
+    // Web & desktop: a picture's tint, "#RRGGBB" or "" for none. Images, texture regions, sprites, tilemaps and canvases
+    // are multiplied by it: white leaves the picture as drawn, so a tint darkens or shifts colours, never brightens.
+    public string Tint { get; set; } = "";
     // Web & desktop: the text breaks into lines at the control's width (and at \n) instead of being cut off.
     public bool Wrap { get; set; }
     public double FontScale { get; set; } = 1;
@@ -526,6 +529,8 @@ public sealed class Element
     // Tilemap control (advanced): a grid of tiles cut from one sheet. Tiles is a run-length list of indices into
     // that sheet, "-1" for an empty cell, written as "index" or "index*count" separated by spaces. Solid lists the
     // indices that stop a body, as numbers and ranges: "1,3,5-9".
+    // Canvas control (advanced): Columns × Rows is its picture's size in pixels (1-1024 each way), stretched over the
+    // control with hard edges. Texture, if set, is the picture it starts as; scripts draw on it (ui.setPixel and co).
     public int TileWidth { get; set; } = 16;
     public int TileHeight { get; set; } = 16;
     public int Columns { get; set; } = 20;

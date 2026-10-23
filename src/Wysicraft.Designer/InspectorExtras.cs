@@ -62,6 +62,7 @@ public partial class MainWindow
                 {
                     "tilemap" => "The tile sheet this map is painted from, cut into TileWidth × TileHeight tiles. Import brings a PNG in; Make a tile sheet… draws a ready-made one.",
                     "sprite" => "The sprite sheet, cut into FrameWidth × FrameHeight frames.",
+                    "canvas" => "The picture the canvas starts as, scaled to Columns × Rows pixels. Empty starts it see-through. Scripts draw over it.",
                     _ => "A picture from this project. Import brings a new PNG in and uses it here."
                 });
                 if (e.Type == "tilemap")
@@ -96,6 +97,18 @@ public partial class MainWindow
                 paint.Click += (_, _) => Guard(() => ShowTilemapEditor(e));
                 Properties.Children.Add(paint);
                 Properties.Children.Add(new TextBlock { Text = "The map is drawn from the tile sheet in Texture, cut into TileWidth × TileHeight tiles numbered left to right. Only the tiles on screen cost anything to draw, so a map can be far larger than the view.", TextWrapping = TextWrapping.Wrap, Opacity = 0.65, FontSize = 11 });
+                return true;
+            }
+            case "Rows" when e.Type == "canvas":
+            {
+                // Columns is drawn as an ordinary field just before this; the note under both says what they mean here.
+                CommitField("Rows", e.Rows.ToString(), v => { if (!int.TryParse(v, out int rows)) throw new FormatException("Rows is a whole number of pixels"); Change(); e.Rows = rows; Draw(); RefreshInspector(); },
+                    "The canvas's height in pixels.");
+                Properties.Children.Add(new TextBlock
+                {
+                    Text = $"Columns × Rows is the picture's size in pixels (1-{Registry.MaxCanvas} each way), stretched over the control with hard edges. Scripts draw on it: ui.setPixel('{e.Id}', x, y, '#FF0000'), ui.fillRect, ui.drawLine, ui.stamp, ui.clearCanvas, and ui.pixelAt to find the pixel under the pointer.",
+                    TextWrapping = TextWrapping.Wrap, Opacity = 0.65, FontSize = 11, Margin = new Thickness(4, 0, 0, 4)
+                });
                 return true;
             }
             case "Solid" when e.Type == "tilemap":

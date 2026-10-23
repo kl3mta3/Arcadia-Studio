@@ -6,13 +6,8 @@
 .vs/
 .tools/
 artifacts/
-tests/
 *.user
 *.log
 docs/
-tools/
+tests/
 wiki/
-installer/
-/wiki
-/wiki
-/wiki

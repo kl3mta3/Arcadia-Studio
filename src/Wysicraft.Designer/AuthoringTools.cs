@@ -22,7 +22,14 @@ public partial class MainWindow
         "ctx.ui.play('sprite_id', 'run'); // sprite clip", "ctx.ui.setValue('sound_id', 'play'); // Sound control: play or stop", "ctx.client.playSound('myproject:click');", "ctx.repeat // true while a key is held down",
         "ctx.ui.animate('animation_id'); // web & desktop", "ctx.ui.stopAnimation('animation_id'); // web & desktop", "ctx.ui.setVelocity('body_id', 0, -200); // web & desktop physics", "ctx.ui.setPosition('body_id', 40, 20); // web & desktop", "ctx.ui.setSize('camera1', 240, 135); // web & desktop: resize (a smaller camera zooms in)", "ctx.ui.setRotation('card', 15); // web & desktop: degrees, clockwise, about its centre", "ctx.ui.setScale('card', 1.2); // web & desktop: 1 is its own size", "ctx.ui.setOpacity('card', 0.5); // web & desktop: 0 to 1", "ctx.ui.bringToFront('card'); // web & desktop: draw it on top (also sendToBack, moveAbove, moveBelow)", "ctx.ui.changeTexture('image_id', 'myproject:textures/gui/image/other.png');",
         "ctx.input.isDown('jump'); // web & desktop inputs", "ctx.input.axis('left'); // 0-1, web & desktop", "ctx.input.pointer(); // {x, y, down, presses, rightDown, rightPresses}: latest finger/mouse press on the floor; right* is the right mouse button (web & desktop)", "ctx.input.shift(); // Shift is held; ctx.input.ctrl() for Ctrl (web & desktop)", "ctx.ui.getElement('body_id').vx; // x, y, width, height, vx, vy (web & desktop)",
-        "ctx.physics.touching('player'); // IDs it's touching or overlapping (web & desktop)", "ctx.physics.isTouching('player', 'goal'); // web & desktop"
+        "ctx.physics.touching('player'); // IDs it's touching or overlapping (web & desktop)", "ctx.physics.isTouching('player', 'goal'); // web & desktop",
+        "ctx.ui.setTint('car', '#E04040'); // web & desktop: multiply a picture by a colour (white = no change); ctx.ui.clearTint('car')",
+        "ctx.ui.setPixel('canvas1', 10, 4, '#FF0000'); // web & desktop Canvas: canvas pixels from its top-left; '' rubs out",
+        "ctx.ui.fillRect('canvas1', 0, 0, 16, 8, '#2060C0'); // web & desktop Canvas (also drawLine(id, x1, y1, x2, y2, colour))",
+        "ctx.ui.setPixels('canvas1', [[1, 1, '#FFFFFF'], [2, 1, '#FFFFFF']]); // web & desktop Canvas: many pixels as one change",
+        "ctx.ui.stamp('canvas1', 'myproject:textures/gui/image/brush.png', 8, 8); // web & desktop Canvas: lay a picture on at its own size",
+        "ctx.ui.clearCanvas('canvas1'); // web & desktop Canvas: all see-through again (or clearCanvas(id, x, y, w, h))",
+        "var p = ctx.input.pointer(), at = ctx.ui.pixelAt('canvas1', p.x, p.y); // web & desktop: {x, y, inside}, the canvas pixel under the pointer"
     ];
     void ShowScriptApi() {
         var window=new Window { Owner=this,Title="Script API / insert snippet",Width=660,Height=440 };

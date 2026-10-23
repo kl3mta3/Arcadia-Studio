@@ -263,6 +263,10 @@ public partial class MainWindow : Window {
 		base.Closing += delegate(object? _, CancelEventArgs e)
 		{
 			if (!CloseSideEditors()) { e.Cancel = true; return; }
+			// A game still on its way to Arcadia stops if the app closes. One the arcade already has carries on there.
+			if (arcadiaDialog is { UploadInFlight: true } && !crashRecovery && !closingForUpdate
+				&& MessageBox.Show(this, "A game is still being uploaded to Arcadia. Closing Arcadia Studio now stops the upload.\n\nClose anyway?", "Arcadia Studio", MessageBoxButton.YesNo) != MessageBoxResult.Yes)
+			{ e.Cancel = true; return; }
 			// The leaderboard creator never asks about saving: closing it hands the page back to the project.
 			if (creatorMode) { SaveScriptText(); return; }
 			if (!crashRecovery && !closingForUpdate)
@@ -597,7 +601,7 @@ public partial class MainWindow : Window {
 		element2.Bounds = bounds;
 		Element element3 = element;
 		// Pictures draw their own image; a fill behind them would show through transparent pixels.
-		if (type is "image" or "texture_region" or "item" or "sprite" or "tilemap") element3.FillEnabled = false;
+		if (type is "image" or "texture_region" or "item" or "sprite" or "tilemap" or "canvas") element3.FillEnabled = false;
 		ApplyControlPreset(element3, preset);
 		element3.LayerGroup=isolatedGroup;
         ui.Elements.Add(element3);
@@ -1608,7 +1612,7 @@ public partial class MainWindow : Window {
 		{
 			if (TryTexture(e.Texture, out byte[] bytes))
 			{
-				frameworkElement = e.Type == "image" ? TextureImage(e.Texture, bytes) : new Image { Source = DecodeTexture(bytes), Stretch = Stretch.Fill };
+				frameworkElement = e.Type == "image" ? TextureImage(e.Texture, bytes, e.Tint) : new Image { Source = Tinted(DecodeTexture(bytes), e.Tint), Stretch = Stretch.Fill };
 			}
 			else
 			{
@@ -1644,7 +1648,7 @@ public partial class MainWindow : Window {
 			frameworkElement = list;
 			break;
 		}
-        case "sprite": case "shape": case "collider": case "camera": case "particles": case "tilemap": case "slots":
+        case "sprite": case "shape": case "collider": case "camera": case "particles": case "tilemap": case "slots": case "canvas":
             frameworkElement = RenderNewControl(e); break;
         case "lb_table": case "lb_podium": case "lb_rank": case "lb_icon": case "lb_range": case "lb_slider": case "lb_me": case "lb_periods":
             frameworkElement = RenderBoardWidget(e); break;

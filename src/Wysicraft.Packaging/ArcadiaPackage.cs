@@ -98,6 +98,16 @@ public static class ArcadiaPackage
     }
 
     /// <summary>The version after the last one published: the last number goes up by one.</summary>
+    /// <summary>How long to keep asking the arcade whether it has finished storing an upload: 2 minutes, and another
+    /// for every 100 files (rounded up). The arcade stores about 180 files a minute on a first upload and far fewer on
+    /// an update, where only changed files are stored, so this is generous.</summary>
+    public static TimeSpan StoreWait(int files) => TimeSpan.FromMinutes(2 + (Math.Max(0, files) + 99) / 100);
+    /// <summary>The number of files in an upload (folders don't count).</summary>
+    public static int FileCount(byte[] zip)
+    {
+        using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(zip));
+        return archive.Entries.Count(e => !e.FullName.EndsWith('/'));
+    }
     public static string NextVersion(string last)
     {
         if (string.IsNullOrWhiteSpace(last)) return "1.0.0";

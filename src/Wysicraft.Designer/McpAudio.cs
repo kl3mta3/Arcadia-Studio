@@ -21,11 +21,13 @@ public sealed class SongSpec
     [Description("Master volume 0-1 (default 0.8).")] public double? Volume { get; set; }
     [Description("Save so it loops seamlessly (notes ringing past the end continue at the start). For background music.")] public bool? Loop { get; set; }
     [Description("The layers. Given: they replace the song's layers (or are added, with addTracks). Left out: the layers stay.")] public List<TrackSpec>? Tracks { get; set; }
+    [Description("Play the song with sampled instruments from an installed SoundFont (get_schema soundFonts lists them; \"GeneralUser GS\" comes with the app) instead of chip sounds. \"\" goes back to chip sounds. Layers without a fontInstrument get the nearest one to their chip instrument.")] public string? SoundFont { get; set; }
 }
 public sealed class TrackSpec
 {
     public string? Name { get; set; }
     [Description("A preset: Square lead, Pulse 25%, Pulse 12%, Triangle bass, Saw brass, Sine flute, Pluck, Bell, Chip chord, Minor chord, Laser bass, Soft pad, Piano, Organ, Guitar, Harp, Strings, Choir, Music box, Noise, Drum kit.")] public string? Instrument { get; set; }
+    [Description("With a SoundFont: one of the font's instruments, by name (\"Grand Piano\", or part of a name when only one has it), by MIDI program number (\"40\"), or bank:program (\"128:0\" is the first drum kit). read_music with soundFont lists a font's instruments. Giving this without a soundFont on the song uses the font that comes with the app.")] public string? FontInstrument { get; set; }
     [Description("Changes to the instrument: wave (square|triangle|saw|sine|noise|drums), duty, attack, decay, sustain, release, vibrato, vibratoRate, vibratoDelay, slide, slideTime, arpeggio (\"0,4,7\"), arpeggioRate, crush, echo, echoFeedback, volume, octave.")] public JsonElement? InstrumentSettings { get; set; }
     [Description("0-1.")] public double? Volume { get; set; }
     [Description("-1 (left) to 1 (right).")] public double? Pan { get; set; }
@@ -78,13 +80,44 @@ public partial class MainWindow
     object SongInfo(Song song, string? path) => new
     {
         sound = path != null ? SoundAssets.Resource(path) : null, path, song.Name, song.Bpm, timeSignature = song.Numerator + "/" + song.Denominator, song.StepsPerBeat, song.Key, song.Scale, song.Bars, song.Loop,
+        // "" = chip sounds. A font that isn't installed on this computer plays as chip sounds until it is.
+        soundFont = song.SoundFont, soundFontInstalled = song.SoundFont.Length == 0 ? (bool?)null : SoundFonts.InstalledName(song.SoundFont) != null,
         seconds = Math.Round(song.Seconds, 2), stepsPerBar = song.StepsPerBar,
         tracks = song.Tracks.Select(t => new
         {
-            t.Name, instrument = t.Instrument.Name, t.Volume, t.Pan, t.Transpose, t.Mute, noteCount = t.Notes.Count,
+            t.Name, instrument = t.Instrument.Name, fontInstrument = FontInstrumentOf(song, t), t.Volume, t.Pan, t.Transpose, t.Mute, noteCount = t.Notes.Count,
             notes = MusicText.Write(t.Notes, song.StepsPerBeat, song.StepsPerBar, MusicTheory.UsesFlats(song.Key, song.Scale))
         })
     };
+
+    /// <summary>What a layer plays through the song's SoundFont, as "bank:program Name" (null for chip sounds).</summary>
+    static string? FontInstrumentOf(Song song, Wysicraft.Core.Audio.Track t)
+    {
+        if (SoundFonts.Load(song.SoundFont) is not { } font) return null;
+        var (_, bank, program) = SoundFonts.Patch(t.Instrument);
+        return FontLine(bank, program, SoundFonts.NameOf(font, bank, program) ?? "");
+    }
+    static string FontLine(int bank, int program, string name) => (bank == 0 ? program.ToString() : bank + ":" + program) + " " + name;
+    /// <summary>The font a song is to play with: the installed name for the one asked for, "" for chip sounds.</summary>
+    static string SoundFontNamed(string asked)
+    {
+        if (asked.Trim().Length == 0) return "";
+        return SoundFonts.InstalledName(asked) ?? throw new InvalidDataException($"There's no SoundFont \"{asked}\" on this computer. Installed: {string.Join(", ", SoundFonts.Installed())}. The person adds more in the Music maker: Sounds → Get more soundfonts…");
+    }
+    /// <summary>A SoundFont's instruments and drum kits, for read_music.</summary>
+    static string SoundFontInfo(string asked)
+    {
+        string name = SoundFontNamed(asked.Trim().Length == 0 ? "?" : asked);
+        var font = SoundFonts.Load(name) ?? throw new InvalidDataException($"The SoundFont \"{name}\" couldn't be read.");
+        var entry = SoundFonts.Catalog.FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return Json.Write(new
+        {
+            kind = "sound font", soundFont = name, license = entry?.License ?? "Imported by the person: check its licence before publishing.", description = entry?.Description,
+            instruments = SoundFonts.Presets(font, false).Select(p => FontLine(p.Bank, p.Program, p.Name)),
+            drumKits = SoundFonts.Presets(font, true).Select(p => FontLine(p.Bank, p.Program, p.Name)),
+            note = "Each line is the instrument's number (program, or bank:program) and its name; give either as a layer's fontInstrument in compose_music. Drum kits play drum notes: C2 kick, D2 snare, F#2 closed hat and the rest of the General MIDI drum map."
+        });
+    }
 
     internal Task<string> McpComposeMusic(string expected, SongSpec? spec, string sound, string name, string format, bool addTracks, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
     {
@@ -127,11 +160,26 @@ public partial class MainWindow
             if (spec.Scale is string scale) song.Scale = scale;
             if (spec.Volume is double volume) song.Volume = volume;
             if (spec.Loop is bool loop) song.Loop = loop;
+            if (spec.SoundFont is string asked) song.SoundFont = SoundFontNamed(asked);
+            // A layer that names one of a font's instruments needs a font: the one that comes with the app, unless the song says.
+            if (song.SoundFont.Length == 0 && spec.SoundFont == null && spec.Tracks?.Any(t => !string.IsNullOrWhiteSpace(t.FontInstrument)) == true)
+                song.SoundFont = SoundFonts.InstalledName(SoundFonts.Catalog[0].Name) ?? throw new InvalidDataException("fontInstrument needs a SoundFont, and the one that comes with the app isn't here. Set the song's soundFont to an installed one (get_schema soundFonts).");
             if (spec.Tracks != null)
             {
                 var tracks = spec.Tracks.Select((t, i) =>
                 {
-                    var ins = Patch(Instruments.Get(t.Instrument ?? "Square lead"), t.InstrumentSettings);
+                    var ins = Instruments.Get(t.Instrument ?? "Square lead");
+                    if (!string.IsNullOrWhiteSpace(t.FontInstrument))
+                    {
+                        if (song.SoundFont.Length == 0) throw new InvalidDataException($"Track {i + 1}: fontInstrument needs the song to have a soundFont (it was set to \"\", chip sounds).");
+                        var font = SoundFonts.Load(song.SoundFont) ?? throw new InvalidDataException($"The SoundFont \"{song.SoundFont}\" isn't on this computer.");
+                        (int Bank, int Program, string Name) found;
+                        try { found = SoundFonts.Find(font, t.FontInstrument); } catch (InvalidDataException ex) { throw new InvalidDataException($"Track {i + 1} ({t.Name ?? t.FontInstrument}): {ex.Message}"); }
+                        // The chip instrument is the nearest one, as in the Music maker: it is what plays where the font isn't installed.
+                        if (t.Instrument == null) ins = found.Bank >= 128 ? Instruments.Get("Drum kit") : Midi.ForProgram(found.Program);
+                        ins.Program = found.Program; ins.Bank = found.Bank;
+                    }
+                    ins = Patch(ins, t.InstrumentSettings);
                     if (t.Instrument != null && !Instruments.Presets.Any(p => p.Name.Equals(t.Instrument, StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException($"Unknown instrument \"{t.Instrument}\". Presets: {string.Join(", ", Instruments.Presets.Select(p => p.Name))}.");
                     var track = new Wysicraft.Core.Audio.Track { Name = t.Name ?? ins.Name, Instrument = ins, Volume = t.Volume ?? 0.8, Pan = t.Pan ?? 0, Transpose = t.Transpose ?? 0, Mute = t.Mute ?? false };
                     try { if (t.Notes != null) track.Notes.AddRange(MusicText.Parse(t.Notes, song.StepsPerBeat)); }
@@ -224,8 +272,10 @@ public partial class MainWindow
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
     }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
 
-    internal async Task<string> McpSongFromAudio(string expected, string file, string sound, string name, double bpm, bool lead, bool chords, bool bass, bool drums, bool removeVocals, double sensitivity, string format, string style, string chordRhythm, string chordVoicing, CancellationToken cancellationToken)
+    internal async Task<string> McpSongFromAudio(string expected, string file, string sound, string name, double bpm, bool lead, bool chords, bool bass, bool drums, bool removeVocals, double sensitivity, string format, string style, string chordRhythm, string chordVoicing, string soundFont, CancellationToken cancellationToken)
     {
+        string playedWith;
+        try { playedWith = SoundFontNamed(soundFont); } catch (InvalidDataException ex) { throw new ModelContextProtocol.McpException(ex.Message); }
         // Read the recording on the UI thread (project state), convert it in the background, save on the UI thread.
         var (channels, rate, title) = await Dispatcher.InvokeAsync(() =>
         {
@@ -257,19 +307,22 @@ public partial class MainWindow
             try
             {
                 CheckRevision(expected);
+                song.SoundFont = playedWith; // each layer then plays the nearest of the font's instruments
                 var (l, r) = SongRenderer.Render(song);
                 string fmt = format.Length > 0 ? format : "ogg"; if (!AudioFiles.Formats.Contains(fmt)) throw new InvalidDataException("format is ogg (default) or wav.");
                 string saved = SaveSoundAsset(song.Name, fmt, true, null, [l, r], SoundAssets.SongSuffix, Encoding.UTF8.GetBytes(Json.Write(song)), song.Loop);
-                return Json.Write(new { revision = Revision(), song = SongInfo(song, saved), note = "An 8-bit cover: check it with read_music and tidy stray notes with compose_music (or open it in the Music maker)." });
+                return Json.Write(new { revision = Revision(), song = SongInfo(song, saved), note = (playedWith.Length > 0 ? "A cover played with " + playedWith : "An 8-bit cover") + ": check it with read_music and tidy stray notes with compose_music (or open it in the Music maker)." });
             }
             catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentException) { throw new ModelContextProtocol.McpException(ex.Message); }
         }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken).Task;
     }
 
-    internal Task<string> McpReadMusic(string sound, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
+    internal Task<string> McpReadMusic(string sound, string soundFont, CancellationToken cancellationToken) => Dispatcher.InvokeAsync(() =>
     {
         try
         {
+            if (sound.Length == 0 && soundFont.Length > 0) return SoundFontInfo(soundFont);
+            if (sound.Length == 0) throw new InvalidDataException("Give sound (a project sound to read) or soundFont (an installed SoundFont, to list its instruments).");
             string path = SoundAssetPath(sound) ?? throw new InvalidDataException($"There's no sound \"{sound}\" in the project.");
             if (project.Assets.TryGetValue(path + SoundAssets.SongSuffix, out var song)) return Json.Write(new { kind = "song", song = SongInfo(Json.Read<Song>(Encoding.UTF8.GetString(song)), path) });
             if (project.Assets.TryGetValue(path + SoundAssets.EffectSuffix, out var fx)) return Json.Write(new { kind = "sound effect", sound = SoundAssets.Resource(path), path, settings = Json.Read<SoundEffect>(Encoding.UTF8.GetString(fx)) });
@@ -282,7 +335,7 @@ public partial class MainWindow
 
 public sealed partial class DesignerMcpTools
 {
-    [McpServerTool(Name = "compose_music"), Description("Write or change 8-bit music, like the Music maker, and save it as a project sound (Ogg by default; plays in Minecraft, web and desktop). New song: name + song {bpm, timeSignature, key, scale, tracks:[{name, instrument (preset), instrumentSettings, volume, pan, transpose, notes (text) or noteList}]}. Notes text: \"C4 q E4 e G4 e | C5 h r q C4+E4+G4 w\" (w h q e s t lengths, . dotted, r rest, + chord). Change a song: sound = its ID, and only the fields to change (tracks replace the layers, or addTracks adds them). A sound not made in the Music maker is replaced by the new song, keeping its ID. Set loop:true for background music. Returns the sound ID and every layer as text.")]
+    [McpServerTool(Name = "compose_music"), Description("Write or change music, like the Music maker, and save it as a project sound (Ogg by default; plays in Minecraft, web and desktop): 8-bit chip sounds, or sampled instruments (piano, strings, guitars, real drum kits) from a SoundFont. New song: name + song {bpm, timeSignature, key, scale, soundFont, tracks:[{name, instrument (chip preset), fontInstrument (one of the SoundFont's), instrumentSettings, volume, pan, transpose, notes (text) or noteList}]}. For sampled instruments set song.soundFont (get_schema soundFonts lists what is installed) and give layers a fontInstrument; guide(topic:\"sound\") has an example. Notes text: \"C4 q E4 e G4 e | C5 h r q C4+E4+G4 w\" (w h q e s t lengths, . dotted, r rest, + chord). Change a song: sound = its ID, and only the fields to change (tracks replace the layers, or addTracks adds them). A sound not made in the Music maker is replaced by the new song, keeping its ID. Set loop:true for background music. Returns the sound ID and every layer as text.")]
     public Task<string> ComposeMusic(string expectedRevision, SongSpec? song = null, string sound = "", string name = "", string format = "", bool addTracks = false, CancellationToken cancellationToken = default)
         => editor.McpComposeMusic(expectedRevision, song, sound, name, format, addTracks, cancellationToken);
     [McpServerTool(Name = "sound_effect"), Description("Make or change a retro sound effect, like the Sound effect maker, saved as a project sound. preset: coin, jump, laser, explosion, powerup, hurt, blip or random (a new random take each call). settings patch any of: wave (square|triangle|saw|sine|noise), frequency (Hz), minFrequency, slide (octaves/s), deltaSlide, vibratoDepth (semitones), vibratoSpeed, arpeggioSemitones, arpeggioTime (s), duty, dutySweep, attack, sustain, punch, decay (s), repeatTime, lowPass, lowPassSweep, highPass, crush, volume. sound = an existing effect to change; mutate:true for a close variation. showSeconds > 0 opens it in the Sound effect maker where the person can see it, plays it, and closes it after that many seconds (unless they change it).")]
@@ -291,9 +344,9 @@ public sealed partial class DesignerMcpTools
     [McpServerTool(Name = "particles"), Description("Make or change a particle effect, like the Particle maker, saved in the project (web and desktop). effect = its name (an existing one is changed, a new one made). preset: sparks, explosion, smoke, fountain, sparkle, blood, rain, magic, trail, confetti or random. settings patch any field (emission burst|stream, count, duration, life, lifeVariance, direction, spread, speed, speedVariance, gravity, drag, radius, sizeStart, sizeEnd, sizeVariance, colors [{at, color}], opacityStart, opacityEnd, spin, shape square|circle|line|texture, texture, blend normal|add); get_schema particleDefaults shows them all. mutate:true for a close variation. showSeconds > 0 opens it in the Particle maker where the person can see it, plays it, and closes it after that many seconds (unless they change it). Use it on a Pickup (its card's Particles, or var PARTICLES in its script), a Particles control, or ui.burst(effect, controlId) from a script.")]
     public Task<string> Particles(string expectedRevision, string effect, string preset = "", JsonElement? settings = null, bool mutate = false, double showSeconds = 0, CancellationToken cancellationToken = default)
         => editor.McpParticles(expectedRevision, effect, preset, settings, mutate, showSeconds, cancellationToken);
-    [McpServerTool(Name = "song_from_audio"), Description("Turn a recording into an 8-bit song (a chiptune cover), like the Music maker's Song from audio: the beat is tracked through the song, the chord on every beat is named, the singer becomes the melody and the drums come from their hits. When the Demucs instrument splitter has been downloaded (the Music maker offers it on first import), the song is split into vocals, bass, drums and other first, which is much more accurate (a minute or two). style arrange (default: Chords, Bass, Melody, Drums layers; chordRhythm eighths|quarters|held, chordVoicing auto|power|triads) or notes (every note heard, for piano or solo pieces). file = full path of an audio file on this computer (MP3, WAV, Ogg, M4A…) or sound = a project sound. bpm 0 = detect. removeVocals takes out centre-mixed singing first (then the lead is the instruments). Saved as a new project sound with its song, so compose_music and the Music maker can change it.")]
-    public Task<string> SongFromAudio(string expectedRevision, string file = "", string sound = "", string name = "", double bpm = 0, bool lead = true, bool chords = true, bool bass = true, bool drums = true, bool removeVocals = false, double sensitivity = 0.5, string format = "", string style = "arrange", string chordRhythm = "eighths", string chordVoicing = "auto", CancellationToken cancellationToken = default)
-        => editor.McpSongFromAudio(expectedRevision, file, sound, name, bpm, lead, chords, bass, drums, removeVocals, sensitivity, format, style, chordRhythm, chordVoicing, cancellationToken);
-    [McpServerTool(Name = "read_music", ReadOnly = true), Description("Read a project sound: a song's tempo, time signature, key and every layer's instrument and notes (as compose_music text), a sound effect's settings, or a recording's length.")]
-    public Task<string> ReadMusic(string sound, CancellationToken cancellationToken = default) => editor.McpReadMusic(sound, cancellationToken);
+    [McpServerTool(Name = "song_from_audio"), Description("Turn a recording into an 8-bit song (a chiptune cover; or, with soundFont = an installed SoundFont, a cover on sampled instruments), like the Music maker's Song from audio: the beat is tracked through the song, the chord on every beat is named, the singer becomes the melody and the drums come from their hits. When the Demucs instrument splitter has been downloaded (the Music maker offers it on first import), the song is split into vocals, bass, drums and other first, which is much more accurate (a minute or two). style arrange (default: Chords, Bass, Melody, Drums layers; chordRhythm eighths|quarters|held, chordVoicing auto|power|triads) or notes (every note heard, for piano or solo pieces). file = full path of an audio file on this computer (MP3, WAV, Ogg, M4A…) or sound = a project sound. bpm 0 = detect. removeVocals takes out centre-mixed singing first (then the lead is the instruments). Saved as a new project sound with its song, so compose_music and the Music maker can change it.")]
+    public Task<string> SongFromAudio(string expectedRevision, string file = "", string sound = "", string name = "", double bpm = 0, bool lead = true, bool chords = true, bool bass = true, bool drums = true, bool removeVocals = false, double sensitivity = 0.5, string format = "", string style = "arrange", string chordRhythm = "eighths", string chordVoicing = "auto", string soundFont = "", CancellationToken cancellationToken = default)
+        => editor.McpSongFromAudio(expectedRevision, file, sound, name, bpm, lead, chords, bass, drums, removeVocals, sensitivity, format, style, chordRhythm, chordVoicing, soundFont, cancellationToken);
+    [McpServerTool(Name = "read_music", ReadOnly = true), Description("Read a project sound: a song's tempo, time signature, key, SoundFont and every layer's instrument and notes (as compose_music text), a sound effect's settings, or a recording's length. Or, with soundFont = an installed SoundFont's name and no sound, list that font's instruments and drum kits for compose_music's fontInstrument.")]
+    public Task<string> ReadMusic(string sound = "", string soundFont = "", CancellationToken cancellationToken = default) => editor.McpReadMusic(sound, soundFont, cancellationToken);
 }

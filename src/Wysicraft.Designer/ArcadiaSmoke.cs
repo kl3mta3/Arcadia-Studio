@@ -16,6 +16,10 @@ namespace Wysicraft.Designer;
 // --smoke-publish: the Publish to Arcadia window against a fake arcade on this computer. Linking (without a browser),
 // the account, Check, Publish (processing → live, the game ID kept), publishing again to the same game, and a revoked
 // key. Nothing reaches a real arcade, and the preferences it touches are put back.
+/// <summary>The fake arcade taking its time: how many more looks at an upload answer "processing", how many get no
+/// answer at all (503), and an upload held back until it is let go (to cancel one on its way).</summary>
+internal sealed class SlowArcade { public int Processing, Unanswered; public TaskCompletionSource? Hold; }
+
 public partial class MainWindow
 {
     internal async Task VerifyPublishingAsync(string output)
@@ -28,6 +32,8 @@ public partial class MainWindow
         bool boardOff = false;
         // The arcade failing to store the next upload (its submission ends "failed"), and the arcade being down.
         bool failNext = false, arcadeDown = false;
+        // The arcade taking its time over an upload (see SlowArcade).
+        var slow = new SlowArcade();
         static bool UploadHasBoard(byte[] zip)
         {
             using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(zip));
@@ -87,6 +93,7 @@ public partial class MainWindow
                     await Send(200, "{\"ok\":true,\"wouldHold\":true,\"findings\":[{\"level\":\"hold\",\"code\":\"new-runtime\",\"message\":\"A new Arcadia Studio runtime build\",\"file\":\"wysicraft/wysicraft-web.js\"}]}"); return;
                 case "POST /api/publish/games":
                     // A different game of theirs already has this title.
+                    if (slow.Hold is { } heldNew) { await heldNew.Task; if (http.RequestAborted.IsCancellationRequested) return; }
                     if (titleTaken) { titleTaken = false; await Send(409, "{\"error\":\"You already have a game called Smoke.\",\"code\":\"title-taken\",\"gameId\":\"c-smoke2\"}"); return; }
                     lastUpload = body.ToArray();
                     string newId = ++newGames > 1 ? "c-smoke" + newGames : "c-smoke";
@@ -94,6 +101,7 @@ public partial class MainWindow
                 case var update when update.StartsWith("POST /api/publish/games/"):
                     // Deleted on the arcade: updates are refused with their own code.
                     string id = path[(path.LastIndexOf('/') + 1)..];
+                    if (slow.Hold is { } heldUpdate) { await heldUpdate.Task; if (http.RequestAborted.IsCancellationRequested) return; }
                     if (deleted && id == "c-smoke") { await Send(404, "{\"error\":\"You deleted this game on Arcadia.\",\"code\":\"deleted\"}"); return; }
                     lastUpload = body.ToArray();
                     string used = clash && http.Request.Query["overwrite"] != "true" ? ",\"details\":{\"used\":\"arcade\",\"kept\":[" + (boardOff ? "" : "\"title\",\"description\",\"screenshots\",") + "\"scores\"]}" : ",\"details\":{\"used\":\"app\"}";
@@ -103,6 +111,8 @@ public partial class MainWindow
                 case "GET /media/cover.png": case "GET /media/shot.png": case "GET /media/keep.png":
                     http.Response.ContentType = "image/png"; await http.Response.Body.WriteAsync(path.EndsWith("cover.png") ? mediaCover : mediaShot); return;
                 case "GET /api/publish/submissions/7":
+                    if (slow.Unanswered > 0) { slow.Unanswered--; await Send(503, "{\"error\":\"The arcade is restarting.\",\"code\":\"unavailable\"}"); return; }
+                    if (slow.Processing > 0) { slow.Processing--; await Send(200, submission("processing")); return; }
                     if (failNext) { failNext = false; await Send(200, submission("failed").Replace("\"message\":null", "\"message\":\"Something went wrong on the arcade's side (GitHub POST /repos/x/y/git/trees failed (422): Sorry, your request timed out.). It doesn't count against your limits; please upload again.\"")); return; }
                     await Send(200, submission(statusPolls++ == 0 ? "processing" : "live")); return;
             }
@@ -118,7 +128,7 @@ public partial class MainWindow
         {
             dialog = new ArcadiaDialog(this, client); dialog.Show();
             dialog.PromptPictures = output;
-            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, on => boardOff = !on, () => failNext = true, down => arcadeDown = down, mediaCover, mediaShot);
+            string result = await dialog.SelfTest(calls, () => deleted = true, () => titleTaken = true, () => lastUpload, () => clash = true, on => boardOff = !on, () => failNext = true, down => arcadeDown = down, slow, mediaCover, mediaShot);
             // A picture of the window as it ended, scrolled to the screenshots and videos, beside the result, for a look at the layout.
             dialog.ShowGallery(); dialog.UpdateLayout();
             var shot = new System.Windows.Media.Imaging.RenderTargetBitmap((int)dialog.ActualWidth, (int)dialog.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32); shot.Render(dialog);
@@ -144,7 +154,7 @@ public partial class MainWindow
         internal string PromptPictures = "";
         internal void ShowGallery() { UpdateLayout(); shots.BringIntoView(); }
         async Task Settle() { for (int i = 0; i < 400 && busy; i++) await Task.Delay(25); await Task.Delay(50); }
-        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, Action<bool> boardOnWebsite, Action failNextUpload, Action<bool> arcadeIsDown, byte[] mediaCover, byte[] mediaShot)
+        internal async Task<string> SelfTest(List<string> calls, Action deleteOnArcade, Action takeTitle, Func<byte[]> lastUpload, Action editOnWebsite, Action<bool> boardOnWebsite, Action failNextUpload, Action<bool> arcadeIsDown, SlowArcade slow, byte[] mediaCover, byte[] mediaShot)
         {
             void Expect(bool ok, string what) { if (!ok) throw new Exception("Publish window: " + what + "\nStatus: " + status.Text + "\nAccount: " + account.Text + "\nCalls:\n" + string.Join("\n", calls)); }
             await Settle();
@@ -343,6 +353,62 @@ public partial class MainWindow
             bool refused = false; int before = calls.Count;
             try { await client.MediaAsync(key!, "https://elsewhere.example/steal.png"); } catch (ArcadiaException ex) when (ex.Code == "media") { refused = true; }
             Expect(refused && calls.Count == before, "a picture address outside the arcade is never fetched, so the key goes nowhere else");
+
+            // ---- Waiting for the arcade to store an upload ----
+            // The wait goes by the number of files. The window says what is happening, Cancel becomes Stop waiting,
+            // and a look the arcade doesn't answer neither ends the wait nor offers to upload again.
+            var hadChoose = ChooseDetails; ChooseDetails = _ => true; problems.Clear(); ProblemForTest = (text, canRetry) => { problems.Add((text, canRetry)); return false; };
+            Expect(CanPublish(out string cannot), "the game can be published for the waiting checks: " + cannot);
+            int Uploads() => calls.Count(c => c.StartsWith("POST /api/publish/games"));
+            async Task<bool> Until(Func<bool> test, int ms = 8000) { for (int i = 0; i < ms / 10 && !test(); i++) await Task.Delay(10); return test(); }
+            PollEvery = TimeSpan.FromMilliseconds(40);
+            int counted = -1; StoreWait = n => { counted = n; return ArcadiaPackage.StoreWait(n); };
+            slow.Processing = 8; uploadsBefore = Uploads();
+            var run = Guard(Publish, popUp: true);
+            Expect(await Until(() => onArcade), "the upload reaches the arcade: " + status.Text);
+            Expect(cancel.Visibility == Visibility.Visible && (string)cancel.Content == "Stop waiting" && progress.IsIndeterminate && progress.Visibility == Visibility.Visible, "while the arcade stores an upload there is a moving bar, and Cancel is Stop waiting");
+            Expect(status.Text.StartsWith("Storing on Arcadia…") && status.Text.Contains(" file") && status.Text.Contains("minutes") && status.Text.Contains("close this window"), "the status says what is happening: " + status.Text);
+            Expect(await Until(() => status.Text.Contains("so far")), "and how long it has been: " + status.Text);
+            await run;
+            Expect(status.Text.Contains("is live") && cancel.Visibility == Visibility.Collapsed && progress.Visibility == Visibility.Collapsed && !progress.IsIndeterminate && Uploads() == uploadsBefore + 1, "it ends live once the arcade is done: " + status.Text);
+            using (var sentZip = new System.IO.Compression.ZipArchive(new MemoryStream(lastUpload())))
+                Expect(counted > 0 && counted == sentZip.Entries.Count(e => !e.FullName.EndsWith('/')), "the wait is worked out from the files in the upload: " + counted);
+            slow.Unanswered = 3; slow.Processing = 2; uploadsBefore = Uploads();
+            await Guard(Publish, popUp: true);
+            Expect(status.Text.Contains("is live") && problems.Count == 0 && Uploads() == uploadsBefore + 1, "looks the arcade doesn't answer don't end the wait, and nothing is uploaded twice: " + status.Text + " / " + problems.Count + " pop-ups");
+            // The wait running out: still being stored (another upload may be ahead of it), or the arcade out of reach.
+            StoreWait = _ => TimeSpan.FromMilliseconds(300); slow.Processing = 1000000;
+            await Guard(Publish, popUp: true);
+            Expect(status.Text.StartsWith("The arcade is still storing it") && open.Visibility == Visibility.Visible && problems.Count == 0, "when the wait runs out the window says the arcade is still storing it: " + status.Text);
+            slow.Processing = 0; slow.Unanswered = 1000000;
+            await Guard(Publish, popUp: true);
+            Expect(status.Text.StartsWith("The upload reached the arcade, but") && problems.Count == 0, "or that the arcade couldn't be reached since, without offering to upload again: " + status.Text);
+            slow.Unanswered = 0;
+            // Stop waiting stops the waiting, not the upload.
+            StoreWait = ArcadiaPackage.StoreWait; slow.Processing = 1000000; uploadsBefore = Uploads();
+            run = Guard(Publish, popUp: true);
+            Expect(await Until(() => onArcade), "the upload reaches the arcade again: " + status.Text);
+            CancelWork(); await run;
+            Expect(status.Text.StartsWith("Stopped waiting") && Uploads() == uploadsBefore + 1 && open.Visibility == Visibility.Visible, "Stop waiting stops the waiting, and the upload stays with the arcade: " + status.Text);
+            // Closing the window while it works hides it; the work carries on, and the window comes back with the result.
+            slow.Processing = 30;
+            run = Guard(Publish, popUp: true);
+            Expect(await Until(() => onArcade), "the upload reaches the arcade a third time: " + status.Text);
+            Close();
+            Expect(!IsVisible && busy, "closing the window while the arcade stores an upload hides it, and the work carries on");
+            await run;
+            Expect(IsVisible && status.Text.Contains("is live"), "and it comes back with how it ended: " + status.Text);
+            // Cancel while the game is still on its way: nothing is published and no version is used.
+            slow.Processing = 0; var hold = new TaskCompletionSource(); slow.Hold = hold;
+            string versionWas = version.Text, lastWas = editor.SavedGame(client.Host)?.LastVersion ?? "";
+            run = Guard(Publish, popUp: true);
+            Expect(await Until(() => UploadInFlight), "a game on its way to the arcade is known to be: " + status.Text);
+            Expect(cancel.Visibility == Visibility.Visible && (string)cancel.Content == "Cancel", "while a game is being sent there is a Cancel button");
+            CancelWork(); await run;
+            slow.Hold = null; hold.SetResult();
+            Expect(status.Text.StartsWith("Cancelled") && version.Text == versionWas && (editor.SavedGame(client.Host)?.LastVersion ?? "") == lastWas && problems.Count == 0 && cancel.Visibility == Visibility.Collapsed && !UploadInFlight,
+                "Cancel stops an upload that hasn't reached the arcade: nothing is published and no version is used: " + status.Text);
+            ChooseDetails = hadChoose; ProblemForTest = null; PollEvery = TimeSpan.FromSeconds(2.5); StoreWait = ArcadiaPackage.StoreWait;
 
             // A revoked key: forgotten, and the window says to link again.
             editor.StoreArcadiaKey(client.Host, "arcadia_pk_revoked"); await Guard(Refresh);

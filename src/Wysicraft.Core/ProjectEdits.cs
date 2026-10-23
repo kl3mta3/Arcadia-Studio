@@ -107,7 +107,7 @@ public static class ProjectEdits
                     if (element.Id != edit.Element) throw new InvalidDataException("Element ID must match element.");
                     // Like the toolbox: pictures draw their own image (a fill would show through transparent pixels),
                     // and sounds, colliders and cameras have no picture at all, so new ones start without a fill unless asked.
-                    if (before == null && element.Type is "image" or "texture_region" or "item" or "sprite" or "sound" or "collider" or "camera" or "tilemap"
+                    if (before == null && element.Type is "image" or "texture_region" or "item" or "sprite" or "sound" or "collider" or "camera" or "tilemap" or "canvas"
                         && !(edit.Data.ValueKind == JsonValueKind.Object && edit.Data.TryGetProperty("fillEnabled", out _))) element.FillEnabled = false;
                     Tilemaps.Fit(element); // a tilemap's box always matches its grid, whatever was sent for it
                     if (before != null) target.Elements[target.Elements.IndexOf(before)] = element;

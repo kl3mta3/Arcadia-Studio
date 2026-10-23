@@ -186,6 +186,8 @@ public partial class MainWindow
         pixels.Click += (_, _) => Guard(() => PixelEditorForElement(e)); buttons.Children.Add(pixels); Properties.Children.Add(buttons);
         Properties.Children.Add(new TextBlock { Text = "An assigned image replaces the fill. Transparent pixels reveal the canvas.", Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
         Field(Properties, "Opacity", e, "Opacity");
+        // Web & desktop: a picture multiplied by a colour (recolouring white or grey art, team colours, a hurt flash).
+        if (AdvancedAllowed && Tintable(e)) TintField(Properties, e);
         // Web & desktop: the control turned and resized about its centre. A panel carries what's attached inside it.
         if (AdvancedAllowed && !Untransformed(e))
         {
@@ -281,7 +283,7 @@ public partial class MainWindow
             try { return TextureBrush(e.Texture, bytes); } catch { return Brushes.Magenta; }
         return Brush(e.Background);
     }
-    Brush FrameBrush(Element e) => e.Type is "shape" or "collider" or "camera" ? Brushes.Transparent : e.Type is "image" or "texture_region" or "sprite" ? e.FillEnabled ? Brush(e.Background) : Brushes.Transparent : SkinBrush(e);
+    Brush FrameBrush(Element e) => e.Type is "shape" or "collider" or "camera" ? Brushes.Transparent : e.Type is "image" or "texture_region" or "sprite" or "canvas" ? e.FillEnabled ? Brush(e.Background) : Brushes.Transparent : SkinBrush(e);
     Border DecorateControl(FrameworkElement content, Element e)
     {
         if (content is Control control) { control.Background = Brushes.Transparent; control.BorderThickness = new Thickness(0); }

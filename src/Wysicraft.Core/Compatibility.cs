@@ -82,6 +82,7 @@ public static class Compatibility
                     Add(ui.Id, e.Id, Fonts.IsBuiltin(e.Font) ? $"font \"{e.Font}\" (Minecraft has only {string.Join(", ", Fonts.Minecraft)})" : $"imported font \"{e.Font}\"");
                 if (e.Body.Length > 0) Add(ui.Id, e.Id, e.Body + " physics body");
                 if (e.Rotation != 0 || e.Scale != 1) Add(ui.Id, e.Id, e.Rotation != 0 && e.Scale != 1 ? "rotation and scale" : e.Rotation != 0 ? "rotation" : "scale");
+                if (e.Tint.Length > 0) Add(ui.Id, e.Id, $"tint {e.Tint} (Minecraft draws pictures as they are)");
                 if (e.Wrap) Add(ui.Id, e.Id, "wrapped text (Minecraft draws one line)");
                 if (e.VerticalAlign != "middle") Add(ui.Id, e.Id, $"text at the {e.VerticalAlign} (Minecraft puts it in the middle)");
                 if (e.Input.Length > 0) Add(ui.Id, e.Id, $"presses input \"{e.Input}\"");

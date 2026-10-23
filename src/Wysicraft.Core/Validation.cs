@@ -111,6 +111,8 @@ public static partial class Validation
                 if(e.HorizontalAnchor is not ("left" or "center" or "right" or "stretch") || e.VerticalAnchor is not ("top" or "center" or "bottom" or "stretch") || !double.IsFinite(e.MinWidth+e.MinHeight+e.RowTemplateWidth) || e.MinWidth < 1 || e.MinWidth > limits.ScreenSize || e.MinHeight < 1 || e.MinHeight > limits.ScreenSize || e.RowTemplateWidth < 0 || e.RowTemplateWidth > limits.ScreenSize) Add(ui.Id,e.Id,"Invalid anchors or minimum size");
                 if (e.Opacity < 0 || e.Opacity > 1 || e.FontScale <= 0 || e.FontScale > 8 || e.Maximum <= e.Minimum) Add(ui.Id, e.Id, "Invalid appearance or value range");
                 if (!double.IsFinite(e.Rotation) || !double.IsFinite(e.Scale) || e.Scale < 0.01 || e.Scale > 100) Add(ui.Id, e.Id, "Rotation must be a number, and scale 0.01 to 100");
+                if (e.Tint.Length > 0 && !Regex.IsMatch(e.Tint, "^#[0-9a-fA-F]{6}$")) Add(ui.Id, e.Id, "Tint must be #RRGGBB, or empty for none");
+                if (e.Type == "canvas" && (e.Columns is < 1 or > Registry.MaxCanvas || e.Rows is < 1 or > Registry.MaxCanvas)) Add(ui.Id, e.Id, $"A canvas is 1-{Registry.MaxCanvas} pixels each way (Columns × Rows)");
                 if (e.VerticalAlign is not ("top" or "middle" or "bottom")) Add(ui.Id, e.Id, "Vertical alignment must be top, middle or bottom");
                 if (!Resource(e.Font) || !double.IsFinite(e.CornerRadius) || e.CornerRadius < 0 || e.CornerRadius > 128) Add(ui.Id, e.Id, "Invalid font resource or corner radius (0–128)");
                 else if (Fonts.Problem(project, e.Font) is string fontProblem) Add(ui.Id, e.Id, fontProblem);

@@ -124,6 +124,41 @@ public static class SoundFonts
         font.Presets.Where(p => drums ? p.BankNumber >= 128 : p.BankNumber < 128).OrderBy(p => p.BankNumber).ThenBy(p => p.PatchNumber)
             .Select(p => (p.BankNumber, p.PatchNumber, p.Name.Trim())).ToList();
 
+    /// <summary>A font's name as it is installed, whatever case it was asked for in. Null when it isn't installed.</summary>
+    public static string? InstalledName(string? name) => string.IsNullOrWhiteSpace(name) ? null : Installed().FirstOrDefault(n => n.Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>What a font's instrument is called (its program in bank 0 when the font has no such bank). Null when the
+    /// font has neither.</summary>
+    public static string? NameOf(SoundFont font, int bank, int program)
+    {
+        var all = Presets(font, bank >= 128);
+        var hit = all.FirstOrDefault(p => p.Bank == bank && p.Program == program);
+        if (hit.Name == null && bank is > 0 and < 128) hit = all.FirstOrDefault(p => p.Bank == 0 && p.Program == program);
+        return hit.Name;
+    }
+
+    /// <summary>One of a font's instruments, asked for by name ("Grand Piano"; a part of the name is enough when only
+    /// one has it), by MIDI program number ("40"), or by bank and program ("8:40"; bank 128 is the drum kits).</summary>
+    public static (int Bank, int Program, string Name) Find(SoundFont font, string text)
+    {
+        text = text.Trim();
+        var all = Presets(font, false).Concat(Presets(font, true)).ToList();
+        var parts = text.Split(':');
+        if (parts.Length <= 2 && parts.All(p => int.TryParse(p.Trim(), out _)))
+        {
+            int bank = parts.Length == 2 ? int.Parse(parts[0]) : 0, program = int.Parse(parts[^1]);
+            if (bank is < 0 or > 128 || program is < 0 or > 127) throw new InvalidDataException("An instrument number is a program 0-127, or bank:program with the bank 0-128 (128 = drum kits).");
+            return (bank, program, NameOf(font, bank, program) ?? throw new InvalidDataException($"This SoundFont has no instrument {text}."));
+        }
+        var exact = all.Where(p => p.Name.Equals(text, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (exact.Count > 0) return exact[0];
+        var within = all.Where(p => p.Name.Contains(text, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (within.Count == 1) return within[0];
+        var near = within.Count > 1 ? within : all.Where(p => text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(w => w.Length > 2 && p.Name.Contains(w, StringComparison.OrdinalIgnoreCase))).ToList();
+        throw new InvalidDataException((within.Count > 1 ? $"Several instruments in this SoundFont are called something like \"{text}\"" : $"This SoundFont has no instrument called \"{text}\"")
+            + (near.Count > 0 ? ": " + string.Join(", ", near.Take(12).Select(p => p.Name)) + (near.Count > 12 ? "…" : "") + "." : ".") + " read_music with soundFont lists them all.");
+    }
+
     /// <summary>A layer's instrument as MIDI: channel 10 for drums, the bank and the program (General MIDI numbers, so
     /// a song keeps its instruments when the font changes). Chip instruments that were never given one get the nearest.</summary>
     public static (int Channel, int Bank, int Program) Patch(Instrument ins)

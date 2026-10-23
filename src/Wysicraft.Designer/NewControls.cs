@@ -47,7 +47,7 @@ public partial class MainWindow
             {
                 if (!TryTexture(e.Texture, out var png)) { grid.Children.Add(new TextBlock { Text = "▦ sprite", Foreground = Brushes.LightGray, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }); break; }
                 var image = new Image { Stretch = Stretch.Fill }; RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
-                SetSpriteFrames(image, DecodeTexture(png), e); grid.Children.Add(image);
+                SetSpriteFrames(image, Tinted(DecodeTexture(png), e.Tint), e); grid.Children.Add(image);
                 break;
             }
             case "collider":
@@ -82,6 +82,7 @@ public partial class MainWindow
                 grid.Children.Add(image);
                 break;
             }
+            case "canvas": return RenderCanvasControl(e);
             case "camera":
             {
                 // Cameras draw nothing in apps; on the canvas they show as a dashed view frame with a zoom note.
@@ -101,10 +102,10 @@ public partial class MainWindow
     readonly Dictionary<string, ImageSource?> tilemapPictures = [];
     ImageSource? TilemapImage(Element e)
     {
-        string key = string.Join('\u0001', e.Texture, e.Tiles, e.Columns, e.Rows, e.TileWidth, e.TileHeight);
+        string key = string.Join('\u0001', e.Texture, e.Tiles, e.Columns, e.Rows, e.TileWidth, e.TileHeight, e.Tint);
         if (tilemapPictures.TryGetValue(key, out var cached)) return cached;
         if (tilemapPictures.Count > 32) tilemapPictures.Clear();
-        return tilemapPictures[key] = PaintTilemap(e);
+        return tilemapPictures[key] = PaintTilemap(e) is BitmapSource painted ? Tinted(painted, e.Tint) : null;
     }
     ImageSource? PaintTilemap(Element e)
     {

@@ -336,6 +336,18 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             var target=project.Screens.First(s=>s.Id==screen);
             if(project.Manifest.Inputs.Count!=1 || target.Animations.Single().Tracks[0].Target!="mcp_star2" || target.Elements[0].Id!="mcp_ball" || !target.GroupParents.ContainsKey("MCP group") || target.Elements.Single(e=>e.Id=="mcp_star2").Input!="jump")
                 throw new Exception("New MCP edit kinds did not apply");
+            // Tints and the Canvas control: in the schema, the guide and the script API, made and checked through apply_edits.
+            if(!schema["controls"]!.AsArray().Any(c=>(string?)c!["type"]=="canvas" && c["advanced"]!.GetValue<bool>()) || !schema["instructions"]!.GetValue<string>().Contains("Canvas (web & desktop)") || !schema["instructions"]!.GetValue<string>().Contains("ui.setTint(id,'#RRGGBB')")
+                || !schema["scriptApi"]!.AsArray().Any(s=>s!.GetValue<string>().Contains("setPixel(")) || !schema["scriptApi"]!.AsArray().Any(s=>s!.GetValue<string>().Contains("setTint(")) || schema["elementDefaults"]!["tint"]!.GetValue<string>()!="")
+                throw new Exception("get_schema doesn't describe tints and the Canvas control");
+            if(!(await CallText("guide",new{topic="games"})).Contains("# Tints and the Canvas control")) throw new Exception("guide topic games lacks Tints and the Canvas control");
+            await Edit(new{kind="upsert_element",screen,element="mcp_paper",data=new{type="canvas",columns=32,rows=16,tint="#80C0FF",bounds=new{x=200,y=10,width=64,height=32}}},
+                new{kind="upsert_element",screen,element="mcp_star2",data=new{tint="#FF8000"}});
+            var painted=project.Screens.First(s=>s.Id==screen); // apply_edits replaces the screen objects
+            var paper=painted.Elements.Single(e=>e.Id=="mcp_paper");
+            if(paper.FillEnabled || paper.Columns!=32 || paper.Tint!="#80C0FF" || painted.Elements.Single(e=>e.Id=="mcp_star2").Tint!="#FF8000") throw new Exception("A canvas and tints made through apply_edits did not land as sent");
+            await Call("apply_edits",new{expectedRevision=rev,edits=new object[]{new{kind="upsert_element",screen,element="mcp_paper",data=new{tint="orange"}}}},fail:true);
+            await Call("apply_edits",new{expectedRevision=rev,edits=new object[]{new{kind="upsert_element",screen,element="mcp_paper",data=new{columns=5000}}}},fail:true);
             var checkedProject=await Call("validate_project",new {});
             if(!checkedProject["errors"]!.AsArray().Any(e=>e!["minecraftOnly"]!.GetValue<bool>()) || checkedProject["minecraftUses"]!.AsArray().Count<4)throw new Exception("Minecraft-only uses not reported");
             await Call("export_project",new{expectedRevision=rev,format="jar"},fail:true); // physics and inputs don't go to Minecraft
@@ -390,6 +402,36 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             var softPng=project.Assets.First(a=>a.Key.EndsWith("mcp_soft.png")).Value; var softImage=DecodePixels(softPng);
             if(softImage.Get(16,16)!=0xFFFF0000u || softImage.Pixels.Count(p=>p>>24 is >0 and <255)<20 || softImage.Pixels.Distinct().Count()<30) throw new Exception("pixel_art brush and smooth did not draw soft art: "+softImage.Pixels.Distinct().Count()+" colors");
             await Call("pixel_art",new{expectedRevision=rev,newName="mcp_soft_bad",width=8,height=8,commands=new object[]{new{op="brush",color="#FFFFFF",hardness=3}}},fail:true);
+            // Music on sampled instruments: the installed SoundFonts are in the schema, a font lists its instruments, a
+            // song is written with them (named, numbered and a drum kit), and a chip song goes over to the font and back.
+            var fontsListed=(await Call("get_schema",new{}))["soundFonts"]?["installed"]?.AsArray();
+            if(fontsListed==null || !fontsListed.Any(f=>f!["name"]!.GetValue<string>()=="GeneralUser GS" && f["comesWithTheApp"]!.GetValue<bool>() && f["license"]!.GetValue<string>().Length>10)) throw new Exception("get_schema doesn't list the SoundFont that comes with the app: "+fontsListed?.ToJsonString());
+            var fontList=await Call("read_music",new{soundFont="generaluser gs"});
+            var fontInstruments=fontList["instruments"]!.AsArray().Select(n=>n!.GetValue<string>()).ToList(); var fontKits=fontList["drumKits"]!.AsArray().Select(n=>n!.GetValue<string>()).ToList();
+            if(fontList["kind"]!.GetValue<string>()!="sound font" || fontInstruments.Count<128 || !fontInstruments.Contains("0 Grand Piano") || !fontKits.Any(k=>k.StartsWith("128:0 ")) || fontList["license"]!.GetValue<string>().Length<10) throw new Exception("read_music didn't list the font's instruments: "+fontInstruments.Count+" / "+string.Join(", ",fontKits.Take(3)));
+            await Call("read_music",new{soundFont="No Such Font"},fail:true);
+            await Call("read_music",new{},fail:true);
+            var fontSong=await Call("compose_music",new{expectedRevision=rev,name="mcp_village",song=new{bpm=96,key="G",scale="major",soundFont="GeneralUser GS",tracks=new object[]{
+                new{name="Melody",fontInstrument="Flute",notes="D5 q B4 e G4 e A4 q B4 q"},
+                new{name="Bass",fontInstrument="33",notes="G2 h D2 h"},
+                new{name="Drums",fontInstrument="128:0",notes="C2+F#2 q F#2 q D2+F#2 q F#2 q"}}}});
+            rev=fontSong["revision"]!.GetValue<string>();
+            var fontTracks=fontSong["song"]!["tracks"]!.AsArray();
+            if(fontSong["song"]!["soundFont"]!.GetValue<string>()!="GeneralUser GS" || fontSong["song"]!["soundFontInstalled"]?.GetValue<bool>()!=true || !fontTracks[0]!["fontInstrument"]!.GetValue<string>().EndsWith(" Flute") || !fontTracks[1]!["fontInstrument"]!.GetValue<string>().StartsWith("33 ") || !fontTracks[2]!["fontInstrument"]!.GetValue<string>().StartsWith("128:0 ") || fontTracks[2]!["instrument"]!.GetValue<string>()!="Drum kit")
+                throw new Exception("compose_music didn't use the font's instruments: "+fontSong["song"]!.ToJsonString());
+            string villagePath=fontSong["song"]!["path"]!.GetValue<string>(); byte[] villageOgg=project.Assets[villagePath];
+            var villageSaved=Json.Read<Wysicraft.Core.Audio.Song>(Encoding.UTF8.GetString(project.Assets[villagePath+SoundAssets.SongSuffix]));
+            if(villageSaved.SoundFont!="GeneralUser GS" || villageSaved.Tracks[0].Instrument.Program!=73 || villageSaved.Tracks[2].Instrument.Bank!=128) throw new Exception("The song wasn't saved with its font and instruments: "+villageSaved.SoundFont+" "+villageSaved.Tracks[0].Instrument.Program);
+            // Back to chip sounds, keeping the notes; then a layer naming a font instrument brings the app's font in by itself.
+            var chipAgain=await Call("compose_music",new{expectedRevision=rev,sound=villagePath,song=new{soundFont=""}});
+            rev=chipAgain["revision"]!.GetValue<string>();
+            if(chipAgain["song"]!["soundFont"]!.GetValue<string>()!="" || chipAgain["song"]!["tracks"]![0]!["fontInstrument"]!=null || chipAgain["song"]!["tracks"]!.AsArray().Count!=3 || project.Assets[villagePath].AsSpan().SequenceEqual(villageOgg)) throw new Exception("soundFont \"\" didn't take the song back to chip sounds: "+chipAgain["song"]!.ToJsonString());
+            var fontByLayer=await Call("compose_music",new{expectedRevision=rev,name="mcp_strings",song=new{tracks=new object[]{new{fontInstrument="48",notes="C4+E4+G4 w"}}}});
+            rev=fontByLayer["revision"]!.GetValue<string>();
+            if(fontByLayer["song"]!["soundFont"]!.GetValue<string>()!="GeneralUser GS" || !fontByLayer["song"]!["tracks"]![0]!["fontInstrument"]!.GetValue<string>().StartsWith("48 ")) throw new Exception("A layer's fontInstrument didn't bring the app's font in: "+fontByLayer["song"]!.ToJsonString());
+            await Call("compose_music",new{expectedRevision=rev,name="mcp_bad_font",song=new{soundFont="No Such Font",tracks=new object[]{new{notes="C4 q"}}}},fail:true);
+            await Call("compose_music",new{expectedRevision=rev,name="mcp_bad_ins",song=new{soundFont="GeneralUser GS",tracks=new object[]{new{fontInstrument="Kazoo Orchestra",notes="C4 q"}}}},fail:true);
+            await Call("compose_music",new{expectedRevision=rev,name="mcp_no_font",song=new{soundFont="",tracks=new object[]{new{fontInstrument="Flute",notes="C4 q"}}}},fail:true);
             var itch=await Call("itch_publish",new{action="status"});
             if(itch["settings"]==null || itch["note"]==null)throw new Exception("itch.io status incomplete: "+itch.ToJsonString());
             await Call("itch_publish",new{action="publish"},fail:true);
@@ -447,7 +489,7 @@ async Task<string> CallText(string name,object args) { var r=await Rpc("tools/ca
             await StopMcp();
             try { using var stopped=await client.GetAsync(mcpUrl); throw new Exception("Server still accepts connections after stopping."); }
             catch(HttpRequestException) { }
-            File.WriteAllText(output,"PASS: 34 MCP tools, tutorial (targets, highlight, clear, status), speech (status, voices, mix, add_sound, transcribe), video (status), particles (+ ui.burst in Preview), pixel_art live, connect instructions, guide topics, itch_publish (status, prepare), pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
+            File.WriteAllText(output,"PASS: 34 MCP tools, tutorial (targets, highlight, clear, status), speech (status, voices, mix, add_sound, transcribe), video (status), particles (+ ui.burst in Preview), pixel_art live, connect instructions, guide topics, itch_publish (status, prepare), pixel_art (new, layers, frames, grid, fill, edit with saved layers, errors), read_pixel_art, sprite_sheet (clips, checks, one Undo), read_sprite_sheet, authentication, new edit kinds (inputs, animations, rename, reorder, groups, add/remove component), tints and the Canvas control (schema, guide, script API, apply_edits and its checks), sounds, sprites/shapes/colliders/physics, Minecraft-only validation and export blocking, web export, Arcadia prepare (settings, Preview screenshot, package; no upload), preview script/wait/state, atomic edits/undo, syntax rejection, template discovery/assignment, asset deletion, preview value changes, stale-revision close/stop, launch failure reporting, bundled KubeJS export, project new/open/save, capture, and shutdown. No Minecraft launch needed.");
         }
         finally { await StopMcp(); dirty=false; }
     }
